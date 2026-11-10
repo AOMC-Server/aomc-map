@@ -9,17 +9,26 @@ import {
 
 export type TileSource = (zoom: number, x: number, y: number) => string;
 
+/**
+ * One slot per tile coordinate. `bitmap` is the last image we know for it: undefined = nothing
+ * yet, null = known to be empty. `version` says which source it came from, so when the source
+ * changes (a different revision) the old image stays on screen and is replaced in place once the
+ * new one has loaded.
+ */
 type Entry = {
-	state: "loading" | "loaded" | "empty" | "error";
-	bitmap?: ImageBitmap;
-	abort?: AbortController;
-	failedAt?: number;
+	bitmap: ImageBitmap | null | undefined;
+	version: number;
+	loading?: { version: number; abort: AbortController };
+	failed?: { version: number; at: number };
 };
 
 type Wanted = { zoom: number; x: number; y: number; priority: number };
+type Dest = { x0: number; y0: number; x1: number; y1: number };
 
 const RETRY_MS = 5000;
 const MAX_TILES_PER_FRAME = 600;
+
+const key = (zoom: number, x: number, y: number) => `${zoom}/${x}/${y}`;
 
 /**
  * Draws tiles from a URL template, with an LRU bitmap cache. While a tile loads, a coarser
@@ -30,8 +39,7 @@ export class TileLayer {
 	private cache = new Map<string, Entry>();
 	private source: TileSource | null = null;
 	private sourceId = 0;
-	private previousId: number | null = null;
-	private queue: Map<string, Wanted> = new Map();
+	private wanted = new Map<string, Wanted>();
 	private inFlight = 0;
 
 	constructor(
@@ -44,48 +52,45 @@ export class TileLayer {
 		},
 	) {}
 
-	/** keepPrevious: keep showing the old source's tiles until the new ones arrive (e.g. head moved). */
+	/**
+	 * keepPrevious: keep showing the images of the old source until the new ones arrive (e.g. the
+	 * revision changed). Pass false when the content is unrelated (another map or dimension).
+	 */
 	setSource(source: TileSource | null, keepPrevious = false) {
-		this.previousId = keepPrevious && this.source ? this.sourceId : null;
 		this.source = source;
 		this.sourceId++;
-		this.queue.clear();
+		this.wanted.clear();
+		if (!keepPrevious) this.clear();
 		this.opts.onChange();
 	}
 
-	private key(id: number, zoom: number, x: number, y: number) {
-		return `${id}/${zoom}/${x}/${y}`;
+	private clear() {
+		for (const entry of this.cache.values()) {
+			entry.loading?.abort.abort();
+			entry.loading = undefined; // so a response that is already on its way is ignored
+			entry.bitmap?.close();
+		}
+		this.cache.clear();
+		this.inFlight = 0;
 	}
 
 	/** Entry lookup that also marks it as recently used. */
-	private touch(
-		id: number,
-		zoom: number,
-		x: number,
-		y: number,
-	): Entry | undefined {
-		const key = this.key(id, zoom, x, y);
-		const entry = this.cache.get(key);
+	private touch(k: string): Entry | undefined {
+		const entry = this.cache.get(k);
 		if (entry) {
-			this.cache.delete(key);
-			this.cache.set(key, entry);
+			this.cache.delete(k);
+			this.cache.set(k, entry);
 		}
 		return entry;
 	}
 
-	private loaded(zoom: number, x: number, y: number): Entry | undefined {
-		for (const id of [this.sourceId, this.previousId]) {
-			if (id === null) continue;
-			const entry = this.touch(id, zoom, x, y);
-			if (
-				entry &&
-				(entry.state === "loaded" ||
-					(id === this.sourceId && entry.state === "empty"))
-			) {
-				return entry;
-			}
-		}
-		return undefined;
+	/** An image (possibly of an older revision) or a known-empty marker is available. */
+	private known(entry: Entry | undefined): entry is Entry {
+		return entry !== undefined && entry.bitmap !== undefined;
+	}
+
+	private fresh(entry: Entry) {
+		return entry.version === this.sourceId;
 	}
 
 	draw(ctx: CanvasRenderingContext2D, view: View, size: Size, dpr: number) {
@@ -103,22 +108,25 @@ export class TileLayer {
 			for (let tx = range.minX; tx <= range.maxX; tx++) {
 				if (++drawn > MAX_TILES_PER_FRAME) break;
 				const priority = Math.hypot(tx - cx, ty - cy);
-				const key = this.key(this.sourceId, level, tx, ty);
-				wanted.set(key, { zoom: level, x: tx, y: ty, priority });
+				wanted.set(key(level, tx, ty), {
+					zoom: level,
+					x: tx,
+					y: ty,
+					priority,
+				});
 				const rect = tileRect(view, size, level, T, tx, ty);
-				const dest = {
+				this.drawTile(ctx, level, tx, ty, {
 					x0: Math.round(rect.x * dpr),
 					y0: Math.round(rect.y * dpr),
 					x1: Math.round((rect.x + rect.w) * dpr),
 					y1: Math.round((rect.y + rect.h) * dpr),
-				};
-				this.drawTile(ctx, level, tx, ty, dest);
+				});
 
 				// A coarser parent is cheap (1/4 the tiles) and gives a quick preview while zooming.
 				if (level < maxZoom) {
 					const px = floorDiv(tx, 2);
 					const py = floorDiv(ty, 2);
-					const pk = this.key(this.sourceId, level + 1, px, py);
+					const pk = key(level + 1, px, py);
 					if (!wanted.has(pk)) {
 						wanted.set(pk, {
 							zoom: level + 1,
@@ -130,7 +138,7 @@ export class TileLayer {
 				}
 			}
 		}
-		this.queue = wanted;
+		this.wanted = wanted;
 		this.pump();
 	}
 
@@ -139,17 +147,21 @@ export class TileLayer {
 		level: number,
 		tx: number,
 		ty: number,
-		d: { x0: number; y0: number; x1: number; y1: number },
+		d: Dest,
 	) {
 		const T = this.opts.tileSize;
 		const dw = d.x1 - d.x0;
 		const dh = d.y1 - d.y0;
-		const exact = this.loaded(level, tx, ty);
-		if (exact?.state === "empty") return;
-		if (exact?.bitmap) {
-			ctx.imageSmoothingEnabled = dw <= T;
-			ctx.drawImage(exact.bitmap, d.x0, d.y0, dw, dh);
-			return;
+		const exact = this.touch(key(level, tx, ty));
+
+		if (this.known(exact)) {
+			if (exact.bitmap) {
+				ctx.imageSmoothingEnabled = dw <= T;
+				ctx.drawImage(exact.bitmap, d.x0, d.y0, dw, dh);
+				return;
+			}
+			// Known empty. If that is out of date, a fresher coarse tile may already show content.
+			if (this.fresh(exact)) return;
 		}
 
 		// Ancestors: draw the sub-rectangle of a coarser tile that covers this one.
@@ -157,9 +169,12 @@ export class TileLayer {
 			const n = 2 ** up;
 			const ax = floorDiv(tx, n);
 			const ay = floorDiv(ty, n);
-			const entry = this.loaded(level + up, ax, ay);
-			if (!entry) continue;
-			if (entry.state === "empty" || !entry.bitmap) return;
+			const entry = this.touch(key(level + up, ax, ay));
+			if (!this.known(entry)) continue;
+			if (!entry.bitmap) {
+				if (this.fresh(entry)) return;
+				continue;
+			}
 			const sw = T / n;
 			ctx.imageSmoothingEnabled = dw <= sw;
 			ctx.drawImage(
@@ -180,8 +195,8 @@ export class TileLayer {
 		if (level > 0) {
 			for (let j = 0; j < 2; j++) {
 				for (let i = 0; i < 2; i++) {
-					const child = this.loaded(level - 1, tx * 2 + i, ty * 2 + j);
-					if (!child?.bitmap) continue;
+					const child = this.touch(key(level - 1, tx * 2 + i, ty * 2 + j));
+					if (!this.known(child) || !child.bitmap) continue;
 					const hx0 = d.x0 + Math.round((dw * i) / 2);
 					const hx1 = d.x0 + Math.round((dw * (i + 1)) / 2);
 					const hy0 = d.y0 + Math.round((dh * j) / 2);
@@ -191,51 +206,69 @@ export class TileLayer {
 				}
 			}
 		}
+		// An out-of-date empty tile with nothing better available: leave blank.
 	}
 
 	private pump() {
 		const maxConcurrent = this.opts.maxConcurrent ?? 8;
 		const now = Date.now();
 
-		// Cancel in-flight requests that are no longer wanted.
-		for (const [key, entry] of this.cache) {
-			if (entry.state === "loading" && !this.queue.has(key)) {
-				entry.abort?.abort();
+		// Cancel requests that are no longer wanted or are for an older source.
+		for (const [k, entry] of this.cache) {
+			const loading = entry.loading;
+			if (!loading) continue;
+			if (loading.version !== this.sourceId || !this.wanted.has(k)) {
+				loading.abort.abort();
+				entry.loading = undefined;
 				this.inFlight--;
-				this.cache.delete(key);
+				if (entry.bitmap === undefined) this.cache.delete(k);
 			}
 		}
 
-		const pending = [...this.queue.entries()]
-			.filter(([key]) => {
-				const entry = this.cache.get(key);
-				if (!entry) return true;
-				if (entry.state === "error" && now - (entry.failedAt ?? 0) > RETRY_MS) {
-					this.cache.delete(key);
-					return true;
-				}
-				return false;
-			})
-			.sort((a, b) => a[1].priority - b[1].priority);
+		const pending: [string, Wanted][] = [];
+		for (const [k, tile] of this.wanted) {
+			const entry = this.cache.get(k);
+			if (!entry) {
+				pending.push([k, tile]);
+				continue;
+			}
+			if (entry.loading) continue;
+			if (this.known(entry) && this.fresh(entry)) continue;
+			const failed = entry.failed;
+			if (
+				failed &&
+				failed.version === this.sourceId &&
+				now - failed.at < RETRY_MS
+			) {
+				continue;
+			}
+			pending.push([k, tile]);
+		}
+		pending.sort((a, b) => a[1].priority - b[1].priority);
 
-		for (const [key, tile] of pending) {
+		for (const [k, tile] of pending) {
 			if (this.inFlight >= maxConcurrent) break;
-			this.start(key, tile);
+			this.start(k, tile);
 		}
 	}
 
-	private start(key: string, tile: Wanted) {
+	private start(k: string, tile: Wanted) {
 		if (!this.source) return;
+		const version = this.sourceId;
 		const url = this.source(tile.zoom, tile.x, tile.y);
 		const abort = new AbortController();
-		const entry: Entry = { state: "loading", abort };
-		this.cache.set(key, entry);
+		const loading = { version, abort };
+
+		let entry = this.cache.get(k);
+		if (!entry) {
+			entry = { bitmap: undefined, version: -1 };
+			this.cache.set(k, entry);
+		}
+		const target = entry;
+		target.loading = loading;
 		this.inFlight++;
 		this.evict();
 
-		const finish = () => {
-			if (this.cache.get(key) === entry) this.inFlight--;
-		};
 		fetch(url, { signal: abort.signal })
 			.then(async (res) => {
 				if (res.status === 204) return null;
@@ -243,42 +276,40 @@ export class TileLayer {
 				return createImageBitmap(await res.blob());
 			})
 			.then((bitmap) => {
-				if (this.cache.get(key) !== entry) {
+				if (target.loading !== loading) {
 					bitmap?.close();
 					return;
 				}
-				finish();
-				entry.abort = undefined;
-				entry.state = bitmap ? "loaded" : "empty";
-				entry.bitmap = bitmap ?? undefined;
+				target.loading = undefined;
+				this.inFlight--;
+				// Swap in place: the old image stays visible right up to this moment.
+				target.bitmap?.close();
+				target.bitmap = bitmap;
+				target.version = version;
+				target.failed = undefined;
 				this.opts.onChange();
 			})
 			.catch((err) => {
-				if (abort.signal.aborted || this.cache.get(key) !== entry) return;
+				if (abort.signal.aborted || target.loading !== loading) return;
 				console.warn("tile load failed", url, err);
-				finish();
-				entry.abort = undefined;
-				entry.state = "error";
-				entry.failedAt = Date.now();
+				target.loading = undefined;
+				this.inFlight--;
+				target.failed = { version, at: Date.now() };
 				setTimeout(() => this.opts.onChange(), RETRY_MS + 50);
 			});
 	}
 
 	private evict() {
 		const max = this.opts.maxCache ?? 512;
-		for (const [key, entry] of this.cache) {
+		for (const [k, entry] of this.cache) {
 			if (this.cache.size <= max) break;
-			if (entry.state === "loading") continue;
+			if (entry.loading) continue;
 			entry.bitmap?.close();
-			this.cache.delete(key);
+			this.cache.delete(k);
 		}
 	}
 
 	dispose() {
-		for (const entry of this.cache.values()) {
-			entry.abort?.abort();
-			entry.bitmap?.close();
-		}
-		this.cache.clear();
+		this.clear();
 	}
 }
