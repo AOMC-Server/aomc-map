@@ -12,6 +12,7 @@ import {
 } from "../permissions";
 import type { AppEnv } from "../types";
 import { dimensionRoutes } from "./dimensions";
+import { mapLayerRoutes } from "./layers";
 import { memberRoutes } from "./members";
 import { mapRevisionRoutes } from "./revisions";
 
@@ -168,4 +169,5 @@ export const mapRoutes = new Hono<AppEnv>()
 	})
 	.route("/:slug/dimensions", dimensionRoutes)
 	.route("/:slug/members", memberRoutes)
-	.route("/:slug/revisions", mapRevisionRoutes);
+	.route("/:slug/revisions", mapRevisionRoutes)
+	.route("/:slug/layers", mapLayerRoutes);

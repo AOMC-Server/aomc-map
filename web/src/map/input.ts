@@ -12,7 +12,11 @@ export interface InputHost {
 	pointer(sx: number, sy: number, kind: "move" | "click"): void;
 	pointerLeft(): void;
 	doubleClickZoomEnabled(): boolean;
+	/** Lets a tool claim a pointer-down (e.g. to drag a vertex) instead of panning the map. */
+	beginDrag(sx: number, sy: number): DragSession | null;
 }
+
+export type DragSession = { move(sx: number, sy: number): void; end(): void };
 
 const DRAG_THRESHOLD = 5;
 const INERTIA_MIN_SPEED = 0.15; // px per ms
@@ -27,6 +31,7 @@ export class Input {
 	private velocity: Pt = { x: 0, y: 0 };
 	private lastMove = 0;
 	private lastPinch: { dist: number; mid: Pt } | null = null;
+	private session: DragSession | null = null;
 	private cleanup: (() => void)[] = [];
 
 	constructor(
@@ -69,11 +74,14 @@ export class Input {
 		const p = this.local(e);
 		this.pointers.set(e.pointerId, p);
 		if (this.pointers.size === 1) {
+			this.session = this.host.beginDrag(p.x, p.y);
+			if (this.session) return;
 			this.start = { ...p, t: performance.now() };
 			this.moved = false;
 			this.velocity = { x: 0, y: 0 };
 			this.lastMove = performance.now();
 		} else if (this.pointers.size === 2) {
+			this.endSession();
 			this.moved = true;
 			this.lastPinch = this.pinchState();
 		}
@@ -95,6 +103,10 @@ export class Input {
 		}
 		const prev = this.pointers.get(e.pointerId) as Pt;
 		this.pointers.set(e.pointerId, p);
+		if (this.session) {
+			this.session.move(p.x, p.y);
+			return;
+		}
 
 		if (this.pointers.size >= 2 && this.lastPinch) {
 			const next = this.pinchState();
@@ -136,10 +148,19 @@ export class Input {
 		}
 	};
 
+	private endSession() {
+		this.session?.end();
+		this.session = null;
+	}
+
 	private up = (e: PointerEvent) => {
 		const p = this.local(e);
 		const wasSingle = this.pointers.size === 1;
 		this.pointers.delete(e.pointerId);
+		if (this.session) {
+			this.endSession();
+			return;
+		}
 		if (this.pointers.size === 1) {
 			// Pinch ended with one finger left: continue as a drag from there.
 			this.lastPinch = null;
@@ -165,6 +186,7 @@ export class Input {
 	};
 
 	private cancel = (e: PointerEvent) => {
+		this.endSession();
 		this.pointers.delete(e.pointerId);
 		this.start = null;
 		this.lastPinch = null;

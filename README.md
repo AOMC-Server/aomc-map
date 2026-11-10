@@ -51,3 +51,15 @@ curl -H "Authorization: Bearer aomc_..." \
 URL state: `/?map=<slug>&dim=<slug>&x=&z=&zoom=&rev=`. `rev` is omitted when viewing head, `embed=1` hides all UI (for iframes), and `/` alone opens the default map. Zoom is a float: 0 is 1 block per pixel, negative magnifies (down to -4), positive zooms out (up to `MAX_ZOOM`).
 
 Controls: drag/touch to pan (with inertia), wheel or pinch to zoom at the cursor, double-click to zoom in, arrow keys and `+`/`-`. Measure and Copy-coords tools are in the toolbar; Esc clears the measurement.
+
+## Layers and features
+
+Layers hold pins, lines and areas (polygons) and belong to one dimension of a map. Edits are append-only: every change adds a revision, and deleting adds a "deleted" revision, so nothing is lost.
+
+- `GET /api/maps/:map/layers?dim=<slug>&at=<rev>` returns the layers visible to you with their features as of revision `at` (omit for now).
+- `POST /api/maps/:map/layers`, `PATCH/DELETE /api/layers/:id` (delete is soft), `POST /api/layers/:id/features`, `PATCH/DELETE /api/features/:id`, `GET /api/features/:id/history`, `POST /api/features/:id/restore/:revisionId` (moderators).
+- `GET /api/layers/:id/export` and `POST /api/layers/:id/import[?replace=1]` use a JSON array of `{type, name, popup, color, geometry}`; pins have `[x, z]`, lines and areas `[[x, z], ...]`, all integers within ±30,000,000. At most 5000 features per layer.
+- Private layers are visible to map moderators and the layer's members only; everyone else gets a 404.
+- Popups support only `**bold**`, `[links](https://…)` and line breaks, and are rendered as text, never HTML.
+
+In the app: the **Layers** panel toggles visibility and creates layers; "Add feature" opens the editor, where you click the map to place points (drag a point to move it, Enter or Finish to complete, Esc to cancel).

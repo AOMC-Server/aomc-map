@@ -1,7 +1,7 @@
 import type { Role } from "@aomc/shared";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import type { Db } from "./db/client";
-import { layerMembers, mapMembers, maps } from "./db/schema";
+import { layerMembers, layers, mapMembers, maps } from "./db/schema";
 
 export type Actor = { id: string } | null;
 export type MapInfo = {
@@ -143,4 +143,19 @@ export async function loadMapAccess(db: Db, actor: Actor, slug: string) {
 export async function loadMapAccessById(db: Db, actor: Actor, mapId: number) {
 	const [map] = await db.select().from(maps).where(eq(maps.id, mapId));
 	return resolveAccess(db, actor, map);
+}
+
+/** Loads a live layer the actor may view, with their map and layer roles. null means answer 404. */
+export async function loadLayerAccess(db: Db, actor: Actor, layerId: number) {
+	if (!Number.isSafeInteger(layerId)) return null;
+	const [layer] = await db
+		.select()
+		.from(layers)
+		.where(and(eq(layers.id, layerId), isNull(layers.deletedAt)));
+	if (!layer) return null;
+	const access = await loadMapAccessById(db, actor, layer.mapId);
+	if (!access) return null;
+	const layerRole = actor ? await loadLayerRole(db, layer.id, actor.id) : null;
+	if (!canViewLayer(access.role, layer, layerRole)) return null;
+	return { layer, map: access.map, role: access.role, layerRole };
 }

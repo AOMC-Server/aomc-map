@@ -24,6 +24,12 @@
 			"preset": "recommended",
 			"style": {
 				"noNonNullAssertion": "off"
+			},
+			"complexity": {
+				"noImportantStyles": "off"
+			},
+			"suspicious": {
+				"noArrayIndexKey": "off"
 			}
 		}
 	},

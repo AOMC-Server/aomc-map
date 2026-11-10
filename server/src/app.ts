@@ -4,6 +4,8 @@ import type { Db } from "./db/client";
 import type { Env } from "./env";
 import { authRoutes } from "./routes/auth";
 import { blobRoutes } from "./routes/blobs";
+import { featureRoutes } from "./routes/features";
+import { layerRoutes } from "./routes/layers";
 import { mapRoutes } from "./routes/maps";
 import { meRoutes } from "./routes/me";
 import { revisionRoutes } from "./routes/revisions";
@@ -36,6 +38,8 @@ export function createApp({ db, env, services, fetch: fetchFn }: AppDeps) {
 			.route("/api/tokens", tokenRoutes)
 			.route("/api/maps", mapRoutes)
 			.route("/api/revisions", revisionRoutes)
+			.route("/api/layers", layerRoutes)
+			.route("/api/features", featureRoutes)
 			.route(
 				"/",
 				staticRoutes(env.WEB_DIST ?? `${import.meta.dir}/../../web/dist`),

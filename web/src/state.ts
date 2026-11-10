@@ -1,4 +1,6 @@
-import type { Role } from "@aomc/shared";
+import type { Dye } from "@aomc/shared/colors";
+import type { FeatureType, Point } from "@aomc/shared/features";
+import type { Role } from "@aomc/shared/schemas";
 import { computed, signal } from "@preact/signals";
 import type { View } from "./map/camera";
 
@@ -29,6 +31,32 @@ export type MapDetail = {
 	dimensions: Dimension[];
 };
 
+export type FeatureData = {
+	id: number;
+	layerId: number;
+	revisionId: number;
+	type: FeatureType;
+	name: string;
+	popup: string;
+	color: Dye | null;
+	geometry: Point | Point[];
+	authorId: string;
+	updatedAt: number;
+};
+
+export type LayerData = {
+	id: number;
+	dimensionId: number;
+	name: string;
+	color: Dye;
+	hiddenByDefault: boolean;
+	visibility: "inherit" | "private";
+	sortOrder: number;
+	createdBy: string;
+	canEdit: boolean;
+	features: FeatureData[];
+};
+
 export type Tool = "none" | "measure" | "copy";
 
 export const user = signal<User | null>(null);
@@ -42,6 +70,54 @@ export const view = signal<View>({ centerX: 0, centerZ: 0, zoom: 2 });
 export const cursor = signal<{ x: number; z: number } | null>(null);
 export const activeTool = signal<Tool>("none");
 export const loadError = signal<string | null>(null);
+
+export const notice = signal<{ text: string; kind: "error" | "info" } | null>(
+	null,
+);
+
+export const layersData = signal<LayerData[]>([]);
+/** Layers the user toggled away from their default (layerId -> hidden). */
+export const layerOverrides = signal<Map<number, boolean>>(new Map());
+export const layerPanelOpen = signal(false);
+
+export const isLayerHidden = (l: LayerData) =>
+	layerOverrides.value.get(l.id) ?? l.hiddenByDefault;
+
+export function toggleLayer(l: LayerData) {
+	const next = new Map(layerOverrides.value);
+	next.set(l.id, !isLayerHidden(l));
+	layerOverrides.value = next;
+}
+
+/** The clicked feature whose popup is open, with the block position the popup is anchored to. */
+export const popup = signal<{
+	featureId: number;
+	layerId: number;
+	x: number;
+	z: number;
+} | null>(null);
+export const hoverInfo = signal<{
+	text: string;
+	sx: number;
+	sy: number;
+} | null>(null);
+
+export type EditorTarget =
+	| { mode: "create"; layerId: number }
+	| { mode: "edit"; layerId: number; featureId: number };
+export const editor = signal<EditorTarget | null>(null);
+
+/** Edits are only possible while looking at the present. */
+export const viewingHistory = computed(() => rev.value !== null);
+export const canEditMap = computed(() => {
+	const role = currentMap.value?.role;
+	return (
+		!viewingHistory.value &&
+		user.value !== null &&
+		role !== undefined &&
+		role !== "viewer"
+	);
+});
 
 export const effectiveRev = computed(() => {
 	const head = currentMap.value?.map.headRev ?? 0;

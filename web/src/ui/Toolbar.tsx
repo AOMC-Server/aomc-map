@@ -3,6 +3,7 @@ import {
 	activeTool,
 	currentMap,
 	dimSlug,
+	layerPanelOpen,
 	maps,
 	type Tool,
 	visibleDimensions,
@@ -65,6 +66,17 @@ export function Toolbar() {
 					</button>
 				))}
 			</div>
+
+			<button
+				type="button"
+				class={`btn ${layerPanelOpen.value ? "active" : ""}`}
+				aria-pressed={layerPanelOpen.value}
+				onClick={() => {
+					layerPanelOpen.value = !layerPanelOpen.value;
+				}}
+			>
+				Layers
+			</button>
 
 			<div class="group">
 				<ToolButton

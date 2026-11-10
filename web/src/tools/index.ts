@@ -8,6 +8,8 @@ import {
 	drawCopy,
 	watchCopy,
 } from "./copyCoords";
+import { drawing, initDrawTool } from "./draw";
+import { initFeatureInteraction } from "./features";
 import {
 	clearMeasure,
 	clickMeasure,
@@ -22,13 +24,19 @@ export function initTools(map: MapView): () => void {
 
 	map.setOverlay("measure", drawMeasure);
 	map.setOverlay("copy", drawCopy);
-	disposers.push(watchMeasure(map), watchCopy(map));
+	disposers.push(
+		watchMeasure(map),
+		watchCopy(map),
+		initDrawTool(map),
+		initFeatureInteraction(map),
+	);
 
 	disposers.push(
 		map.on("move", (e) => {
 			cursor.value = e ? { x: Math.floor(e.x), z: Math.floor(e.z) } : null;
 		}),
 		map.on("click", (e) => {
+			if (drawing.value) return;
 			const p = { x: Math.floor(e.x), z: Math.floor(e.z) };
 			if (activeTool.value === "measure") clickMeasure(p);
 			else if (activeTool.value === "copy") void clickCopy(p);
@@ -39,8 +47,9 @@ export function initTools(map: MapView): () => void {
 	disposers.push(
 		effect(() => {
 			const tool = activeTool.value;
-			map.setDoubleClickZoom(tool === "none");
-			map.setCursor(tool === "none" ? "grab" : "crosshair");
+			const idle = tool === "none" && drawing.value === null;
+			map.setDoubleClickZoom(idle);
+			map.setCursor(idle ? "grab" : "crosshair");
 			if (tool !== "measure") clearMeasure();
 			if (tool !== "copy") clearCopy();
 		}),
@@ -53,7 +62,7 @@ export function initTools(map: MapView): () => void {
 			(t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))
 		)
 			return;
-		if (e.key !== "Escape") return;
+		if (e.key !== "Escape" || drawing.value) return;
 		if (measurePoints.value.length > 0) clearMeasure();
 		else if (copiedPoints.value.length > 0) clearCopy();
 		else activeTool.value = "none";

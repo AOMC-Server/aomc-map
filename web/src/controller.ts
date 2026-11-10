@@ -1,21 +1,27 @@
 import { effect, signal } from "@preact/signals";
 import { api } from "./api";
+import { loadLayers } from "./layers";
 import type { View } from "./map/camera";
 import { MapView } from "./map/MapView";
 import {
 	currentMap,
 	dimSlug,
+	editor,
 	effectiveRev,
 	embed,
+	isLayerHidden,
+	layersData,
 	loadError,
 	type MapDetail,
 	maps,
+	popup,
 	rev,
 	user,
 	view,
 	visibleDimensions,
 } from "./state";
 import { initTools } from "./tools";
+import { stopDraw } from "./tools/draw";
 import { formatUrl, parseUrl } from "./url";
 
 /** The live map instance, for UI that needs to talk to it. */
@@ -63,6 +69,8 @@ export async function selectMap(
 	const dim = dims.find((d) => d.slug === opts.dim) ?? dims[0] ?? null;
 
 	destroyMap();
+	closeFeatureUi();
+	layersData.value = [];
 	currentMap.value = detail;
 	dimSlug.value = dim?.slug ?? null;
 	rev.value = opts.rev !== null && opts.rev !== undefined ? opts.rev : null;
@@ -81,9 +89,17 @@ export async function selectMap(
 	mapView.value = mv;
 }
 
+function closeFeatureUi() {
+	stopDraw();
+	editor.value = null;
+	popup.value = null;
+}
+
 export function selectDimension(slug: string) {
-	if (visibleDimensions.value.some((d) => d.slug === slug))
+	if (visibleDimensions.value.some((d) => d.slug === slug)) {
+		closeFeatureUi();
 		dimSlug.value = slug;
+	}
 }
 
 export function setRev(value: number | null) {
@@ -146,6 +162,25 @@ export async function boot() {
 			keepPrevious: key === lastKey,
 		});
 		lastKey = key;
+	});
+
+	// Reload layers whenever what we are looking at (map, dimension, time) changes.
+	effect(() => {
+		currentMap.value;
+		dimSlug.value;
+		rev.value;
+		void loadLayers();
+	});
+
+	// Draw the layers the user has switched on.
+	effect(() => {
+		const mv = mapView.value;
+		if (!mv) return;
+		mv.setFeatures(
+			layersData.value
+				.filter((l) => !isLayerHidden(l))
+				.map((l) => ({ id: l.id, color: l.color, features: l.features })),
+		);
 	});
 
 	let urlTimer: ReturnType<typeof setTimeout> | undefined;
