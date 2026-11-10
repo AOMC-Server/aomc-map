@@ -13,6 +13,7 @@ import {
 import type { AppEnv } from "../types";
 import { dimensionRoutes } from "./dimensions";
 import { memberRoutes } from "./members";
+import { mapRevisionRoutes } from "./revisions";
 
 const publicFields = {
 	id: maps.id,
@@ -165,4 +166,5 @@ export const mapRoutes = new Hono<AppEnv>()
 		return c.json({ ok: true });
 	})
 	.route("/:slug/dimensions", dimensionRoutes)
-	.route("/:slug/members", memberRoutes);
+	.route("/:slug/members", memberRoutes)
+	.route("/:slug/revisions", mapRevisionRoutes);

@@ -6,6 +6,23 @@ export type Role = z.infer<typeof roleSchema>;
 export const visibilitySchema = z.enum(["public", "private"]);
 export type Visibility = z.infer<typeof visibilitySchema>;
 
+export const MAX_COORD = 30_000_000;
+
+export const coordSchema = z.object({
+	x: z.number().int().min(-MAX_COORD).max(MAX_COORD),
+	z: z.number().int().min(-MAX_COORD).max(MAX_COORD),
+});
+export type Coord = z.infer<typeof coordSchema>;
+
+export const uploadCoordsSchema = z.array(coordSchema);
+
+const tileSizeSchema = z
+	.number()
+	.int()
+	.min(16)
+	.max(2048)
+	.refine((n) => n % 2 === 0, "tile size must be even");
+
 const slugSchema = z
 	.string()
 	.min(1)
@@ -16,14 +33,14 @@ export const createMapSchema = z.object({
 	slug: slugSchema,
 	name: z.string().trim().min(1).max(100),
 	visibility: visibilitySchema.default("private"),
-	tileSize: z.number().int().min(16).max(2048).optional(),
+	tileSize: tileSizeSchema.optional(),
 });
 export type CreateMap = z.infer<typeof createMapSchema>;
 
 export const updateMapSchema = z.object({
 	name: z.string().trim().min(1).max(100).optional(),
 	visibility: visibilitySchema.optional(),
-	tileSize: z.number().int().min(16).max(2048).optional(),
+	tileSize: tileSizeSchema.optional(),
 });
 export type UpdateMap = z.infer<typeof updateMapSchema>;
 

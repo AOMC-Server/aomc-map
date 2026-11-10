@@ -122,12 +122,25 @@ export async function loadLayerRole(
 	return row?.role ?? null;
 }
 
-/** Loads a map by slug with the actor's effective role. Returns null when it doesn't exist or isn't visible (callers answer 404). */
-export async function loadMapAccess(db: Db, actor: Actor, slug: string) {
-	const [map] = await db.select().from(maps).where(eq(maps.slug, slug));
+async function resolveAccess(
+	db: Db,
+	actor: Actor,
+	map: typeof maps.$inferSelect | undefined,
+) {
 	if (!map) return null;
 	const membership = actor ? await loadMembership(db, map.id, actor.id) : null;
 	const role = effectiveRole(actor, map, membership);
 	if (!canViewMap(role)) return null;
 	return { map, role: role as Role };
+}
+
+/** Loads a map by slug with the actor's effective role. Returns null when it doesn't exist or isn't visible (callers answer 404). */
+export async function loadMapAccess(db: Db, actor: Actor, slug: string) {
+	const [map] = await db.select().from(maps).where(eq(maps.slug, slug));
+	return resolveAccess(db, actor, map);
+}
+
+export async function loadMapAccessById(db: Db, actor: Actor, mapId: number) {
+	const [map] = await db.select().from(maps).where(eq(maps.id, mapId));
+	return resolveAccess(db, actor, map);
 }
