@@ -91,6 +91,7 @@ export class TileLayer {
 	draw(ctx: CanvasRenderingContext2D, view: View, size: Size, dpr: number) {
 		if (!this.source) return;
 		const { tileSize: T, maxZoom } = this.opts;
+		ctx.imageSmoothingQuality = "high";
 		const level = tileLevel(view.zoom, dpr, maxZoom);
 		const range = visibleTiles(view, size, level, T);
 		const wanted = new Map<string, Wanted>();

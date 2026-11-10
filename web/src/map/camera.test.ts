@@ -68,16 +68,32 @@ describe("clampZoom / tileLevel", () => {
 	test("level is the coarsest that does not magnify, clamped", () => {
 		expect(tileLevel(-3, 1, 8)).toBe(0);
 		expect(tileLevel(0, 1, 8)).toBe(0);
-		expect(tileLevel(0.1, 1, 8)).toBe(1);
+		expect(tileLevel(0.1, 1, 8)).toBe(0);
+		expect(tileLevel(0.99, 1, 8)).toBe(0);
 		expect(tileLevel(1, 1, 8)).toBe(1);
-		expect(tileLevel(7.5, 1, 8)).toBe(8);
+		expect(tileLevel(1.5, 1, 8)).toBe(1);
+		expect(tileLevel(7.5, 1, 8)).toBe(7);
 		expect(tileLevel(12, 1, 8)).toBe(8);
+	});
+
+	test("tile pixels are never larger than device pixels (no upscaling blur)", () => {
+		for (const dpr of [1, 1.25, 1.5, 2, 3]) {
+			for (let zoom = -4; zoom <= 8; zoom += 0.05) {
+				const level = tileLevel(zoom, dpr, 12);
+				const devicePxPerTilePx = 2 ** (level - zoom) * dpr;
+				if (level > 0) expect(devicePxPerTilePx).toBeLessThanOrEqual(1 + 1e-6);
+				// ...and the next coarser level would be magnified.
+				if (level > 0 && level < 12)
+					expect(2 ** (level + 1 - zoom) * dpr).toBeGreaterThan(1);
+			}
+		}
 	});
 
 	test("high dpr picks finer levels", () => {
 		expect(tileLevel(1, 2, 8)).toBe(0);
 		expect(tileLevel(2, 2, 8)).toBe(1);
-		expect(tileLevel(2, 3, 8)).toBe(1);
+		expect(tileLevel(2, 3, 8)).toBe(0);
+		expect(tileLevel(3, 3, 8)).toBe(1);
 	});
 });
 

@@ -56,11 +56,15 @@ export function panBy(view: View, dxPx: number, dyPx: number): View {
 }
 
 /**
- * Tile level to draw: the coarsest level that still has at least one tile pixel per device pixel,
- * so tiles are never magnified by more than the zoom requires and downscaled by less than 2x.
+ * Tile level to draw: the coarsest level that never magnifies its pixels.
+ *
+ * One pixel of a level-L tile covers 2^L blocks, which is 2^(L - zoom) * dpr device pixels. That
+ * is at most 1 exactly when L <= zoom - log2(dpr), hence the floor: tiles are shown at 1x down to
+ * (just under) 2x reduced, never blurred by upscaling. Rounding up would pick a level whose
+ * pixels are up to 2x too large.
  */
 export function tileLevel(zoom: number, dpr: number, maxZoom: number): number {
-	const level = Math.ceil(zoom - Math.log2(dpr) - 1e-9);
+	const level = Math.floor(zoom - Math.log2(dpr) + 1e-9);
 	return Math.min(Math.max(level, 0), maxZoom);
 }
 
