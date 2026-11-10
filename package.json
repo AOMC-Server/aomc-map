@@ -1,0 +1,22 @@
+{
+	"name": "aomc-map",
+	"private": true,
+	"workspaces": [
+		"server",
+		"web",
+		"shared"
+	],
+	"scripts": {
+		"dev": "bun --watch server/src/index.ts",
+		"build": "bun --cwd web run build",
+		"test": "bun test",
+		"lint": "biome check .",
+		"db:generate": "bun --cwd server run db:generate",
+		"db:migrate": "bun --cwd server run db:migrate"
+	},
+	"devDependencies": {
+		"@biomejs/biome": "^2.0.0",
+		"@types/bun": "latest",
+		"typescript": "^5.6.0"
+	}
+}

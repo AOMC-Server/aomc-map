@@ -1,0 +1,19 @@
+{
+	"name": "@aomc/server",
+	"private": true,
+	"type": "module",
+	"scripts": {
+		"db:generate": "drizzle-kit generate",
+		"db:migrate": "bun src/db/migrate.ts"
+	},
+	"dependencies": {
+		"@aomc/shared": "workspace:*",
+		"@hono/zod-validator": "^0.7.0",
+		"drizzle-orm": "^0.44.0",
+		"hono": "^4.6.0",
+		"zod": "^4.0.0"
+	},
+	"devDependencies": {
+		"drizzle-kit": "^0.31.0"
+	}
+}
