@@ -19,7 +19,9 @@ Bun workspace: `server/` (Hono + Drizzle + SQLite), `shared/` (zod schemas, coor
 
 ## Scripts
 
-- `bun run dev` – server with watch
+- `bun run dev` – server with watch (API on :3000)
+- `bun run dev:web` – Vite dev server with hot reload, proxying `/api`, `/auth` and `/blobs` to :3000
+- `bun run build` – production web build into `web/dist`, which the server serves (with SPA fallback)
 - `bun test` – tests
 - `bun run lint` – Biome
 - `bun run db:generate` – generate a migration after editing `server/src/db/schema.ts`
@@ -43,3 +45,9 @@ curl -H "Authorization: Bearer aomc_..." \
 - Tiles: `GET /api/maps/:map/dimensions/:dim/tiles/:zoom/:x/:y?rev=R` (302 to `/blobs/<hash>.webp`, or 204 if empty). Zoom 0 is 1 block per pixel; tile indices are `floor(block / tileSize)`.
 - Moderators can `POST /api/revisions/:id/revert` and `/unrevert`. History is never rewritten, so older revs still show the reverted upload.
 - Limits (env): `MAX_UPLOAD_BYTES`, `MAX_IMAGE_DIM`, `MAX_FILES_PER_UPLOAD`, `UPLOAD_RATE_LIMIT`, `MAX_ZOOM`.
+
+## Viewer
+
+URL state: `/?map=<slug>&dim=<slug>&x=&z=&zoom=&rev=`. `rev` is omitted when viewing head, `embed=1` hides all UI (for iframes), and `/` alone opens the default map. Zoom is a float: 0 is 1 block per pixel, negative magnifies (down to -4), positive zooms out (up to `MAX_ZOOM`).
+
+Controls: drag/touch to pan (with inertia), wheel or pinch to zoom at the cursor, double-click to zoom in, arrow keys and `+`/`-`. Measure and Copy-coords tools are in the toolbar; Esc clears the measurement.

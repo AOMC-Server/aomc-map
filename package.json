@@ -8,6 +8,7 @@
 	],
 	"scripts": {
 		"dev": "bun --watch server/src/index.ts",
+		"dev:web": "bun --cwd web run dev",
 		"build": "bun --cwd web run build",
 		"test": "bun test",
 		"lint": "biome check .",

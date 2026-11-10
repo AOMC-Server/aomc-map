@@ -1,0 +1,108 @@
+import { floorDiv } from "@aomc/shared/coords";
+
+/** Camera state. zoom is a float: css pixels per block = 2^-zoom (0 = 1:1, negative magnifies). */
+export type View = { centerX: number; centerZ: number; zoom: number };
+export type Size = { width: number; height: number };
+
+export const MIN_ZOOM = -4;
+
+export const scaleOf = (zoom: number) => 2 ** -zoom;
+
+export function clampZoom(zoom: number, maxZoom: number): number {
+	return Math.min(Math.max(zoom, MIN_ZOOM), maxZoom);
+}
+
+export function screenToBlock(view: View, size: Size, sx: number, sy: number) {
+	const s = scaleOf(view.zoom);
+	return {
+		x: view.centerX + (sx - size.width / 2) / s,
+		z: view.centerZ + (sy - size.height / 2) / s,
+	};
+}
+
+export function blockToScreen(view: View, size: Size, x: number, z: number) {
+	const s = scaleOf(view.zoom);
+	return {
+		x: (x - view.centerX) * s + size.width / 2,
+		y: (z - view.centerZ) * s + size.height / 2,
+	};
+}
+
+/** Changes zoom while keeping the block under (sx, sy) fixed on screen. */
+export function zoomAt(
+	view: View,
+	size: Size,
+	sx: number,
+	sy: number,
+	zoom: number,
+): View {
+	const anchor = screenToBlock(view, size, sx, sy);
+	const s = scaleOf(zoom);
+	return {
+		zoom,
+		centerX: anchor.x - (sx - size.width / 2) / s,
+		centerZ: anchor.z - (sy - size.height / 2) / s,
+	};
+}
+
+/** Moves the camera so the content under the pointer follows a screen-space drag. */
+export function panBy(view: View, dxPx: number, dyPx: number): View {
+	const s = scaleOf(view.zoom);
+	return {
+		...view,
+		centerX: view.centerX - dxPx / s,
+		centerZ: view.centerZ - dyPx / s,
+	};
+}
+
+/**
+ * Tile level to draw: the coarsest level that still has at least one tile pixel per device pixel,
+ * so tiles are never magnified by more than the zoom requires and downscaled by less than 2x.
+ */
+export function tileLevel(zoom: number, dpr: number, maxZoom: number): number {
+	const level = Math.ceil(zoom - Math.log2(dpr) - 1e-9);
+	return Math.min(Math.max(level, 0), maxZoom);
+}
+
+export type TileRange = {
+	minX: number;
+	maxX: number;
+	minY: number;
+	maxY: number;
+};
+
+/** Inclusive range of tile indices at `level` that intersect the viewport. */
+export function visibleTiles(
+	view: View,
+	size: Size,
+	level: number,
+	tileSize: number,
+): TileRange {
+	const s = scaleOf(view.zoom);
+	const span = tileSize * 2 ** level;
+	const left = view.centerX - size.width / 2 / s;
+	const right = view.centerX + size.width / 2 / s;
+	const top = view.centerZ - size.height / 2 / s;
+	const bottom = view.centerZ + size.height / 2 / s;
+	return {
+		minX: floorDiv(left, span),
+		maxX: floorDiv(right, span),
+		minY: floorDiv(top, span),
+		maxY: floorDiv(bottom, span),
+	};
+}
+
+/** Screen-space (css px) rectangle of a tile. */
+export function tileRect(
+	view: View,
+	size: Size,
+	level: number,
+	tileSize: number,
+	tx: number,
+	ty: number,
+) {
+	const span = tileSize * 2 ** level;
+	const a = blockToScreen(view, size, tx * span, ty * span);
+	const b = blockToScreen(view, size, (tx + 1) * span, (ty + 1) * span);
+	return { x: a.x, y: a.y, w: b.x - a.x, h: b.y - a.y };
+}

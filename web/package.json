@@ -3,6 +3,17 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"build": "echo 'web not implemented yet'"
+		"dev": "vite",
+		"build": "vite build"
+	},
+	"dependencies": {
+		"@aomc/shared": "workspace:*"
+	},
+	"devDependencies": {
+		"@preact/preset-vite": "^2.10.0",
+		"@preact/signals": "^2.0.0",
+		"hono": "^4.6.0",
+		"preact": "^10.24.0",
+		"vite": "^7.0.0"
 	}
 }

@@ -7,6 +7,7 @@ import { blobRoutes } from "./routes/blobs";
 import { mapRoutes } from "./routes/maps";
 import { meRoutes } from "./routes/me";
 import { revisionRoutes } from "./routes/revisions";
+import { staticRoutes } from "./routes/static";
 import { tokenRoutes } from "./routes/tokens";
 import type { Services } from "./services";
 import type { AppEnv } from "./types";
@@ -35,6 +36,10 @@ export function createApp({ db, env, services, fetch: fetchFn }: AppDeps) {
 			.route("/api/tokens", tokenRoutes)
 			.route("/api/maps", mapRoutes)
 			.route("/api/revisions", revisionRoutes)
+			.route(
+				"/",
+				staticRoutes(env.WEB_DIST ?? `${import.meta.dir}/../../web/dist`),
+			)
 	);
 }
 

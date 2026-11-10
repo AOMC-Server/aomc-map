@@ -102,6 +102,7 @@ export const mapRoutes = new Hono<AppEnv>()
 				createdAt: map.createdAt,
 			},
 			role: access.role,
+			maxZoom: c.var.env.MAX_ZOOM,
 			dimensions: dims.map((d) => ({
 				id: d.id,
 				slug: d.slug,
