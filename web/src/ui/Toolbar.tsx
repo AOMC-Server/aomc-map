@@ -1,10 +1,13 @@
+import { useEffect, useRef } from "preact/hooks";
 import { selectDimension, selectMap } from "../controller";
 import {
 	activeTool,
 	currentMap,
 	dimSlug,
+	historyPanelOpen,
 	layerPanelOpen,
 	maps,
+	rev,
 	type Tool,
 	visibleDimensions,
 } from "../state";
@@ -35,8 +38,25 @@ function ToolButton(props: {
 export function Toolbar() {
 	const detail = currentMap.value;
 	const dims = visibleDimensions.value;
+	const ref = useRef<HTMLElement>(null);
+
+	// The toolbar wraps on narrow screens; panels and banners position themselves below it.
+	useEffect(() => {
+		const el = ref.current;
+		if (!el) return;
+		const publish = () =>
+			document.documentElement.style.setProperty(
+				"--toolbar-h",
+				`${el.offsetHeight}px`,
+			);
+		publish();
+		const observer = new ResizeObserver(publish);
+		observer.observe(el);
+		return () => observer.disconnect();
+	}, []);
+
 	return (
-		<header class="toolbar">
+		<header class="toolbar" ref={ref}>
 			<select
 				class="map-select"
 				aria-label="Map"
@@ -74,9 +94,22 @@ export function Toolbar() {
 				aria-pressed={layerPanelOpen.value}
 				onClick={() => {
 					layerPanelOpen.value = !layerPanelOpen.value;
+					historyPanelOpen.value = false;
 				}}
 			>
 				Layers
+			</button>
+
+			<button
+				type="button"
+				class={`btn ${historyPanelOpen.value || rev.value !== null ? "active" : ""}`}
+				aria-pressed={historyPanelOpen.value}
+				onClick={() => {
+					historyPanelOpen.value = !historyPanelOpen.value;
+					layerPanelOpen.value = false;
+				}}
+			>
+				History
 			</button>
 
 			<div class="group">

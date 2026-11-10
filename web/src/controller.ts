@@ -165,11 +165,14 @@ export async function boot() {
 	});
 
 	// Reload layers whenever what we are looking at (map, dimension, time) changes.
+	// Debounced so dragging the time slider does not fire a request per step.
+	let layersTimer: ReturnType<typeof setTimeout> | undefined;
 	effect(() => {
 		currentMap.value;
 		dimSlug.value;
 		rev.value;
-		void loadLayers();
+		clearTimeout(layersTimer);
+		layersTimer = setTimeout(() => void loadLayers(), 120);
 	});
 
 	// Draw the layers the user has switched on.

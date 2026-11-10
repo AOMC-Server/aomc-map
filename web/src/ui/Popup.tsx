@@ -2,6 +2,7 @@ import { DYE_HEX } from "@aomc/shared/colors";
 import { mapView } from "../controller";
 import { deleteFeature } from "../layers";
 import { canEditMap, editor, layersData, popup, view } from "../state";
+import { featureHistoryFor } from "./FeatureHistory";
 import { PopupText } from "./PopupText";
 
 const TYPE_LABEL = { pin: "Pin", line: "Line", polygon: "Area" } as const;
@@ -50,40 +51,54 @@ export function Popup() {
 				{TYPE_LABEL[feature.type]} · {layer.name}
 			</div>
 			{feature.popup && <PopupText text={feature.popup} />}
-			{editable && (
-				<div class="popup-actions">
-					<button
-						type="button"
-						class="btn"
-						onClick={() => {
-							popup.value = null;
-							editor.value = {
-								mode: "edit",
-								layerId: layer.id,
-								featureId: feature.id,
-							};
-						}}
-					>
-						Edit
-					</button>
-					<button
-						type="button"
-						class="btn"
-						onClick={async () => {
-							if (
-								!confirm(
-									`Delete "${feature.name || TYPE_LABEL[feature.type]}"?`,
+			<div class="popup-actions">
+				{editable && (
+					<>
+						<button
+							type="button"
+							class="btn"
+							onClick={() => {
+								popup.value = null;
+								editor.value = {
+									mode: "edit",
+									layerId: layer.id,
+									featureId: feature.id,
+								};
+							}}
+						>
+							Edit
+						</button>
+						<button
+							type="button"
+							class="btn"
+							onClick={async () => {
+								if (
+									!confirm(
+										`Delete "${feature.name || TYPE_LABEL[feature.type]}"?`,
+									)
 								)
-							)
-								return;
-							popup.value = null;
-							await deleteFeature(feature.id);
-						}}
-					>
-						Delete
-					</button>
-				</div>
-			)}
+									return;
+								popup.value = null;
+								await deleteFeature(feature.id);
+							}}
+						>
+							Delete
+						</button>
+					</>
+				)}
+				<button
+					type="button"
+					class="btn"
+					onClick={() => {
+						featureHistoryFor.value = {
+							featureId: feature.id,
+							title: feature.name || TYPE_LABEL[feature.type],
+						};
+					}}
+				>
+					History
+				</button>
+			</div>
 		</div>
 	);
 }

@@ -2,6 +2,7 @@ import { signal } from "@preact/signals";
 import { mapView, refreshHead } from "./controller";
 import { showNotice } from "./layers";
 import type { Bounds } from "./map/geometry";
+import { fetchRevision, loadRevisions, watchRevision } from "./revisions";
 
 export type UploadState =
 	| { phase: "idle" }
@@ -81,7 +82,7 @@ export function startUpload(mapSlug: string, dimSlug: string, files: File[]) {
 			body = JSON.parse(xhr.responseText);
 		} catch {}
 		if (xhr.status === 202 && body?.revisionId) {
-			follow(body.revisionId);
+			void follow(body.revisionId);
 			return;
 		}
 		const reason =
@@ -97,105 +98,36 @@ export function startUpload(mapSlug: string, dimSlug: string, files: File[]) {
 	xhr.send(form);
 }
 
-type RevisionBody = {
-	revision: {
-		status: "pending" | "processing" | "done" | "failed";
-		rev: number | null;
-		error: string | null;
-		bbox: Bounds | null;
-	};
-};
+async function follow(revisionId: number) {
+	uploadState.value = { phase: "processing", revisionId, message: "Queued" };
+	void loadRevisions();
+	const outcome = await watchRevision(revisionId, (p) => {
+		uploadState.value = {
+			phase: "processing",
+			revisionId,
+			message: p.message ?? "Processing",
+			done: p.done,
+			total: p.total,
+		};
+	});
 
-async function fetchRevision(
-	id: number,
-): Promise<RevisionBody["revision"] | null> {
-	try {
-		const res = await fetch(`/api/revisions/${id}`);
-		return res.ok ? ((await res.json()) as RevisionBody).revision : null;
-	} catch {
-		return null;
-	}
-}
-
-async function finish(
-	id: number,
-	status: "done" | "failed",
-	error?: string | null,
-) {
-	if (status === "failed") {
-		const message = error || "Processing failed.";
+	if (outcome.status === "failed") {
+		const message = outcome.error || "Processing failed.";
 		uploadState.value = { phase: "failed", error: message, fileErrors: [] };
 		showNotice(`Upload failed: ${message}`, "error");
+		void loadRevisions();
 		return;
 	}
-	const revision = await fetchRevision(id);
+	const revision = await fetchRevision(revisionId);
 	uploadState.value = {
 		phase: "done",
-		revisionId: id,
+		revisionId,
 		rev: revision?.rev ?? null,
 		bbox: revision?.bbox ?? null,
 	};
 	showNotice("Upload finished. The map has been updated.");
 	await refreshHead();
-}
-
-/** Follows a revision with server-sent events, falling back to polling if the stream breaks. */
-function follow(revisionId: number) {
-	uploadState.value = { phase: "processing", revisionId, message: "Queued" };
-	let settled = false;
-	const settle = (status: "done" | "failed", error?: string | null) => {
-		if (settled) return;
-		settled = true;
-		void finish(revisionId, status, error);
-	};
-
-	const poll = async () => {
-		while (!settled) {
-			const r = await fetchRevision(revisionId);
-			if (r?.status === "done") return settle("done");
-			if (r?.status === "failed") return settle("failed", r.error);
-			await new Promise((resolve) => setTimeout(resolve, 1500));
-		}
-	};
-
-	if (typeof EventSource === "undefined") {
-		void poll();
-		return;
-	}
-	const source = new EventSource(`/api/revisions/${revisionId}/events`);
-	const onProgress = (e: MessageEvent) => {
-		const d = JSON.parse(e.data) as {
-			message?: string;
-			done?: number;
-			total?: number;
-		};
-		if (settled) return;
-		uploadState.value = {
-			phase: "processing",
-			revisionId,
-			message: d.message ?? "Processing",
-			done: d.done,
-			total: d.total,
-		};
-	};
-	source.addEventListener("pending", onProgress);
-	source.addEventListener("processing", onProgress);
-	source.addEventListener("done", () => {
-		source.close();
-		settle("done");
-	});
-	source.addEventListener("failed", (e) => {
-		source.close();
-		settle(
-			"failed",
-			(JSON.parse((e as MessageEvent).data) as { error?: string }).error,
-		);
-	});
-	source.onerror = () => {
-		if (settled) return;
-		source.close();
-		void poll();
-	};
+	void loadRevisions();
 }
 
 /** Zooms the map to the area covered by a finished upload. */

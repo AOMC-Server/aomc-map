@@ -65,3 +65,9 @@ Layers hold pins, lines and areas (polygons) and belong to one dimension of a ma
 - Popups support only `**bold**`, `[links](https://…)` and line breaks, and are rendered as text, never HTML.
 
 In the app: the **Layers** panel toggles visibility and creates layers; "Add feature" opens the editor, where you click the map to place points (drag a point to move it, Enter or Finish to complete, Esc to cancel).
+
+## History
+
+The **History** panel has a time slider over the map's revisions (tiles and features both follow it; `?rev=N` in the URL), and an upload log with author, date, area and status. Hovering or clicking an entry outlines its area on the map. While looking at the past the app shows a banner and editing is off; "Back to latest" returns to the present.
+
+Moderators can **Revert** an upload (and **Restore** it again): this publishes a new revision, so older revisions still show the original. Feature popups have a **History** button; moderators can restore an earlier version of a feature, including a deleted one (slide back to a revision where it existed, open its popup, then restore).

@@ -86,6 +86,29 @@ export const layersData = signal<LayerData[]>([]);
 /** Layers the user toggled away from their default (layerId -> hidden). */
 export const layerOverrides = signal<Map<number, boolean>>(new Map());
 export const layerPanelOpen = signal(false);
+export const historyPanelOpen = signal(false);
+
+export type RevisionInfo = {
+	id: number;
+	rev: number | null;
+	kind: "upload" | "revert" | "unrevert";
+	dimensionId: number | null;
+	authorId: string;
+	authorName: string;
+	targetRevisionId: number | null;
+	status: "pending" | "processing" | "done" | "failed";
+	error: string | null;
+	bbox: { minX: number; minZ: number; maxX: number; maxZ: number } | null;
+	fileCount: number;
+	reverted: boolean;
+	createdAt: number;
+	completedAt: number | null;
+};
+
+/** Revisions of the current map, newest first. */
+export const revisionsData = signal<RevisionInfo[]>([]);
+/** Area of a revision to outline on the map (hovered or selected in the upload log). */
+export const highlightBbox = signal<RevisionInfo["bbox"]>(null);
 
 export const isLayerHidden = (l: LayerData) =>
 	layerOverrides.value.get(l.id) ?? l.hiddenByDefault;
@@ -124,6 +147,11 @@ export const canEditMap = computed(() => {
 		role !== undefined &&
 		role !== "viewer"
 	);
+});
+
+export const isModerator = computed(() => {
+	const role = currentMap.value?.role;
+	return user.value !== null && (role === "moderator" || role === "owner");
 });
 
 export const effectiveRev = computed(() => {

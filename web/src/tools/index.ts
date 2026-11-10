@@ -10,6 +10,7 @@ import {
 } from "./copyCoords";
 import { drawing, initDrawTool } from "./draw";
 import { initFeatureInteraction } from "./features";
+import { initHistoryOverlay } from "./history";
 import {
 	clearMeasure,
 	clickMeasure,
@@ -29,6 +30,7 @@ export function initTools(map: MapView): () => void {
 		watchCopy(map),
 		initDrawTool(map),
 		initFeatureInteraction(map),
+		initHistoryOverlay(map),
 	);
 
 	disposers.push(
