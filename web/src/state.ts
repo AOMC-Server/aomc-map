@@ -24,10 +24,17 @@ export type Dimension = {
 	archived: boolean;
 };
 
+export type UploadLimits = {
+	maxUploadBytes: number;
+	maxFilesPerUpload: number;
+	maxImageDim: number;
+};
+
 export type MapDetail = {
 	map: MapSummary;
 	role: Role;
 	maxZoom: number;
+	limits: UploadLimits;
 	dimensions: Dimension[];
 };
 

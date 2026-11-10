@@ -116,7 +116,7 @@ function destroyMap() {
 }
 
 /** Re-reads the map so a new head revision shows up without a reload. */
-async function refreshHead() {
+export async function refreshHead() {
 	const current = currentMap.value;
 	if (!current) return;
 	const detail = await fetchDetail(current.map.slug);

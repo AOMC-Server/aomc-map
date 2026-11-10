@@ -1,6 +1,7 @@
 import { useEffect, useRef } from "preact/hooks";
 import { attachContainer, boot } from "../controller";
 import { editor, embed, layerPanelOpen, loadError } from "../state";
+import { uploadOpen } from "../upload";
 import { FeatureEditor } from "./FeatureEditor";
 import { LayerPanel } from "./LayerPanel";
 import { Popup } from "./Popup";
@@ -8,6 +9,7 @@ import { StatusBar } from "./StatusBar";
 import { Toast } from "./Toast";
 import { Toolbar } from "./Toolbar";
 import { Tooltip } from "./Tooltip";
+import { UploadDialog } from "./UploadDialog";
 
 function SidePanel() {
 	const target = editor.value;
@@ -38,6 +40,7 @@ export function App() {
 					<SidePanel />
 					<StatusBar />
 					<Tooltip />
+					{uploadOpen.value && <UploadDialog />}
 				</>
 			)}
 			<Toast />

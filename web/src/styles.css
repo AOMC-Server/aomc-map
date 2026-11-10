@@ -461,6 +461,145 @@ textarea {
 	text-overflow: ellipsis;
 }
 
+/* Upload dialog */
+.modal-backdrop {
+	position: absolute;
+	inset: 0;
+	z-index: 20;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 12px;
+	background: rgba(0, 0, 0, 0.55);
+}
+
+.modal {
+	position: relative;
+	width: min(560px, 100%);
+	max-height: calc(100vh - 24px);
+	overflow-y: auto;
+	padding: 16px 18px;
+	background: #1c1f25;
+	border: 1px solid var(--border);
+	border-radius: 10px;
+	box-shadow: 0 10px 40px rgba(0, 0, 0, 0.6);
+}
+
+.modal h2 {
+	margin: 0 28px 8px 0;
+	font-size: 17px;
+}
+
+.steps {
+	margin: 8px 0 12px;
+	padding-left: 20px;
+}
+
+.steps li {
+	margin: 4px 0;
+}
+
+code {
+	padding: 1px 4px;
+	background: #14161a;
+	border-radius: 4px;
+	font-size: 12px;
+	word-break: break-all;
+}
+
+.upload-target {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 6px;
+	margin: 8px 0;
+}
+
+.upload-target select {
+	width: auto;
+}
+
+.dropzone {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	min-height: 84px;
+	padding: 12px;
+	border: 2px dashed var(--border);
+	border-radius: 8px;
+	color: #b8bec8;
+	text-align: center;
+	cursor: pointer;
+}
+
+.dropzone:hover,
+.dropzone.dragging {
+	border-color: var(--accent);
+	color: var(--text);
+	background: rgba(88, 101, 242, 0.08);
+}
+
+.file-summary {
+	margin-top: 10px;
+}
+
+.file-list,
+.errors {
+	margin: 6px 0;
+	padding-left: 18px;
+	font-size: 13px;
+}
+
+.errors {
+	color: #ff8a80;
+}
+
+.modal-actions {
+	display: flex;
+	gap: 8px;
+	margin-top: 14px;
+}
+
+.progress {
+	height: 10px;
+	overflow: hidden;
+	background: #14161a;
+	border: 1px solid var(--border);
+	border-radius: 6px;
+}
+
+.progress .bar {
+	height: 100%;
+	background: var(--accent);
+	transition: width 0.15s;
+}
+
+.progress .bar.indeterminate {
+	width: 35%;
+	animation: slide 1.1s ease-in-out infinite;
+}
+
+@keyframes slide {
+	0% {
+		transform: translateX(-100%);
+	}
+	100% {
+		transform: translateX(300%);
+	}
+}
+
+.progress-wrap {
+	margin: 14px 0 6px;
+}
+
+.success {
+	color: #7be08a;
+}
+
+.error-text {
+	color: #ff8a80;
+}
+
 .toast {
 	position: absolute;
 	left: 50%;

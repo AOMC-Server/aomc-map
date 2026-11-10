@@ -8,6 +8,7 @@ import {
 	type Tool,
 	visibleDimensions,
 } from "../state";
+import { uploadBusy, uploadOpen } from "../upload";
 import { LoginButton } from "./LoginButton";
 
 function ToolButton(props: {
@@ -92,6 +93,16 @@ export function Toolbar() {
 			</div>
 
 			<div class="spacer" />
+			<button
+				type="button"
+				class={`btn ${uploadBusy() ? "active" : ""}`}
+				title="Upload Xaero's World Map exports"
+				onClick={() => {
+					uploadOpen.value = true;
+				}}
+			>
+				{uploadBusy() ? "Uploading…" : "Upload"}
+			</button>
 			<LoginButton />
 		</header>
 	);

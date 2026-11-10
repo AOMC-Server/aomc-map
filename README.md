@@ -33,6 +33,8 @@ Bun workspace: `server/` (Hono + Drizzle + SQLite), `shared/` (zod schemas, coor
 
 ## Uploading tiles
 
+In the app, use the **Upload** button in the toolbar: pick or drop PNG/ZIP exports, choose the dimension, and watch the progress. You can close the dialog while processing continues. Scripts can use the API directly:
+
 ```bash
 curl -H "Authorization: Bearer aomc_..." \
   -F 'files[]=@Overworld_x-512_z0.png' -F 'files[]=@Overworld_x0_z0.png' \

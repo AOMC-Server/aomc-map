@@ -31,6 +31,11 @@ describe("setup", () => {
 			"the_end",
 		]);
 		expect(body.role).toBe("viewer");
+		expect(body.limits).toEqual({
+			maxUploadBytes: 200 * 1024 * 1024,
+			maxFilesPerUpload: 2000,
+			maxImageDim: 4096,
+		});
 	});
 
 	test("pending owners become owners on first login", async () => {

@@ -104,6 +104,11 @@ export const mapRoutes = new Hono<AppEnv>()
 			},
 			role: access.role,
 			maxZoom: c.var.env.MAX_ZOOM,
+			limits: {
+				maxUploadBytes: c.var.env.MAX_UPLOAD_BYTES,
+				maxFilesPerUpload: c.var.env.MAX_FILES_PER_UPLOAD,
+				maxImageDim: c.var.env.MAX_IMAGE_DIM,
+			},
 			dimensions: dims.map((d) => ({
 				id: d.id,
 				slug: d.slug,
