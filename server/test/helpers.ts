@@ -99,6 +99,15 @@ export function png(
 		.toBuffer();
 }
 
+/** Decodes an image to raw RGBA (for tests that live outside the server package). */
+export async function decodeRgba(data: Uint8Array) {
+	const { data: raw, info } = await sharp(data)
+		.ensureAlpha()
+		.raw()
+		.toBuffer({ resolveWithObject: true });
+	return { data: raw, width: info.width, height: info.height };
+}
+
 export const solid = (w: number, h: number, c: Rgb) => png(w, h, () => c);
 
 export const RED: Rgb = [255, 0, 0];

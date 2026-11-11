@@ -9,6 +9,7 @@ import { inviteRoutes } from "./routes/invites";
 import { layerRoutes } from "./routes/layers";
 import { mapRoutes } from "./routes/maps";
 import { meRoutes } from "./routes/me";
+import { previewRoutes } from "./routes/preview";
 import { revisionRoutes } from "./routes/revisions";
 import { staticRoutes } from "./routes/static";
 import { tokenRoutes } from "./routes/tokens";
@@ -41,6 +42,7 @@ export function createApp({ db, env, services, fetch: fetchFn }: AppDeps) {
 			.route("/api/revisions", revisionRoutes)
 			.route("/api/layers", layerRoutes)
 			.route("/api/invites", inviteRoutes)
+			.route("/api/preview.png", previewRoutes)
 			.route("/api/features", featureRoutes)
 			.route(
 				"/",

@@ -12,6 +12,10 @@
 		"build": "bun --cwd web run build",
 		"test": "bun test",
 		"lint": "biome check .",
+		"typecheck": "tsc --noEmit -p server && tsc --noEmit -p shared && tsc --noEmit -p web && tsc --noEmit -p scripts",
+		"backup": "bun scripts/backup.ts",
+		"gc-blobs": "bun scripts/gc-blobs.ts",
+		"import-v1": "bun scripts/import-v1.ts",
 		"db:generate": "bun --cwd server run db:generate",
 		"db:migrate": "bun --cwd server run db:migrate"
 	},

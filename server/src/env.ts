@@ -7,6 +7,7 @@ const envSchema = z.object({
 	DISCORD_CLIENT_ID: z.string().default(""),
 	DISCORD_CLIENT_SECRET: z.string().default(""),
 	SESSION_SECRET: z.string().min(16).default("dev-only-secret-change-me"),
+	PREVIEW_CACHE_MAX: z.coerce.number().int().min(1).default(500), // cached link-preview images
 	WEB_DIST: z.string().optional(), // defaults to <repo>/web/dist
 	DEFAULT_TILE_SIZE: z.coerce.number().int().default(512),
 	MAX_ZOOM: z.coerce.number().int().min(1).max(12).default(8),

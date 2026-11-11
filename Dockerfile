@@ -25,9 +25,12 @@ COPY --from=deps /app/node_modules node_modules
 COPY package.json ./
 COPY server server
 COPY shared shared
+COPY scripts scripts
 COPY --from=web /app/web/dist web/dist
 RUN mkdir /data && chown bun:bun /data
 USER bun
 VOLUME /data
 EXPOSE 3000
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+	CMD ["bun", "-e", "fetch(`http://127.0.0.1:${process.env.PORT}/api/me`).then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
 CMD ["bun", "server/src/index.ts"]
