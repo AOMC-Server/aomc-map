@@ -467,9 +467,10 @@ describe("api tokens", () => {
 				.filter((r) => !writeScopeFor(r.path.replace(/:[a-zA-Z]+/g, "1")))
 				.map((r) => `${r.method} ${r.path}`),
 		);
-		expect([...unscoped]).toEqual([
-			"POST /api/tokens",
+		expect([...unscoped].sort()).toEqual([
+			"DELETE /api/me",
 			"DELETE /api/tokens/:id",
+			"POST /api/tokens",
 		]);
 	});
 });

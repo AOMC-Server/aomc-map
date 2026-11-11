@@ -38,6 +38,10 @@ const envSchema = z.object({
 				.map((v) => v.trim())
 				.filter(Boolean),
 		),
+	// Who is responsible for the personal data (the GDPR "controller") and how to reach them;
+	// shown on the /privacy page.
+	PRIVACY_CONTROLLER: z.string().trim().default(""),
+	PRIVACY_CONTACT: z.string().trim().default(""),
 	// User-Agents (comma separated, `*` is a wildcard) that mark an upload as sent by the in-game mod
 	MOD_USER_AGENTS: z
 		.string()

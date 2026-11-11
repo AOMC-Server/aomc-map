@@ -1,4 +1,5 @@
-import { loginUrl } from "../api";
+import { useEffect, useState } from "preact/hooks";
+import { api, attempt, loginUrl } from "../api";
 import {
 	type Settings,
 	settings,
@@ -217,6 +218,85 @@ function Debugging() {
 	);
 }
 
+/** Download everything stored about you, or delete your account. */
+function YourData() {
+	const [confirming, setConfirming] = useState(false);
+	const [busy, setBusy] = useState(false);
+	const [error, setError] = useState<string | null>(null);
+
+	// Linked to from the privacy statement; the section only appears once the page has loaded.
+	useEffect(() => {
+		if (location.hash === "#your-data")
+			document.getElementById("your-data")?.scrollIntoView();
+	}, []);
+
+	const remove = async () => {
+		setBusy(true);
+		setError(null);
+		const res = await attempt(() => api.api.me.$delete());
+		setBusy(false);
+		if (res.ok) location.href = "/";
+		else setError(res.error);
+	};
+
+	return (
+		<section class="page-section" id="your-data">
+			<h2>Your data</h2>
+			<p class="muted">
+				What the site keeps about you and why is described in the{" "}
+				<a href="/privacy">privacy statement</a>.
+			</p>
+			<div class="group">
+				<a class="btn" href="/api/me/export" download="my-map-data.json">
+					Download my data
+				</a>
+				{!confirming && (
+					<button
+						type="button"
+						class="btn danger"
+						onClick={() => setConfirming(true)}
+					>
+						Delete my account
+					</button>
+				)}
+			</div>
+			{confirming && (
+				<div class="delete-account">
+					<p>
+						This logs you out everywhere and deletes your account, your API
+						tokens, your roles and the invites you made. It cannot be undone.
+					</p>
+					<p>
+						Your uploads, layers and features stay on the map under the name
+						“Deleted user”, with nothing left that leads back to you. Delete any
+						of them first if you want them gone. Logging in again later starts a
+						new, empty account.
+					</p>
+					<div class="group">
+						<button
+							type="button"
+							class="btn danger"
+							disabled={busy}
+							onClick={() => void remove()}
+						>
+							{busy ? "Deleting…" : "Yes, delete my account"}
+						</button>
+						<button
+							type="button"
+							class="btn"
+							disabled={busy}
+							onClick={() => setConfirming(false)}
+						>
+							Cancel
+						</button>
+					</div>
+					{error && <p class="error-text">{error}</p>}
+				</div>
+			)}
+		</section>
+	);
+}
+
 /** /settings: your preferences and API tokens. */
 export function SettingsPage() {
 	const { status, retry } = usePageLoad();
@@ -253,7 +333,10 @@ export function SettingsPage() {
 					<LoadFailed retry={retry} />
 				</section>
 			) : u ? (
-				<ApiTokens />
+				<>
+					<ApiTokens />
+					<YourData />
+				</>
 			) : (
 				<section class="page-section">
 					<h2>API tokens</h2>

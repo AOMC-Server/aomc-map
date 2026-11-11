@@ -33,6 +33,10 @@ export const mapRoutes = new Hono<AppEnv>()
 				map: mapFields(map),
 				role,
 				maxZoom: env.MAX_ZOOM,
+				privacy: {
+					controller: env.PRIVACY_CONTROLLER,
+					contact: env.PRIVACY_CONTACT,
+				},
 				limits: {
 					maxUploadBytes: env.MAX_UPLOAD_BYTES,
 					maxFilesPerUpload: env.MAX_FILES_PER_UPLOAD,

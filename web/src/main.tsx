@@ -12,6 +12,7 @@ import {
 import { App } from "./ui/App";
 import { InvitePage, inviteTokenFromPath } from "./ui/InvitePage";
 import { ManagePage } from "./ui/ManagePage";
+import { PrivacyPage } from "./ui/PrivacyPage";
 import { SettingsPage } from "./ui/SettingsPage";
 import { StatsPage } from "./ui/StatsPage";
 import "./styles.css";
@@ -31,7 +32,8 @@ const onMap =
 	!inviteToken &&
 	path !== "/settings" &&
 	path !== "/manage" &&
-	path !== "/stats";
+	path !== "/stats" &&
+	path !== "/privacy";
 
 effect(() => {
 	const s = settings.value;
@@ -56,6 +58,8 @@ render(
 		<ManagePage />
 	) : path === "/stats" ? (
 		<StatsPage />
+	) : path === "/privacy" ? (
+		<PrivacyPage />
 	) : (
 		<App />
 	),

@@ -90,6 +90,8 @@ All settings are environment variables (see `.env.example`).
 | `SELF_DELETE_WINDOW_HOURS`                   | `24`                          | hours after uploading that the uploader may delete their own upload (`0`: moderators only)                                                                       |
 | `PREVIEW_CACHE_MAX`                          | `500`                         | link-preview images kept on disk                                                                                                                                 |
 | `MOD_USER_AGENTS`                            | `AOMC Webmapper,AOMC Visited` | User-Agents (comma separated, `*` wildcard) that mark an upload as sent by the in-game mod                                                                       |
+| `PRIVACY_CONTROLLER`                         |                               | who is responsible for the personal data (name, or name and address), shown on `/privacy`                                                                        |
+| `PRIVACY_CONTACT`                            |                               | how to reach them about privacy (an e-mail address or a link), shown on `/privacy`                                                                               |
 
 ## Using the map
 
@@ -113,6 +115,8 @@ All settings are environment variables (see `.env.example`).
 - _Dimensions_: add, rename, reorder, archive, and set the theme (Overworld, Nether or End), which picks the dimension's block icon and the interface colours while it is shown, and the _Xaero id_ used in copied waypoints (`dim%0` Overworld, `dim%-1` Nether, `dim%1` End; guessed from the theme). Archived dimensions keep their tiles and history.
 - _Members_: make someone a moderator or owner by Discord user id (they must have logged in once), change roles, or remove people. The last owner can't be demoted or removed.
 - _Invites_: links that make the person a moderator, with an expiry and an optional use limit. The link is shown once and only a hash is stored. `/invite/<token>` shows who invited you, asks you to log in, and lands you on the map. Accepting never lowers anyone's role.
+
+**Privacy.** `/privacy` describes what the site keeps about people (Discord id, name and avatar; contributions with their history; two login cookies; no analytics, no IP logs) and is linked from the account buttons. Set `PRIVACY_CONTROLLER` and `PRIVACY_CONTACT` before going public; the statement assumes hosting in the EU/EEA without access logs holding IP addresses, so adjust `web/src/ui/PrivacyPage.tsx` if yours differs. Under _Settings → Your data_ people can download everything stored about them as JSON (`GET /api/me/export`) or delete their account (`DELETE /api/me`, browser session only): the login, tokens, roles, layer memberships and their invites go, and their uploads, layers and features stay under a fresh "Deleted user" with nothing that identifies them. The map's last owner has to hand over first.
 
 **Private layers** (a layer's visibility setting) are only visible to map moderators and the layer's members. The layer's creator and moderators get a _Sharing_ button for members and layer invite links.
 

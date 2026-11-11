@@ -30,6 +30,13 @@ export function LoginButton() {
 				<a class="btn" href="/stats" title="Statistics and leaderboard">
 					Stats
 				</a>
+				<a
+					class="btn"
+					href="/privacy"
+					title="What the site keeps about you, and why"
+				>
+					Privacy
+				</a>
 				<a class="btn primary" href={loginUrl()}>
 					Log in with Discord
 				</a>
@@ -65,6 +72,13 @@ export function LoginButton() {
 				title="Your settings and API tokens"
 			>
 				Settings
+			</a>
+			<a
+				class="btn account-action"
+				href="/privacy"
+				title="What the site keeps about you, and why"
+			>
+				Privacy
 			</a>
 			<button
 				type="button"

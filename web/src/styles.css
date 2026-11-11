@@ -2644,6 +2644,39 @@ body.resizing {
 	margin-bottom: 10px;
 }
 
+/* The privacy statement: running text, so it gets room to breathe. */
+.privacy {
+	line-height: 1.55;
+}
+
+.privacy p {
+	margin: 0 0 10px;
+}
+
+.privacy p:last-child {
+	margin-bottom: 0;
+}
+
+.privacy ul {
+	margin: 0 0 10px;
+	padding-left: 1.3em;
+}
+
+.privacy li {
+	margin-bottom: 6px;
+}
+
+.delete-account {
+	border-radius: var(--radius);
+	margin-top: 12px;
+	padding: 12px 14px;
+	border: var(--bw) solid var(--danger);
+}
+
+.delete-account p {
+	margin: 0 0 10px;
+}
+
 .page-section .members .section-title {
 	margin-top: 0;
 }
