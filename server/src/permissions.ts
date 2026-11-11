@@ -46,6 +46,16 @@ export function canDeleteUpload(
 	);
 }
 
+/** The actor's role on a layer: an explicit membership, else editor for its creator. */
+export function effectiveLayerRole(
+	actor: Actor,
+	layer: LayerInfo,
+	membership: LayerRole,
+): LayerRole {
+	if (membership) return membership;
+	return actor !== null && actor.id === layer.createdBy ? "editor" : null;
+}
+
 export function canViewLayer(
 	role: Role,
 	layer: LayerInfo,
@@ -128,7 +138,7 @@ export async function loadLayerAccess(
 				)
 				.get()
 		: undefined;
-	const layerRole = row?.role ?? null;
+	const layerRole = effectiveLayerRole(actor, layer, row?.role ?? null);
 	if (!canViewLayer(role, layer, layerRole)) return null;
 	return { layer, layerRole };
 }
