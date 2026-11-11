@@ -12,7 +12,7 @@ import type { Bounds } from "./geometry";
 import { type DragSession, Input } from "./input";
 import { Renderer } from "./renderer";
 import { easeZoom, tweenView } from "./smoothZoom";
-import { TileLayer, type TileSource } from "./tileLayer";
+import { TileLayer, type TileLookup, type TileSource } from "./tileLayer";
 
 type MapPointer = { x: number; z: number; sx: number; sy: number };
 type ScreenPoint = { x: number; y: number };
@@ -139,8 +139,8 @@ export class MapView {
 	}
 
 	/** keepPrevious: keep showing the old images until the new ones arrive (same content, newer revision). */
-	setTileSource(source: TileSource, keepPrevious = false) {
-		this.tiles.setSource(source, keepPrevious);
+	setTileSource(source: TileSource, keepPrevious = false, lookup?: TileLookup) {
+		this.tiles.setSource(source, keepPrevious, lookup);
 	}
 
 	on<K extends keyof MapEvents>(

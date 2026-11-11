@@ -9,15 +9,33 @@ import {
 
 export type TileSource = (zoom: number, x: number, y: number) => string;
 
+export type TileRect = {
+	minX: number;
+	minY: number;
+	maxX: number;
+	maxY: number;
+};
+
+/**
+ * Looks up the image URLs of many tiles at once, keyed by `x/y`. Tiles in `rect` that are
+ * missing from the result are empty. Equal URLs mean equal images.
+ */
+export type TileLookup = (
+	zoom: number,
+	rect: TileRect,
+	signal: AbortSignal,
+) => Promise<Map<string, string>>;
+
 /**
  * One slot per tile coordinate. `bitmap` is the last image we know for it: undefined = nothing
  * yet, null = known to be empty. `version` says which source it came from, so when the source
  * changes (a different revision) the old image stays on screen and is replaced in place once the
- * new one has loaded.
+ * new one has loaded. `url` is where the bitmap came from.
  */
 type Entry = {
 	bitmap: ImageBitmap | null | undefined;
 	version: number;
+	url?: string | null;
 	loading?: { version: number; abort: AbortController };
 	failed?: { version: number; at: number };
 };
@@ -29,6 +47,9 @@ const RETRY_MS = 5000;
 const MAX_TILES_PER_FRAME = 600;
 const MAX_CACHE = 512;
 const MAX_CONCURRENT = 8;
+/** Most tiles in one lookup request (the server allows more). */
+const MAX_LOOKUP_AREA = 1024;
+const MAX_URLS = 8192;
 
 const key = (zoom: number, x: number, y: number) => `${zoom}/${x}/${y}`;
 
@@ -36,13 +57,23 @@ const key = (zoom: number, x: number, y: number) => `${zoom}/${x}/${y}`;
  * Draws tiles from a URL template, with an LRU bitmap cache. While a tile loads, a coarser
  * ancestor (or finer children) is drawn in its place. Requests for tiles that scrolled out of
  * view are cancelled.
+ *
+ * With a lookup, the image URLs of all wanted tiles are fetched in one request per zoom level
+ * first: empty tiles then need no request at all, and a tile whose URL did not change between
+ * sources keeps its image without loading it again.
  */
 export class TileLayer {
 	private cache = new Map<string, Entry>();
 	private source: TileSource | null = null;
+	private lookup: TileLookup | null = null;
 	private sourceId = 0;
 	private wanted = new Map<string, Wanted>();
 	private inFlight = 0;
+	/** Image URLs found by the lookup for the current source; null = empty. */
+	private urls = new Map<string, string | null>();
+	/** Tiles whose lookup is under way. */
+	private lookingUp = new Set<string>();
+	private lookupAbort = new AbortController();
 
 	constructor(
 		private opts: {
@@ -55,11 +86,17 @@ export class TileLayer {
 	/**
 	 * keepPrevious: keep showing the images of the old source until the new ones arrive (e.g. the
 	 * revision changed). Pass false when the content is unrelated (another map or dimension).
+	 * lookup: resolves many tiles per request; `source` is then only used if it fails.
 	 */
-	setSource(source: TileSource, keepPrevious = false) {
+	setSource(source: TileSource, keepPrevious = false, lookup?: TileLookup) {
 		this.source = source;
+		this.lookup = lookup ?? null;
 		this.sourceId++;
 		this.wanted.clear();
+		this.lookupAbort.abort();
+		this.lookupAbort = new AbortController();
+		this.urls.clear();
+		this.lookingUp.clear();
 		if (!keepPrevious) this.clear();
 		this.opts.onChange();
 	}
@@ -245,16 +282,110 @@ export class TileLayer {
 		}
 		pending.sort((a, b) => a[1].priority - b[1].priority);
 
+		if (this.lookup) {
+			this.resolve(
+				pending.filter(([k]) => !this.urls.has(k) && !this.lookingUp.has(k)),
+			);
+		}
+
+		let settled = false;
 		for (const [k, tile] of pending) {
-			if (this.inFlight >= MAX_CONCURRENT) break;
-			this.start(k, tile);
+			let url: string | null;
+			if (this.lookup) {
+				const found = this.urls.get(k);
+				if (found === undefined) continue; // still looking it up
+				url = found;
+			} else {
+				if (!this.source) return;
+				url = this.source(tile.zoom, tile.x, tile.y);
+			}
+
+			// Known empty, or the same image as before: nothing to load.
+			const entry = this.cache.get(k);
+			if (url === null || (entry?.bitmap !== undefined && entry.url === url)) {
+				this.settle(k, url);
+				settled = true;
+				continue;
+			}
+			if (this.inFlight < MAX_CONCURRENT) this.start(k, url);
+		}
+		if (settled) this.opts.onChange();
+	}
+
+	/** Marks a tile as current without loading: empty (url null) or unchanged. */
+	private settle(k: string, url: string | null) {
+		let entry = this.cache.get(k);
+		if (!entry) {
+			entry = { bitmap: undefined, version: -1 };
+			this.cache.set(k, entry);
+			this.evict();
+		}
+		if (url === null && entry.bitmap) {
+			entry.bitmap.close();
+			entry.bitmap = null;
+		}
+		entry.bitmap ??= null;
+		entry.url = url;
+		entry.version = this.sourceId;
+		entry.failed = undefined;
+	}
+
+	/** Looks up the given tiles, one request per zoom level (split if the area is large). */
+	private resolve(tiles: [string, Wanted][]) {
+		const byZoom = new Map<number, Wanted[]>();
+		for (const [k, tile] of tiles) {
+			this.lookingUp.add(k);
+			const list = byZoom.get(tile.zoom);
+			if (list) list.push(tile);
+			else byZoom.set(tile.zoom, [tile]);
+		}
+		for (const [zoom, list] of byZoom) {
+			const minX = Math.min(...list.map((t) => t.x));
+			const maxX = Math.max(...list.map((t) => t.x));
+			const minY = Math.min(...list.map((t) => t.y));
+			const maxY = Math.max(...list.map((t) => t.y));
+			const rows = Math.max(1, Math.floor(MAX_LOOKUP_AREA / (maxX - minX + 1)));
+			for (let y = minY; y <= maxY; y += rows) {
+				this.lookupRect(zoom, {
+					minX,
+					maxX,
+					minY: y,
+					maxY: Math.min(maxY, y + rows - 1),
+				});
+			}
 		}
 	}
 
-	private start(k: string, tile: Wanted) {
-		if (!this.source) return;
+	private lookupRect(zoom: number, rect: TileRect) {
+		const lookup = this.lookup;
+		const source = this.source;
+		if (!lookup || !source) return;
 		const version = this.sourceId;
-		const url = this.source(tile.zoom, tile.x, tile.y);
+		const signal = this.lookupAbort.signal;
+		const finish = (urlOf: (x: number, y: number) => string | null) => {
+			if (signal.aborted || version !== this.sourceId) return;
+			if (this.urls.size > MAX_URLS) this.urls.clear();
+			for (let y = rect.minY; y <= rect.maxY; y++) {
+				for (let x = rect.minX; x <= rect.maxX; x++) {
+					const k = key(zoom, x, y);
+					this.urls.set(k, urlOf(x, y));
+					this.lookingUp.delete(k);
+				}
+			}
+			this.opts.onChange();
+		};
+		lookup(zoom, rect, signal)
+			.then((found) => finish((x, y) => found.get(`${x}/${y}`) ?? null))
+			.catch((err) => {
+				if (signal.aborted) return;
+				console.warn("tile lookup failed", zoom, rect, err);
+				// Fall back to loading these tiles one by one.
+				finish((x, y) => source(zoom, x, y));
+			});
+	}
+
+	private start(k: string, url: string) {
+		const version = this.sourceId;
 		const abort = new AbortController();
 		const loading = { version, abort };
 
@@ -284,6 +415,7 @@ export class TileLayer {
 				// Swap in place: the old image stays visible right up to this moment.
 				target.bitmap?.close();
 				target.bitmap = bitmap;
+				target.url = url;
 				target.version = version;
 				target.failed = undefined;
 				this.opts.onChange();

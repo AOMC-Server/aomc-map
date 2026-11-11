@@ -7,6 +7,7 @@ import {
 	BLUE,
 	bootTiles,
 	cleanupTempDirs,
+	erase,
 	png,
 	postUpload,
 	RED,
@@ -256,6 +257,82 @@ describe("tile and blob routes", () => {
 		]) {
 			expect((await t.app.request(bad)).status).toBe(404);
 		}
+	});
+
+	test("hash lookup lists the non-empty tiles of an area as of a revision", async () => {
+		const t = await bootTiles();
+		await upload(t, await solid(T, T, RED), 0, 0);
+		await upload(t, await solid(T, T, BLUE), 16, 0);
+		const base = "/api/dimensions/overworld/tiles";
+		const area = "minX=-1&minY=-1&maxX=2&maxY=1";
+		const hashes = async (q: string) => {
+			const res = await t.app.request(`${base}/0/hashes?${area}${q}`);
+			expect(res.status).toBe(200);
+			const { tiles } = (await res.json()) as {
+				tiles: { x: number; y: number; hash: string }[];
+			};
+			return tiles.sort((a, b) => a.x - b.x);
+		};
+		const location = async (x: number, q: string) =>
+			(await t.app.request(`${base}/0/${x}/0${q}`)).headers.get("location");
+
+		const atOne = await hashes("&rev=1");
+		expect(atOne.map((h) => [h.x, h.y])).toEqual([[0, 0]]);
+		const head = await hashes("");
+		expect(head.map((h) => [h.x, h.y])).toEqual([
+			[0, 0],
+			[1, 0],
+		]);
+		// The same images the per-tile redirects point to; unchanged tiles keep their hash.
+		expect(`/blobs/${head[0]?.hash}.webp`).toBe(
+			(await location(0, "")) as string,
+		);
+		expect(`/blobs/${head[1]?.hash}.webp`).toBe(
+			(await location(1, "")) as string,
+		);
+		expect(atOne[0]?.hash).toBe(head[0]?.hash as string);
+
+		const res = await t.app.request(`${base}/0/hashes?${area}&rev=1`);
+		expect(res.headers.get("cache-control")).toContain("immutable");
+		// A coarser level has its own tiles.
+		const coarse = await t.app.request(`${base}/1/hashes?${area}`);
+		expect(((await coarse.json()) as { tiles: unknown[] }).tiles).toHaveLength(
+			1,
+		);
+	});
+
+	test("hash lookup leaves out tiles that became empty", async () => {
+		const t = await bootTiles();
+		const id = await upload(t, await solid(T, T, RED), 0, 0);
+		await erase(t, id);
+		const res = await t.app.request(
+			"/api/dimensions/overworld/tiles/0/hashes?minX=0&minY=0&maxX=0&maxY=0",
+		);
+		expect(await res.json()).toEqual({ tiles: [] });
+	});
+
+	test("hash lookup validates its input", async () => {
+		const t = await bootTiles();
+		const base = "/api/dimensions/overworld/tiles";
+		const status = async (path: string) => (await t.app.request(path)).status;
+		expect(await status(`${base}/0/hashes?minX=0&minY=0&maxX=0`)).toBe(400);
+		expect(await status(`${base}/0/hashes?minX=1&minY=0&maxX=0&maxY=0`)).toBe(
+			400,
+		);
+		expect(await status(`${base}/0/hashes?minX=0&minY=0&maxX=64&maxY=64`)).toBe(
+			400,
+		); // too large
+		expect(await status(`${base}/9/hashes?minX=0&minY=0&maxX=0&maxY=0`)).toBe(
+			400,
+		);
+		expect(
+			await status(`${base}/0/hashes?minX=0&minY=0&maxX=0&maxY=0&rev=99`),
+		).toBe(400);
+		expect(
+			await status(
+				"/api/dimensions/nope/tiles/0/hashes?minX=0&minY=0&maxX=0&maxY=0",
+			),
+		).toBe(404);
 	});
 
 	test("equal tiles share one blob (content addressing)", async () => {

@@ -242,6 +242,42 @@ describe("gc-blobs", () => {
 		expect(r.deleted).toBe(1);
 		expect(existsSync(tmpFile)).toBe(false);
 	});
+
+	test("copies in other formats go with their WebP and stay while it is referenced", async () => {
+		const t = await withData();
+		const dir = t.env.DATA_DIR;
+		const live = new Database(join(dir, "db.sqlite"), { readonly: true });
+		const h = (
+			live
+				.query(
+					"SELECT blob_hash AS h FROM tile_versions WHERE blob_hash IS NOT NULL LIMIT 1",
+				)
+				.get() as { h: string }
+		).h;
+		live.close();
+		const kept: string[] = [];
+		for (const suffix of [".png", ".80.jpg", ".lossy.webp"]) {
+			expect((await t.app.request(`/blobs/${h}${suffix}`)).status).toBe(200);
+			const file = blobPath(dir, h).replace(/\.webp$/, suffix);
+			expect(existsSync(file)).toBe(true);
+			utimesSync(file, new Date(old), new Date(old));
+			kept.push(file);
+		}
+
+		const webp = plant(dir, hash("f"));
+		const orphans = [".png", ".95.jpg", ".lossy.webp"].map((suffix) => {
+			const file = webp.replace(/\.webp$/, suffix);
+			writeFileSync(file, "copy");
+			utimesSync(file, new Date(old), new Date(old));
+			return file;
+		});
+
+		const r = await gcBlobs({ dataDir: dir, deleteFiles: true });
+		expect(r.deleted).toBe(4);
+		expect(r.total).toBe(r.referenced + 1);
+		for (const f of orphans) expect(existsSync(f)).toBe(false);
+		for (const f of kept) expect(existsSync(f)).toBe(true);
+	});
 });
 
 async function withData() {

@@ -1,4 +1,4 @@
-import { and, asc, desc, eq, lte, sql } from "drizzle-orm";
+import { and, asc, between, desc, eq, lte, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { mapInfo, revisions, tileVersions, uploadPatches } from "../db/schema";
 import type { TileWrite } from "./pyramid";
@@ -29,6 +29,38 @@ export async function tileVersionAt(
 		.orderBy(desc(tileVersions.rev))
 		.limit(1);
 	return row;
+}
+
+/** Non-empty tiles in a rectangle (inclusive) as of `rev`. Tiles not listed are empty. */
+export async function tileHashesIn(
+	db: Db,
+	dimensionId: number,
+	zoom: number,
+	rect: { minX: number; minY: number; maxX: number; maxY: number },
+	rev: number,
+): Promise<{ x: number; y: number; hash: string }[]> {
+	// SQLite takes the bare columns of an aggregate query from the row that has the max().
+	const rows = await db
+		.select({
+			x: tileVersions.tileX,
+			y: tileVersions.tileY,
+			hash: tileVersions.blobHash,
+			rev: sql<number>`max(${tileVersions.rev})`,
+		})
+		.from(tileVersions)
+		.where(
+			and(
+				eq(tileVersions.dimensionId, dimensionId),
+				eq(tileVersions.zoom, zoom),
+				between(tileVersions.tileX, rect.minX, rect.maxX),
+				between(tileVersions.tileY, rect.minY, rect.maxY),
+				lte(tileVersions.rev, rev),
+			),
+		)
+		.groupBy(tileVersions.tileX, tileVersions.tileY);
+	return rows.flatMap((r) =>
+		r.hash ? [{ x: r.x, y: r.y, hash: r.hash }] : [],
+	);
 }
 
 export async function tileHashAt(

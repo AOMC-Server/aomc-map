@@ -138,14 +138,36 @@ The in-game mod is recognised by its `User-Agent` header (`MOD_USER_AGENTS`; by 
 | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | Session   | `GET /auth/discord`, `GET /auth/discord/callback`, `POST /auth/logout`, `GET /api/me`, `GET/POST/DELETE /api/tokens`                                                                                                               |
 | Map       | `GET/PATCH /api/map`, `POST /api/dimensions`, `PATCH /api/dimensions/:dim`, `/api/members`                                                                                                                                         |
-| Tiles     | `GET /api/dimensions/:dim/tiles/:zoom/:x/:y?rev=R` → 302 to `/blobs/<hash>.webp`, or 204 if empty (`?only=<upload revision id>` gives that upload's own tile instead); zoom 0 is 1:1 and a tile index is `floor(block / tileSize)` |
+| Tiles     | `GET /api/dimensions/:dim/tiles/:zoom/:x/:y?rev=R` → 302 to the tile image, or 204 if empty (`?only=<upload revision id>` gives that upload's own tile instead; `?format=` picks the image format, see [Tile formats](#tile-formats)); zoom 0 is 1:1 and a tile index is `floor(block / tileSize)`. `GET /api/dimensions/:dim/tiles/:zoom/hashes?minX=&minY=&maxX=&maxY=&rev=R` → `{ tiles: [{ x, y, hash }] }` for up to 4096 tiles at once (unlisted = empty), to load `/blobs/<hash>.webp` directly without a redirect per tile |
 | Revisions | `GET /api/revisions?dimension=&before=&limit=`, `GET /api/revisions/:id`, `…/events` (SSE), `DELETE /api/revisions/:id` (moderators, or the author within `SELF_DELETE_WINDOW_HOURS`; 202, erased in the background)               |
 | Layers    | `GET /api/layers?dim=&at=<rev>`, `POST /api/layers`, `PATCH/DELETE /api/layers/:id`, `POST /api/layers/:id/features`, `GET /export`, `POST /import[?replace=1]`                                                                    |
 | Features  | `PATCH/DELETE /api/features/:id`, `GET …/history`, `POST …/restore/:revisionId`                                                                                                                                                    |
 | Sharing   | `GET/POST /api/invites` (map), `/api/layers/:id/invites`, `GET /api/invites/:token`, `POST …/accept`, `DELETE /api/invites/:id`, `…/layers/:id/members`                                                                            |
 | Stats     | `GET /api/stats?range=all\|30d\|7d` (public): your stats, everyone's combined, the leaderboard and the mapped area over time, including what the in-game mod sent (`modUploads`, `modUploadedBlocks`, `modAreaBlocks`)             |
 | Admin     | `GET /api/admin/stats?range=1h\|6h\|24h\|7d\|30d\|90d\|all` (owners): storage over time, network traffic by kind and by requesting domain, and a server overview                                                                   |
-| Images    | `GET /blobs/<hash>.webp`, `GET /api/preview.png`                                                                                                                                                                                   |
+| Images    | `GET /blobs/<hash>.webp` and the other [tile formats](#tile-formats), `GET /api/preview.png` |
+
+### Tile formats
+
+Tiles are stored as lossless WebP. For tools that cannot read it, or that would rather have smaller files, the tile endpoint can serve other formats, picked with `?format=`:
+
+| `format=`        | Image                                                                    | Redirects to               |
+| ---------------- | ------------------------------------------------------------------------ | -------------------------- |
+| `webp` (default) | Lossless WebP, exactly as stored                                         | `/blobs/<hash>.webp`       |
+| `png`            | Lossless PNG; larger than the WebP                                       | `/blobs/<hash>.png`        |
+| `jpg-95`         | JPEG, quality 95, full colour resolution                                 | `/blobs/<hash>.95.jpg`     |
+| `jpg-80`         | JPEG, quality 80; about a third of the WebP's size                       | `/blobs/<hash>.80.jpg`     |
+| `webp-lossy`     | Lossy WebP, quality 80; the smallest, about a quarter of the WebP's size | `/blobs/<hash>.lossy.webp` |
+
+```
+/api/dimensions/overworld/tiles/0/3/-2?format=png
+/api/dimensions/overworld/tiles/0/3/-2?format=jpg-80&rev=120
+```
+
+- Zoom runs the other way from usual web map tiles: 0 is the most detailed level (one pixel per block), and each level above halves the detail, up to `MAX_ZOOM`.
+- JPEG has no transparency, so unexplored areas are black instead of transparent.
+- `rev` and `only` work with every format.
+- A tile is converted the first time it is asked for in a format (a few milliseconds, up to about 30 for lossy WebP) and the result is kept on disk next to the WebP, so later requests cost the same as the WebP. Like the WebP, the image a redirect points to never changes and can be cached for good.
 
 ## Link previews
 
@@ -162,6 +184,8 @@ Pasting a link to the map into Discord, Slack and similar shows a card with a pi
 ```
 data/db.sqlite     SQLite (WAL mode)
 data/blobs/ab/cd/<sha256>.webp    tile images, content-addressed and immutable
+data/blobs/ab/cd/<sha256>.png     the same tile in other formats (also .95.jpg, .80.jpg, .lossy.webp),
+                                  made on first request; not backed up, as they can be made again
 data/incoming/     uploads waiting to be processed (deleted when the job finishes)
 data/preview-cache/
 ```
@@ -185,7 +209,7 @@ docker compose exec aomc-map bun scripts/gc-blobs.ts            # report only
 docker compose exec aomc-map bun scripts/gc-blobs.ts --delete
 ```
 
-It keeps everything referenced by a tile version or an upload patch, keeps files younger than an hour (`--min-age-minutes`; the blob store refreshes a file's age whenever an upload reuses it), and refuses to delete while jobs are pending, because a running job writes blobs before the database row that points to them.
+Copies in other [tile formats](#tile-formats) are removed together with their WebP. It keeps everything referenced by a tile version or an upload patch, keeps files younger than an hour (`--min-age-minutes`; the blob store refreshes a file's age whenever an upload reuses it), and refuses to delete while jobs are pending, because a running job writes blobs before the database row that points to them.
 
 ### Importing the old (v1) map
 

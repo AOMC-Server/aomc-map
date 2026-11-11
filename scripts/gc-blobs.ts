@@ -6,6 +6,7 @@ import { parseArgs } from "node:util";
 import { createDb } from "../server/src/db/client";
 import { recordStorage } from "../server/src/storage";
 import { isBlobHash } from "../server/src/tiles/blobstore";
+import { formatOfSuffix } from "../server/src/tiles/formats";
 
 export type GcResult = {
 	total: number;
@@ -80,13 +81,20 @@ export async function gcBlobs(opts: {
 		const file = join(blobsDir, rel);
 		const name = basename(rel);
 		const isBlob = name.endsWith(".webp") && isBlobHash(name.slice(0, -5));
+		// A copy in another format made for API clients; it goes when its WebP does.
+		const isCopy =
+			!isBlob &&
+			isBlobHash(name.slice(0, 64)) &&
+			name[64] === "." &&
+			formatOfSuffix(name.slice(65)) !== undefined;
 		const isTemp = name.endsWith(".tmp");
-		if (!isBlob && !isTemp) continue;
+		if (!isBlob && !isCopy && !isTemp) continue;
 		if (isBlob) result.total++;
 		if (isBlob && referenced.has(name.slice(0, -5))) {
 			result.referenced++;
 			continue;
 		}
+		if (isCopy && referenced.has(name.slice(0, 64))) continue;
 		const info = await stat(file);
 		if (now - info.mtimeMs < minAge) {
 			result.skippedYoung++;

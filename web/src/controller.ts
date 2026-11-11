@@ -3,6 +3,7 @@ import { effect, signal } from "@preact/signals";
 import { api, showNotice } from "./api";
 import { loadLayers } from "./layers";
 import { MapView } from "./map/MapView";
+import type { TileLookup } from "./map/tileLayer";
 import {
 	loadPosition,
 	savePosition,
@@ -190,10 +191,29 @@ export async function boot(container: HTMLElement) {
 		if (!dim) return;
 		const query =
 			only === null ? `rev=${r}&v=${epoch}` : `only=${only}&v=${epoch}`;
+		// Isolated uploads are drawn on the fly and have no hashes to look up.
+		const lookup: TileLookup | undefined =
+			only === null
+				? async (z, rect, signal) => {
+						const area = `minX=${rect.minX}&minY=${rect.minY}&maxX=${rect.maxX}&maxY=${rect.maxY}`;
+						const res = await fetch(
+							`/api/dimensions/${dim}/tiles/${z}/hashes?${area}&${query}`,
+							{ signal },
+						);
+						if (!res.ok) throw new Error(`tile lookup ${res.status}`);
+						const body = (await res.json()) as {
+							tiles: { x: number; y: number; hash: string }[];
+						};
+						return new Map(
+							body.tiles.map((t) => [`${t.x}/${t.y}`, `/blobs/${t.hash}.webp`]),
+						);
+					}
+				: undefined;
 		// Keep the old tiles up while new ones load, except when switching what is shown.
 		mv.setTileSource(
 			(z, x, y) => `/api/dimensions/${dim}/tiles/${z}/${x}/${y}?${query}`,
 			dim === lastDim && only === lastOnly,
+			lookup,
 		);
 		lastDim = dim;
 		lastOnly = only;
@@ -202,11 +222,20 @@ export async function boot(container: HTMLElement) {
 	// Reload layers whenever what we are looking at (head, dimension, time) changes.
 	// Debounced so dragging the time slider does not fire a request per step.
 	let layersTimer: ReturnType<typeof setTimeout> | undefined;
+	let layersDim: string | null = null;
 	effect(() => {
 		currentMap.value?.map.headRev;
-		dimSlug.value;
+		const dim = dimSlug.value;
 		rev.value;
 		clearTimeout(layersTimer);
+		// Another dimension's overlays do not belong on this map: drop them and load at once.
+		// Within a dimension the old ones stay up until the new ones arrive.
+		if (dim !== layersDim) {
+			layersDim = dim;
+			layersData.value = [];
+			void loadLayers();
+			return;
+		}
 		layersTimer = setTimeout(() => void loadLayers(), 120);
 	});
 

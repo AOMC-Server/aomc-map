@@ -228,3 +228,108 @@ describe("TileLayer revision changes", () => {
 		expect(pending.length).toBe(before); // still within the retry window
 	});
 });
+
+describe("TileLayer with a lookup", () => {
+	type Lookup = {
+		zoom: number;
+		rect: { minX: number; minY: number; maxX: number; maxY: number };
+		resolve: (found: Record<string, string>) => Promise<void>;
+		reject: () => Promise<void>;
+	};
+	let lookups: Lookup[];
+	const lookup = (zoom: number, rect: Lookup["rect"]) =>
+		new Promise<Map<string, string>>((resolve, reject) => {
+			const settle = async () => {
+				await Bun.sleep(0);
+				await Bun.sleep(0);
+			};
+			lookups.push({
+				zoom,
+				rect,
+				resolve: (found) => {
+					resolve(new Map(Object.entries(found)));
+					return settle();
+				},
+				reject: () => {
+					reject(new Error("lookup failed"));
+					return settle();
+				},
+			});
+		});
+	const byZoom = (z: number) => lookups.find((l) => l.zoom === z) as Lookup;
+	const urls = () => pending.map((p) => p.url).sort();
+
+	beforeEach(() => {
+		lookups = [];
+	});
+
+	test("looks up each zoom level once and loads only the tiles that have images", async () => {
+		const { layer, frame } = makeLayer();
+		layer.setSource(rev(1), false, lookup);
+		frame();
+		expect(pending).toHaveLength(0);
+		expect(lookups.map((l) => [l.zoom, l.rect])).toEqual([
+			[0, { minX: 0, minY: 0, maxX: 1, maxY: 0 }],
+			[1, { minX: 0, minY: 0, maxX: 0, maxY: 0 }],
+		]);
+
+		await byZoom(0).resolve({ "0/0": "/blobs/a" }); // tile 1 is empty
+		await byZoom(1).resolve({ "0/0": "/blobs/p" });
+		frame();
+		expect(urls()).toEqual(["/blobs/a", "/blobs/p"]);
+		await answerAll((url) => url);
+		expect(frame()).toEqual(["/blobs/a"]);
+		frame();
+		expect(lookups).toHaveLength(2); // no further requests
+		expect(pending).toHaveLength(0);
+	});
+
+	test("a tile whose image did not change is not loaded again", async () => {
+		const { layer, frame } = makeLayer();
+		layer.setSource(rev(1), false, lookup);
+		frame();
+		await byZoom(0).resolve({ "0/0": "/blobs/a", "1/0": "/blobs/b" });
+		await byZoom(1).resolve({});
+		frame();
+		await answerAll((url) => url);
+
+		lookups = [];
+		layer.setSource(rev(2), true, lookup);
+		expect(frame().sort()).toEqual(["/blobs/a", "/blobs/b"]);
+		await byZoom(0).resolve({ "0/0": "/blobs/a", "1/0": "/blobs/c" });
+		await byZoom(1).resolve({});
+		frame();
+		expect(urls()).toEqual(["/blobs/c"]);
+		await answerAll((url) => url);
+		expect(frame().sort()).toEqual(["/blobs/a", "/blobs/c"]);
+		expect(bitmaps.find((b) => b.label === "/blobs/a")?.closed).toBe(false);
+	});
+
+	test("an answer for a superseded source is ignored", async () => {
+		const { layer, frame } = makeLayer();
+		layer.setSource(rev(1), false, lookup);
+		frame();
+		const old = lookups.splice(0);
+		layer.setSource(rev(2), true, lookup);
+		frame();
+		for (const l of old) await l.resolve({ "0/0": "/blobs/old" });
+		frame();
+		expect(urls()).toEqual([]);
+	});
+
+	test("if the lookup fails, tiles load one by one", async () => {
+		const { layer, frame } = makeLayer();
+		layer.setSource(rev(1), false, lookup);
+		frame();
+		const origWarn = console.warn;
+		console.warn = () => {};
+		for (const l of lookups) await l.reject();
+		console.warn = origWarn;
+		frame();
+		expect(urls()).toEqual([
+			"/tiles/0/0/0?rev=1",
+			"/tiles/0/1/0?rev=1",
+			"/tiles/1/0/0?rev=1",
+		]);
+	});
+});
