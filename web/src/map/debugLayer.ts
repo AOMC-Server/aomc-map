@@ -4,7 +4,12 @@ import {
 	scaleOf,
 	type View,
 } from "@aomc/shared/view";
-import type { TileDebugInfo, TileDrawState } from "./tileLayer";
+import type {
+	PreloadDebugInfo,
+	PreloadTileState,
+	TileDebugInfo,
+	TileDrawState,
+} from "./tileLayer";
 
 export type DebugOptions = {
 	/** Tile states, labels and a panel of renderer statistics. */
@@ -204,6 +209,77 @@ export function drawTileDebug(
 		label(ctx, flags ? `${t.state} · ${flags}` : t.state, x, y + 15, "#ff0");
 	}
 	ctx.restore();
+}
+
+export const PRELOAD_COLOR: Record<PreloadTileState, string> = {
+	ready: "#3c3",
+	stale: "#fc0",
+	empty: "#999",
+	loading: "#0cf",
+	lookup: "#fff",
+	queued: "#f80",
+	failed: "#f33",
+};
+
+/**
+ * Outlines the preloaded tiles around spawn in the colour of their state, dashed so they stand
+ * apart from the tile outlines. Each level is inset a little further than the next coarser one,
+ * so the edges they share stay visible, and labelled from the bottom-left corner up.
+ */
+export function drawPreloadDebug(
+	ctx: CanvasRenderingContext2D,
+	info: PreloadDebugInfo,
+	dpr: number,
+) {
+	const rank = new Map(info.levels.map((l, i) => [l.level, i]));
+	const lw = Math.max(1, Math.round(dpr));
+	ctx.save();
+	ctx.setTransform(1, 0, 0, 1, 0, 0);
+	ctx.lineWidth = lw;
+	ctx.setLineDash([6 * lw, 4 * lw]);
+	for (const t of info.tiles) {
+		const inset = ((rank.get(t.level) ?? 0) * 3 + 1) * lw;
+		ctx.strokeStyle = PRELOAD_COLOR[t.state];
+		ctx.strokeRect(
+			t.dest.x0 + inset + 0.5,
+			t.dest.y0 + inset + 0.5,
+			t.dest.x1 - t.dest.x0 - 2 * inset,
+			t.dest.y1 - t.dest.y0 - 2 * inset,
+		);
+	}
+	ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+	ctx.font = "11px monospace";
+	ctx.textBaseline = "top";
+	for (const t of info.tiles) {
+		if ((t.dest.x1 - t.dest.x0) / dpr < 140) continue;
+		const r = rank.get(t.level) ?? 0;
+		label(
+			ctx,
+			`preload ${t.level}/${t.x}/${t.y} ${t.state}`,
+			t.dest.x0 / dpr + 4 + r * 3,
+			t.dest.y1 / dpr - 18 - r * 16,
+			PRELOAD_COLOR[t.state],
+		);
+	}
+	ctx.restore();
+}
+
+/**
+ * One line per preloaded level for the debug HUD, e.g. "L3 1/8 ≤8192 10/16 done, 3 empty,
+ * 2 loading": done counts every tile with something to show, the rest break it down.
+ */
+export function preloadHudLines(info: PreloadDebugInfo): string[] {
+	if (info.levels.length === 0) return ["preload off"];
+	return info.levels.map((l, i) => {
+		const done = l.counts.ready + l.counts.stale + l.counts.empty;
+		const rest = (Object.keys(l.counts) as PreloadTileState[])
+			.filter((s) => s !== "ready" && l.counts[s] > 0)
+			.map((s) => `${l.counts[s]} ${s}`);
+		const res = l.level === 0 ? "1/1" : `1/${2 ** l.level}`;
+		const head = `L${l.level} ${res.padEnd(5)} ≤${String(l.radius).padEnd(6)}`;
+		const counts = [`${done}/${l.total} done`, ...rest].join(", ");
+		return `${i === 0 ? "preload" : "       "} ${head} ${counts}`;
+	});
 }
 
 /** A box of text lines in the top-left of the map (css px). */

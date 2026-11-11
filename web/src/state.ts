@@ -46,6 +46,8 @@ export const activeTool = signal<Tool>("none");
 export const loadError = signal<string | null>(null);
 /** Debug render mode: no new tiles are loaded while set. Not saved. */
 export const tilesPaused = signal(false);
+/** Low resolution tiles around spawn: how many have loaded, out of how many. */
+export const preloadProgress = signal({ done: 0, failed: 0, total: 0 });
 
 export const notice = signal<{ text: string; kind: "error" | "info" } | null>(
 	null,

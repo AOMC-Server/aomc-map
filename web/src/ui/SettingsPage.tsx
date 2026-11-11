@@ -186,6 +186,11 @@ function Preferences() {
 				label="Show the zoom scale"
 				hint="For example “1 px = 4 blocks”."
 			/>
+			<Toggle
+				field="preloadSpawn"
+				label="Preload the area around spawn"
+				hint="Load low resolution images of the area around spawn in the background, so there is always something to show there while the detailed ones load. Turn off to save data on a slow or metered connection."
+			/>
 		</section>
 	);
 }

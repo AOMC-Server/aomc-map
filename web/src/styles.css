@@ -1211,6 +1211,33 @@ input[type="range"]:disabled {
 	color: var(--muted);
 }
 
+.debug .preload {
+	align-self: stretch;
+	min-width: 11em;
+	margin-bottom: 4px;
+}
+
+.debug .preload .failed {
+	color: var(--danger);
+}
+
+.preload-track {
+	border-radius: var(--radius-sm);
+	display: block;
+	height: 6px;
+	margin-top: 3px;
+	background: var(--well);
+	border: var(--bw) solid var(--line);
+	overflow: hidden;
+}
+
+.preload-track > span {
+	display: block;
+	height: 100%;
+	background: var(--accent);
+	transition: width 0.2s ease-out;
+}
+
 .debug .tile-pause {
 	margin-top: 4px;
 	pointer-events: auto;
@@ -2324,6 +2351,27 @@ body.resizing {
 .dim-slug {
 	display: block;
 	font-size: 13px;
+}
+
+.dim-preload {
+	margin-top: 8px;
+	font-size: 13px;
+}
+
+.preload-ring {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 8px;
+	margin: 6px 0;
+}
+
+.preload-ring select {
+	width: auto;
+}
+
+.dim-preload .group {
+	margin-top: 6px;
 }
 
 /* ---------------------------------------------------------------------------------------------

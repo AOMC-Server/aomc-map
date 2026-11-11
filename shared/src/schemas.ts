@@ -48,12 +48,32 @@ export function guessDimensionTheme(slug: string): DimensionTheme {
 	return "overworld";
 }
 
+/**
+ * Low resolution tiles around spawn (0, 0) that viewers load in the background and keep, so
+ * there is always something to show there. Tile level n is 1/2^n resolution; radius is in blocks
+ * of the dimension.
+ */
+export const preloadRingSchema = z.object({
+	level: z.number().int().min(0).max(12),
+	radius: z.number().int().min(0).max(MAX_COORD),
+});
+export type PreloadRing = z.infer<typeof preloadRingSchema>;
+export const dimensionPreloadSchema = z.array(preloadRingSchema).max(8);
+
+export const DEFAULT_PRELOAD: PreloadRing[] = [
+	{ level: 2, radius: 2048 },
+	{ level: 3, radius: 8192 },
+	{ level: 4, radius: 16384 },
+];
+
 export const createDimensionSchema = z.object({
 	slug: slugSchema,
 	name: z.string().trim().min(1).max(100),
 	scale: dimensionScaleSchema.optional(),
 	/** Defaults to a guess from the slug. */
 	theme: dimensionThemeSchema.optional(),
+	/** Defaults to DEFAULT_PRELOAD. */
+	preload: dimensionPreloadSchema.optional(),
 });
 
 export const updateDimensionSchema = z
@@ -63,6 +83,7 @@ export const updateDimensionSchema = z
 		archived: z.boolean().optional(),
 		scale: dimensionScaleSchema.optional(),
 		theme: dimensionThemeSchema.optional(),
+		preload: dimensionPreloadSchema.optional(),
 	})
 	.refine(nonEmpty, "nothing to update");
 

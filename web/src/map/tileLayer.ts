@@ -1,4 +1,5 @@
 import { floorDiv } from "@aomc/shared/coords";
+import type { PreloadRing } from "@aomc/shared/schemas";
 import {
 	type Size,
 	tileLevel,
@@ -42,7 +43,59 @@ type Entry = {
 	held?: { bitmap: ImageBitmap | null; url: string; version: number };
 };
 
-type Wanted = { zoom: number; x: number; y: number; priority: number };
+type Wanted = {
+	zoom: number;
+	x: number;
+	y: number;
+	priority: number;
+	preload?: boolean;
+};
+
+export type PreloadProgress = { done: number; failed: number; total: number };
+
+/** Most tiles kept loaded around the origin, well within the cache. */
+export const MAX_PRELOAD_TILES = 256;
+
+/**
+ * The tiles of each ring's level within its radius of the origin, in loading order: coarsest ring
+ * first (each of its tiles covers the most ground), nearest the origin first. Stops at
+ * MAX_PRELOAD_TILES; levels the map does not have are skipped.
+ */
+export function preloadTiles(
+	rings: PreloadRing[],
+	tileSize: number,
+	maxZoom: number,
+): Wanted[] {
+	const tiles: Wanted[] = [];
+	const seen = new Set<string>();
+	const sorted = rings
+		.filter((r) => r.level >= 0 && r.level <= maxZoom)
+		.sort((a, b) => b.level - a.level);
+	sorted.forEach(({ level, radius }, rank) => {
+		const span = tileSize * 2 ** level;
+		const min = floorDiv(-radius, span);
+		const max = floorDiv(radius - 1, span);
+		const ring: Wanted[] = [];
+		for (let y = min; y <= max; y++) {
+			for (let x = min; x <= max; x++) {
+				const k = key(level, x, y);
+				if (seen.has(k)) continue;
+				seen.add(k);
+				ring.push({
+					zoom: level,
+					x,
+					y,
+					priority: 2e6 + rank * 1e4 + Math.hypot(x + 0.5, y + 0.5),
+				});
+				if (ring.length > MAX_PRELOAD_TILES) break;
+			}
+			if (ring.length > MAX_PRELOAD_TILES) break;
+		}
+		ring.sort((a, b) => a.priority - b.priority);
+		tiles.push(...ring);
+	});
+	return tiles.slice(0, MAX_PRELOAD_TILES);
+}
 type Dest = { x0: number; y0: number; x1: number; y1: number };
 
 /**
@@ -58,6 +111,37 @@ export type TileDrawState =
 	| "children"
 	| "missing";
 
+/**
+ * Where a preloaded tile is: shown (ready), shown but of an older source (stale), known to be
+ * empty, being fetched (loading), waiting for its lookup, waiting for a free request (queued),
+ * or failed (retried after RETRY_MS).
+ */
+export type PreloadTileState =
+	| "ready"
+	| "stale"
+	| "empty"
+	| "loading"
+	| "lookup"
+	| "queued"
+	| "failed";
+
+export type PreloadDebugInfo = {
+	/** One per level, coarsest first; radius is the furthest ring of that level. */
+	levels: {
+		level: number;
+		radius: number;
+		counts: Record<PreloadTileState, number>;
+		total: number;
+	}[];
+	tiles: {
+		level: number;
+		x: number;
+		y: number;
+		dest: Dest;
+		state: PreloadTileState;
+	}[];
+};
+
 /** The tiles of the last frame, for the debug view. Rectangles are in device pixels. */
 export type TileDebugInfo = {
 	level: number;
@@ -70,6 +154,7 @@ export type TileDebugInfo = {
 		lookingUp: boolean;
 	}[];
 	cached: number;
+	preload: PreloadDebugInfo;
 	inFlight: number;
 	lookingUp: number;
 	paused: boolean;
@@ -117,14 +202,135 @@ export class TileLayer {
 	private frozen: Set<string> | null = null;
 	/** Cache entries the last unpaused frame drew from. */
 	private used = new Set<string>();
+	/** Coarse tiles around the origin that are always wanted and never evicted. */
+	private preload = new Map<string, Wanted>();
+	/** Furthest radius per preloaded level, for the debug view. */
+	private preloadRadius = new Map<number, number>();
+	private lastProgress: PreloadProgress | null = null;
 
 	constructor(
 		private opts: {
 			tileSize: number;
 			maxZoom: number;
 			onChange: () => void;
+			preload?: PreloadRing[];
+			/** Called when the share of preloaded tiles that are available changes. */
+			onPreloadProgress?: (progress: PreloadProgress) => void;
 		},
-	) {}
+	) {
+		this.setPreload(opts.preload ?? []);
+	}
+
+	/** Replaces the tiles kept loaded around the origin. Tiles already loaded are kept. */
+	setPreload(rings: PreloadRing[]) {
+		this.preload = new Map(
+			preloadTiles(rings, this.opts.tileSize, this.opts.maxZoom).map((t) => [
+				key(t.zoom, t.x, t.y),
+				{ ...t, preload: true },
+			]),
+		);
+		this.preloadRadius.clear();
+		for (const { level, radius } of rings) {
+			if (level > this.opts.maxZoom) continue;
+			this.preloadRadius.set(
+				level,
+				Math.max(radius, this.preloadRadius.get(level) ?? 0),
+			);
+		}
+		this.opts.onChange();
+	}
+
+	private preloadState(k: string): PreloadTileState {
+		const entry = this.cache.get(k);
+		if (entry?.loading) return "loading";
+		if (entry && entry.bitmap !== undefined) {
+			if (!this.fresh(entry)) return "stale";
+			return entry.bitmap ? "ready" : "empty";
+		}
+		if (entry?.failed) return "failed";
+		if (this.lookingUp.has(k)) return "lookup";
+		return "queued";
+	}
+
+	private preloadDebug(view: View, size: Size, dpr: number): PreloadDebugInfo {
+		const T = this.opts.tileSize;
+		const byLevel = new Map<number, PreloadDebugInfo["levels"][number]>();
+		const tiles: PreloadDebugInfo["tiles"] = [];
+		for (const [k, t] of this.preload) {
+			const state = this.preloadState(k);
+			let level = byLevel.get(t.zoom);
+			if (!level) {
+				level = {
+					level: t.zoom,
+					radius: this.preloadRadius.get(t.zoom) ?? 0,
+					counts: {
+						ready: 0,
+						stale: 0,
+						empty: 0,
+						loading: 0,
+						lookup: 0,
+						queued: 0,
+						failed: 0,
+					},
+					total: 0,
+				};
+				byLevel.set(t.zoom, level);
+			}
+			level.counts[state]++;
+			level.total++;
+			const r = tileRect(view, size, t.zoom, T, t.x, t.y);
+			const dest = {
+				x0: Math.round(r.x * dpr),
+				y0: Math.round(r.y * dpr),
+				x1: Math.round((r.x + r.w) * dpr),
+				y1: Math.round((r.y + r.h) * dpr),
+			};
+			// Only what is on screen needs drawing.
+			if (
+				dest.x1 <= 0 ||
+				dest.y1 <= 0 ||
+				dest.x0 >= size.width * dpr ||
+				dest.y0 >= size.height * dpr
+			)
+				continue;
+			tiles.push({ level: t.zoom, x: t.x, y: t.y, dest, state });
+		}
+		return {
+			levels: [...byLevel.values()].sort((a, b) => b.level - a.level),
+			tiles,
+		};
+	}
+
+	/**
+	 * How many preloaded tiles have something to show (an image, possibly of an older revision,
+	 * or known to be empty), and how many last failed to load.
+	 */
+	preloadProgress(): PreloadProgress {
+		let done = 0;
+		let failed = 0;
+		for (const k of this.preload.keys()) {
+			const entry = this.cache.get(k);
+			if (entry?.bitmap !== undefined) done++;
+			else if (entry?.failed) failed++;
+		}
+		return { done, failed, total: this.preload.size };
+	}
+
+	private reportPreload() {
+		const report = this.opts.onPreloadProgress;
+		if (!report) return;
+		const p = this.preloadProgress();
+		const last = this.lastProgress;
+		if (
+			last &&
+			last.done === p.done &&
+			last.failed === p.failed &&
+			last.total === p.total
+		)
+			return;
+		this.lastProgress = p;
+		report(p);
+	}
 
 	/**
 	 * keepPrevious: keep showing the images of the old source until the new ones arrive (e.g. the
@@ -262,13 +468,19 @@ export class TileLayer {
 				}
 			}
 		}
+		// Lowest priority: only loaded when nothing on screen is waiting.
+		for (const [k, tile] of this.preload) {
+			if (!wanted.has(k)) wanted.set(k, tile);
+		}
 		this.wanted = wanted;
 		if (!this.paused) this.pump();
+		this.reportPreload();
 		if (debug) {
 			this.debugInfo = {
 				level,
 				tiles: debug,
 				cached: this.cache.size,
+				preload: this.preloadDebug(view, size, dpr),
 				inFlight: this.inFlight,
 				lookingUp: this.lookingUp.size,
 				paused: this.paused,
@@ -430,16 +642,22 @@ export class TileLayer {
 		entry.failed = undefined;
 	}
 
-	/** Looks up the given tiles, one request per zoom level (split if the area is large). */
+	/**
+	 * Looks up the given tiles, one request per zoom level (split if the area is large).
+	 * Preloaded tiles get their own requests, so a view far from the origin does not stretch the
+	 * rectangle all the way back to it.
+	 */
 	private resolve(tiles: [string, Wanted][]) {
-		const byZoom = new Map<number, Wanted[]>();
+		const groups = new Map<string, Wanted[]>();
 		for (const [k, tile] of tiles) {
 			this.lookingUp.add(k);
-			const list = byZoom.get(tile.zoom);
+			const group = `${tile.zoom}:${tile.preload === true}`;
+			const list = groups.get(group);
 			if (list) list.push(tile);
-			else byZoom.set(tile.zoom, [tile]);
+			else groups.set(group, [tile]);
 		}
-		for (const [zoom, list] of byZoom) {
+		for (const list of groups.values()) {
+			const zoom = (list[0] as Wanted).zoom;
 			const minX = Math.min(...list.map((t) => t.x));
 			const maxX = Math.max(...list.map((t) => t.x));
 			const minY = Math.min(...list.map((t) => t.y));
@@ -537,7 +755,7 @@ export class TileLayer {
 	private evict() {
 		for (const [k, entry] of this.cache) {
 			if (this.cache.size <= MAX_CACHE) break;
-			if (entry.loading) continue;
+			if (entry.loading || this.preload.has(k)) continue;
 			entry.bitmap?.close();
 			entry.held?.bitmap?.close();
 			this.cache.delete(k);

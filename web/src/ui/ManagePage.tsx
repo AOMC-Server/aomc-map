@@ -1,13 +1,17 @@
 import { MAX_NAME } from "@aomc/shared/features";
 import {
+	DEFAULT_PRELOAD,
 	DIMENSION_THEMES,
 	type DimensionTheme,
 	guessDimensionTheme,
+	MAX_COORD,
+	type PreloadRing,
 } from "@aomc/shared/schemas";
 import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { loginUrl } from "../api";
 import { loadMapDetail, loadUser } from "../controller";
+import { MAX_PRELOAD_TILES, preloadTiles } from "../map/tileLayer";
 import { describeDimensionScale, formatScale, parseScale } from "../scale";
 import {
 	addDimension,
@@ -91,6 +95,161 @@ function ThemeSelect(props: {
 	);
 }
 
+const formatBlocks = (n: number) =>
+	n >= 1000 && n % 1024 === 0 ? `${n / 1024}k` : String(n);
+
+/** Accepts "2048", "2k" (2048) or "1.5k"; undefined if invalid. */
+function parseBlocks(text: string): number | undefined {
+	const m = /^\s*(\d+(?:\.\d+)?)\s*(k?)\s*$/i.exec(text);
+	if (!m) return undefined;
+	const n = Math.round(Number(m[1]) * (m[2] ? 1024 : 1));
+	return n <= MAX_COORD ? n : undefined;
+}
+
+function PreloadRingRow(props: {
+	ring: PreloadRing;
+	slug: string;
+	maxZoom: number;
+	disabled: boolean;
+	onChange: (ring: PreloadRing) => void;
+	onRemove: () => void;
+}) {
+	const { ring } = props;
+	const [radius, setRadius] = useState(formatBlocks(ring.radius));
+	const levels = Array.from({ length: props.maxZoom + 1 }, (_, i) => i);
+	return (
+		<div class="preload-ring">
+			<select
+				value={ring.level}
+				aria-label={`Preload resolution of ${props.slug}`}
+				disabled={props.disabled}
+				onChange={(e) =>
+					props.onChange({ ...ring, level: Number(e.currentTarget.value) })
+				}
+			>
+				{levels.map((l) => (
+					<option key={l} value={l}>
+						{l === 0 ? "Full" : `1/${2 ** l}`} resolution
+					</option>
+				))}
+			</select>
+			<span class="muted">within</span>
+			<input
+				type="text"
+				inputMode="numeric"
+				class="scale-input"
+				value={radius}
+				aria-label={`Preload radius of ${props.slug} in blocks`}
+				disabled={props.disabled}
+				onInput={(e) => setRadius(e.currentTarget.value)}
+				onBlur={() => {
+					const parsed = parseBlocks(radius);
+					if (parsed === undefined || parsed === ring.radius) {
+						setRadius(formatBlocks(ring.radius));
+						return;
+					}
+					props.onChange({ ...ring, radius: parsed });
+				}}
+				onKeyDown={(e) => {
+					if (e.key === "Enter") e.currentTarget.blur();
+				}}
+			/>
+			<span class="muted">blocks of spawn</span>
+			<button
+				type="button"
+				class="btn small"
+				disabled={props.disabled}
+				aria-label="Remove"
+				onClick={props.onRemove}
+			>
+				✕
+			</button>
+		</div>
+	);
+}
+
+/** The low resolution tiles viewers keep loaded around spawn (0, 0) in this dimension. */
+function PreloadEditor(props: {
+	d: Dimension;
+	busy: boolean;
+	run: (fn: () => Promise<boolean>) => void;
+}) {
+	const detail = currentMap.value;
+	if (!detail) return null;
+	const { d } = props;
+	const rings = d.preload;
+	const save = (preload: PreloadRing[]) =>
+		props.run(() => updateDimension(d.slug, { preload }));
+	const tiles = preloadTiles(rings, detail.map.tileSize, detail.maxZoom).length;
+	const isDefault = JSON.stringify(rings) === JSON.stringify(DEFAULT_PRELOAD);
+	const coarsest = Math.max(-1, ...rings.map((r) => r.level));
+
+	return (
+		<div class="dim-preload">
+			<span class="muted">
+				Preload around spawn:{" "}
+				{rings.length === 0
+					? "off"
+					: `${tiles} tile${tiles === 1 ? "" : "s"}${tiles >= MAX_PRELOAD_TILES ? " (the most allowed; lower a radius or resolution)" : ""}`}
+			</span>
+			<div>
+				{rings.map((ring, i) => (
+					<PreloadRingRow
+						key={`${i}:${ring.level}:${ring.radius}`}
+						ring={ring}
+						slug={d.slug}
+						maxZoom={detail.maxZoom}
+						disabled={props.busy}
+						onChange={(next) => save(rings.map((r, j) => (j === i ? next : r)))}
+						onRemove={() => save(rings.filter((_, j) => j !== i))}
+					/>
+				))}
+			</div>
+			<div class="group">
+				<button
+					type="button"
+					class="btn small"
+					disabled={props.busy || rings.length >= 8}
+					onClick={() => {
+						// A coarser ring reaching twice as far as the coarsest so far.
+						const last = rings.find((r) => r.level === coarsest);
+						const level = Math.min(coarsest + 1, detail.maxZoom);
+						save([
+							...rings,
+							{
+								level: Math.max(level, 0),
+								radius: Math.min((last?.radius ?? 1024) * 2, MAX_COORD),
+							},
+						]);
+					}}
+				>
+					Add ring
+				</button>
+				{!isDefault && (
+					<button
+						type="button"
+						class="btn small"
+						disabled={props.busy}
+						onClick={() => save(DEFAULT_PRELOAD)}
+					>
+						Reset to default
+					</button>
+				)}
+				{rings.length > 0 && (
+					<button
+						type="button"
+						class="btn small"
+						disabled={props.busy}
+						onClick={() => save([])}
+					>
+						Turn off
+					</button>
+				)}
+			</div>
+		</div>
+	);
+}
+
 function DimensionRow(props: {
 	d: Dimension;
 	index: number;
@@ -168,6 +327,7 @@ function DimensionRow(props: {
 						}
 					/>
 				</div>
+				<PreloadEditor d={d} busy={props.busy} run={props.run} />
 			</div>
 			<div class="group">
 				<button
@@ -262,6 +422,13 @@ function DimensionsTab() {
 			<p class="muted">
 				<b>Theme</b> picks the dimension's icon and the colours of the interface
 				while it is shown.
+			</p>
+			<p class="muted">
+				<b>Preload around spawn</b> loads low resolution images of the area
+				around 0, 0 in the background, so there is always something to show
+				there while the detailed images load. Each ring keeps one resolution
+				loaded out to a distance; a coarser ring can reach further for the same
+				number of tiles. Viewers can turn preloading off in their settings.
 			</p>
 			<ul class="dimension-list">
 				{dims.map((d, i) => (

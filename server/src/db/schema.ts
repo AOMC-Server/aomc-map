@@ -1,4 +1,10 @@
-import { DIMENSION_THEMES, TOKEN_SCOPES, type TokenScope } from "@aomc/shared";
+import {
+	DEFAULT_PRELOAD,
+	DIMENSION_THEMES,
+	type PreloadRing,
+	TOKEN_SCOPES,
+	type TokenScope,
+} from "@aomc/shared";
 import {
 	index,
 	integer,
@@ -89,6 +95,11 @@ export const dimensions = sqliteTable("dimensions", {
 	theme: text("theme", { enum: DIMENSION_THEMES })
 		.notNull()
 		.default("overworld"),
+	/** Low resolution tiles viewers keep loaded around spawn; see preloadRingSchema. */
+	preload: text("preload", { mode: "json" })
+		.$type<PreloadRing[]>()
+		.notNull()
+		.default(DEFAULT_PRELOAD),
 	createdAt: createdAt(),
 });
 

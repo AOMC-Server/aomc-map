@@ -3,6 +3,7 @@ import {
 	type LayerRole,
 	layerRoleSchema,
 	memberRoleSchema,
+	type PreloadRing,
 } from "@aomc/shared";
 import type { InferResponseType } from "hono/client";
 import { api, ok, run } from "./api";
@@ -163,6 +164,7 @@ export const updateDimension = (
 		archived?: boolean;
 		scale?: number | null;
 		theme?: DimensionTheme;
+		preload?: PreloadRing[];
 	},
 ) =>
 	mapChange(() =>

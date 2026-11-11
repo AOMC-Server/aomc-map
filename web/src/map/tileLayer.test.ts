@@ -1,6 +1,14 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import type { PreloadRing } from "@aomc/shared/schemas";
 import type { View } from "@aomc/shared/view";
-import { TileLayer } from "./tileLayer";
+import { preloadHudLines } from "./debugLayer";
+import {
+	MAX_PRELOAD_TILES,
+	type PreloadDebugInfo,
+	type PreloadProgress,
+	preloadTiles,
+	TileLayer,
+} from "./tileLayer";
 
 const T = 16;
 const size = { width: 31, height: 15 }; // covers exactly level-0 tiles 0 and 1 (z = 0)
@@ -59,12 +67,15 @@ afterEach(() => {
 	globalThis.createImageBitmap = realBitmap;
 });
 
-function makeLayer() {
+function makeLayer(preload?: PreloadRing[]) {
 	let changes = 0;
+	const progress: PreloadProgress[] = [];
 	const layer = new TileLayer({
 		tileSize: T,
 		maxZoom: 3,
 		onChange: () => changes++,
+		preload,
+		onPreloadProgress: (p) => progress.push(p),
 	});
 	const draws: string[] = [];
 	const ctx = {
@@ -77,7 +88,7 @@ function makeLayer() {
 		layer.draw(ctx, v, size, 1);
 		return [...draws];
 	};
-	return { layer, frame, changes: () => changes };
+	return { layer, frame, changes: () => changes, progress };
 }
 
 const rev = (r: number) => (z: number, x: number, y: number) =>
@@ -331,6 +342,170 @@ describe("TileLayer with a lookup", () => {
 			"/tiles/0/1/0?rev=1",
 			"/tiles/1/0/0?rev=1",
 		]);
+	});
+});
+
+describe("TileLayer preload", () => {
+	// Level 2 tiles span 64 blocks: radius 64 is the 2x2 tiles around the origin.
+	const rings: PreloadRing[] = [{ level: 2, radius: 64 }];
+	const far: View = { centerX: 10000, centerZ: 8, zoom: 0 };
+
+	test("spawn tiles load after the visible ones, wherever the view is", () => {
+		const { layer, frame } = makeLayer(rings);
+		layer.setSource(rev(1));
+		frame(far);
+		expect(pending.map((p) => labelOf(p.url))).toEqual([
+			"r1:0/624/0",
+			"r1:0/625/0",
+			"r1:1/312/0",
+			"r1:2/-1/-1",
+			"r1:2/0/-1",
+			"r1:2/-1/0",
+			"r1:2/0/0",
+		]);
+	});
+
+	test("a preloaded tile stands in at spawn before the detailed tiles arrive", async () => {
+		const { layer, frame } = makeLayer(rings);
+		layer.setSource(rev(1));
+		frame(far);
+		await answerAll(labelOf);
+		expect(frame()).toEqual(["r1:2/0/0", "r1:2/0/0"]);
+	});
+
+	test("spawn tiles are looked up separately from a distant view", () => {
+		const rects: unknown[] = [];
+		const { layer, frame } = makeLayer(rings);
+		layer.setSource(rev(1), false, (zoom, rect) => {
+			if (zoom === 2) rects.push(rect);
+			return new Promise(() => {});
+		});
+		frame({ ...far, zoom: 2 }); // level 2 is also the visible level here
+		expect(rects).toEqual([
+			{ minX: 155, minY: -1, maxX: 157, maxY: 0 },
+			{ minX: -1, minY: -1, maxX: 0, maxY: 0 },
+		]);
+	});
+
+	test("reports progress as tiles arrive, and only when it changes", async () => {
+		const { layer, frame, progress } = makeLayer(rings);
+		layer.setSource(rev(1));
+		frame(far);
+		frame(far);
+		expect(progress).toEqual([{ done: 0, failed: 0, total: 4 }]);
+		const spawn = pending.filter((p) => p.url.startsWith("/tiles/2/"));
+		await (spawn[0] as Pending).respond("a");
+		await (spawn[1] as Pending).respond(null); // empty counts as loaded
+		frame(far);
+		expect(progress.at(-1)).toEqual({ done: 2, failed: 0, total: 4 });
+	});
+
+	test("a new revision keeps the preload complete; another dimension starts over", async () => {
+		const { layer, frame, progress } = makeLayer(rings);
+		layer.setSource(rev(1));
+		frame(far);
+		await answerAll(labelOf);
+		frame(far);
+		expect(progress.at(-1)).toEqual({ done: 4, failed: 0, total: 4 });
+
+		layer.setSource(rev(2), true);
+		frame(far);
+		expect(progress.at(-1)).toEqual({ done: 4, failed: 0, total: 4 });
+
+		layer.setSource(rev(3), false);
+		frame(far);
+		expect(progress.at(-1)).toEqual({ done: 0, failed: 0, total: 4 });
+	});
+
+	test("the debug view shows each preloaded tile's state, per level", async () => {
+		const { layer, frame } = makeLayer([
+			...rings,
+			{ level: 3, radius: 100 }, // 2×2 tiles of 128 blocks
+		]);
+		layer.collectDebug = true;
+		layer.setSource(rev(1));
+		frame();
+		// Level 3 comes first; one of its tiles has an image, the others are empty.
+		await answerAll((url) =>
+			url.startsWith("/tiles/3/0/0")
+				? "a"
+				: url.startsWith("/tiles/3/")
+					? null
+					: "x",
+		);
+		frame(); // starts the level 2 tiles
+		await (
+			pending.find((p) => p.url.startsWith("/tiles/2/0/0")) as Pending
+		).respond(null);
+		frame();
+		const info = layer.debugInfo?.preload;
+		expect(info?.levels.map((l) => [l.level, l.radius, l.total])).toEqual([
+			[3, 100, 4],
+			[2, 64, 4],
+		]);
+		expect(info?.levels[0]?.counts).toMatchObject({ ready: 1, empty: 3 });
+		// The first level 2 tile was in the first batch, with an image.
+		expect(info?.levels[1]?.counts).toMatchObject({
+			ready: 1,
+			empty: 1,
+			loading: 2,
+		});
+		const states = Object.fromEntries(
+			info?.tiles.map((t) => [`${t.level}/${t.x}/${t.y}`, t.state]) ?? [],
+		);
+		// The view covers blocks 0..31 near spawn: only tiles touching it are listed.
+		expect(states).toEqual({ "3/0/0": "ready", "2/0/0": "empty" });
+
+		expect(preloadHudLines(info as PreloadDebugInfo)).toEqual([
+			"preload L3 1/8   ≤100    4/4 done, 3 empty",
+			"        L2 1/4   ≤64     2/4 done, 1 empty, 2 loading",
+		]);
+		layer.setPreload([]);
+		frame();
+		expect(
+			preloadHudLines(layer.debugInfo?.preload as PreloadDebugInfo),
+		).toEqual(["preload off"]);
+	});
+
+	test("rings can be changed or turned off", () => {
+		const { layer, frame } = makeLayer(rings);
+		layer.setSource(rev(1));
+		layer.setPreload([]);
+		frame(far);
+		expect(pending.some((p) => p.url.startsWith("/tiles/2/"))).toBe(false);
+		layer.setPreload([{ level: 3, radius: 1 }]);
+		frame(far);
+		expect(pending.map((p) => p.url)).toContain("/tiles/3/0/0?rev=1");
+	});
+});
+
+describe("preloadTiles", () => {
+	test("coarsest ring first, nearest spawn first, levels beyond maxZoom skipped", () => {
+		const tiles = preloadTiles(
+			[
+				{ level: 1, radius: 64 }, // 4×4 tiles of 32 blocks
+				{ level: 2, radius: 64 }, // 2×2 tiles of 64 blocks
+				{ level: 9, radius: 1000 },
+			],
+			16,
+			3,
+		);
+		expect(tiles.map((t) => t.zoom)).toEqual([
+			...Array(4).fill(2),
+			...Array(16).fill(1),
+		]);
+		// The 4 level 1 tiles touching spawn come before the outer ones.
+		const inner = tiles
+			.slice(4, 8)
+			.map((t) => `${t.x},${t.y}`)
+			.sort();
+		expect(inner).toEqual(["-1,-1", "-1,0", "0,-1", "0,0"]);
+	});
+
+	test("is capped", () => {
+		expect(preloadTiles([{ level: 0, radius: 1e6 }], 16, 3)).toHaveLength(
+			MAX_PRELOAD_TILES,
+		);
 	});
 });
 

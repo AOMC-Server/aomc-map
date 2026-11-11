@@ -36,6 +36,8 @@ export type Settings = {
 	historyInView: boolean;
 	/** History panel: only your own uploads. */
 	historyMineOnly: boolean;
+	/** Load the dimension's low resolution tiles around spawn in the background. */
+	preloadSpawn: boolean;
 	/** Map debugging: colour tiles by load state, label them and show renderer statistics. */
 	debugRender: boolean;
 	/** Draw the edges of the map tiles being shown. */
@@ -56,6 +58,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	transitionSpeed: "normal",
 	historyInView: false,
 	historyMineOnly: false,
+	preloadSpawn: true,
 	debugRender: false,
 	tileOutlines: false,
 	chunkOutlines: false,
@@ -85,6 +88,7 @@ export function parseSettings(raw: string | null): Settings {
 		"dimensionColours",
 		"historyInView",
 		"historyMineOnly",
+		"preloadSpawn",
 		"debugRender",
 		"tileOutlines",
 		"chunkOutlines",

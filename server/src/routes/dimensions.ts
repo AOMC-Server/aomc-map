@@ -45,6 +45,7 @@ export const dimensionRoutes = new Hono<AppEnv>()
 						name: body.name,
 						scale: body.scale ?? null,
 						theme: body.theme ?? guessDimensionTheme(body.slug),
+						preload: body.preload,
 						sortOrder: Math.max(-1, ...existing.map((d) => d.sortOrder)) + 1,
 					})
 					.returning();

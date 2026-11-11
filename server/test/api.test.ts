@@ -1,5 +1,9 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { MAX_TOKENS_PER_USER, type TokenScope } from "@aomc/shared";
+import {
+	DEFAULT_PRELOAD,
+	MAX_TOKENS_PER_USER,
+	type TokenScope,
+} from "@aomc/shared";
 import { eq } from "drizzle-orm";
 import { upsertUser } from "../src/auth/discord";
 import { writeScopeFor } from "../src/auth/scopes";
@@ -651,6 +655,36 @@ describe("map", () => {
 			).status,
 		).toBe(400);
 		expect((await themes()).mining).toBe("nether");
+	});
+
+	test("dimension spawn preload defaults, can be set, turned off, and is validated", async () => {
+		const t = boot();
+		runSetup(t.db, t.env);
+		const mod = await makeUser(t.db, "3");
+		await addMember(t, "3", "moderator");
+		const preloadOf = async (slug: string) =>
+			(await call(t, null, "GET", "/api/map")).body.dimensions.find(
+				(d: { slug: string }) => d.slug === slug,
+			).preload;
+
+		expect(await preloadOf("overworld")).toEqual(DEFAULT_PRELOAD);
+		await call(t, mod, "POST", "/api/dimensions", {
+			slug: "mining",
+			name: "M",
+			preload: [{ level: 3, radius: 4096 }],
+		});
+		expect(await preloadOf("mining")).toEqual([{ level: 3, radius: 4096 }]);
+
+		const patch = (preload: unknown) =>
+			call(t, mod, "PATCH", "/api/dimensions/overworld", { preload });
+		expect((await patch([])).status).toBe(200);
+		expect(await preloadOf("overworld")).toEqual([]);
+		expect((await patch([{ level: 13, radius: 10 }])).status).toBe(400);
+		expect((await patch([{ level: 2, radius: -1 }])).status).toBe(400);
+		expect((await patch(Array(9).fill({ level: 2, radius: 1 }))).status).toBe(
+			400,
+		);
+		expect(await preloadOf("overworld")).toEqual([]);
 	});
 });
 

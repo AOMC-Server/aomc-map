@@ -1,3 +1,4 @@
+import type { PreloadRing } from "@aomc/shared/schemas";
 import {
 	blockToScreen,
 	clampZoom,
@@ -13,15 +14,22 @@ import {
 	drawChunkGrid,
 	drawGrid,
 	drawHud,
+	drawPreloadDebug,
 	drawTileDebug,
 	NO_DEBUG,
+	preloadHudLines,
 } from "./debugLayer";
 import { FeatureLayer, type Hit, type RenderLayer } from "./featureLayer";
 import type { Bounds } from "./geometry";
 import { type DragSession, Input } from "./input";
 import { Renderer } from "./renderer";
 import { easeZoom, tweenView } from "./smoothZoom";
-import { TileLayer, type TileLookup, type TileSource } from "./tileLayer";
+import {
+	type PreloadProgress,
+	TileLayer,
+	type TileLookup,
+	type TileSource,
+} from "./tileLayer";
 
 type MapPointer = { x: number; z: number; sx: number; sy: number };
 type ScreenPoint = { x: number; y: number };
@@ -31,6 +39,8 @@ export type MapEvents = {
 	/** Fires when the feature (or cluster) under the mouse changes. */
 	hover: { hit: Hit | null; sx: number; sy: number };
 	viewchange: View;
+	/** How far loading the low resolution tiles around spawn has got. */
+	preloadprogress: PreloadProgress;
 };
 export type DragHandler = (sx: number, sy: number) => DragSession | null;
 export type Overlay = (ctx: CanvasRenderingContext2D, map: MapView) => void;
@@ -64,6 +74,7 @@ export class MapView {
 		move: new Set(),
 		hover: new Set(),
 		viewchange: new Set(),
+		preloadprogress: new Set(),
 	};
 	private features: FeatureLayer;
 	private hoverKey: string | null = null;
@@ -103,6 +114,7 @@ export class MapView {
 			tileSize: opts.tileSize,
 			maxZoom: opts.maxZoom,
 			onChange: () => this.renderer.invalidate(),
+			onPreloadProgress: (p) => this.emit("preloadprogress", p),
 		});
 		this.features = new FeatureLayer(() => this.renderer.invalidate());
 		new Input(this.canvas, this);
@@ -170,6 +182,14 @@ export class MapView {
 	/** keepPrevious: keep showing the old images until the new ones arrive (same content, newer revision). */
 	setTileSource(source: TileSource, keepPrevious = false, lookup?: TileLookup) {
 		this.tiles.setSource(source, keepPrevious, lookup);
+	}
+
+	/**
+	 * Low resolution tiles around spawn (0, 0) to keep loaded, so there is always something to
+	 * show there while the detailed tiles load. Empty turns it off.
+	 */
+	setPreload(rings: PreloadRing[]) {
+		this.tiles.setPreload(rings);
 	}
 
 	on<K extends keyof MapEvents>(
@@ -386,7 +406,10 @@ export class MapView {
 		ctx.clearRect(0, 0, canvas.width, canvas.height);
 		this.tiles.draw(ctx, view, size, dpr);
 		const tiles = this.tiles.debugInfo;
-		if (debug.debug && tiles) drawTileDebug(ctx, tiles, dpr);
+		if (debug.debug && tiles) {
+			drawTileDebug(ctx, tiles, dpr);
+			drawPreloadDebug(ctx, tiles.preload, dpr);
+		}
 		if (debug.chunkOutlines) drawChunkGrid(ctx, view, size, dpr);
 		if (debug.tileOutlines) {
 			const level = tileLevel(view.zoom, dpr, this.maxZoom);
@@ -426,7 +449,14 @@ export class MapView {
 				`state   ${[...counts].map(([s, n]) => `${s} ${n}`).join(", ")}`,
 				"tint    stale=yellow ancestor=blue children=purple",
 				"        missing=red empty=grey",
+				...preloadHudLines(tiles.preload),
 			);
+			if (tiles.preload.levels.length > 0) {
+				lines.push(
+					"dashed  preload: ready=green stale=yellow empty=grey",
+					"        loading=cyan lookup=white queued=orange failed=red",
+				);
+			}
 		}
 		drawHud(this.ctx, lines, 8, Math.min(120, size.height / 3));
 	}

@@ -1,5 +1,11 @@
 import { settings } from "../settings";
-import { currentScale, cursor, tilesPaused, view } from "../state";
+import {
+	currentScale,
+	cursor,
+	preloadProgress,
+	tilesPaused,
+	view,
+} from "../state";
 
 /** Human readable scale: "1 block = 4 px" when magnified, "1 px = 8 blocks" when zoomed out. */
 function describeScale(zoom: number): string {
@@ -13,6 +19,35 @@ function describeScale(zoom: number): string {
 
 const trim = (n: number) =>
 	n >= 100 ? Math.round(n) : Math.round(n * 10) / 10;
+
+/** Progress of loading the low resolution tiles around spawn, until they are all there. */
+function PreloadBar() {
+	const { done, failed, total } = preloadProgress.value;
+	if (!settings.value.preloadSpawn || total === 0 || done >= total) return null;
+	return (
+		<div
+			class="preload"
+			role="progressbar"
+			aria-label="Loading the area around spawn"
+			aria-valuemin={0}
+			aria-valuemax={total}
+			aria-valuenow={done}
+		>
+			<span class="line">
+				Loading spawn area: {done} / {total}
+				{failed > 0 && <span class="failed"> · {failed} failed, retrying</span>}
+			</span>
+			<span class="preload-track">
+				<span style={{ width: `${(done / total) * 100}%` }} />
+			</span>
+		</div>
+	);
+}
+
+const preloading = () => {
+	const { done, total } = preloadProgress.value;
+	return settings.value.preloadSpawn && done < total;
+};
 
 /** Cursor position and zoom scale, in a corner of the map. */
 export function StatusBar() {
@@ -28,11 +63,13 @@ export function StatusBar() {
 		!prefs.showCoordinates &&
 		!equivalent &&
 		!prefs.showScale &&
-		!prefs.debugRender
+		!prefs.debugRender &&
+		!preloading()
 	)
 		return null;
 	return (
 		<footer class="debug">
+			<PreloadBar />
 			{prefs.showCoordinates && (
 				<span class="line readout">Position: {c ? `${c.x}, ${c.z}` : "–"}</span>
 			)}

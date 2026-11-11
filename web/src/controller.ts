@@ -22,6 +22,7 @@ import {
 	loadError,
 	mapEpoch,
 	popup,
+	preloadProgress,
 	type RevisionInfo,
 	rev,
 	tilesPaused,
@@ -176,6 +177,9 @@ export async function boot(container: HTMLElement) {
 	mv.on("viewchange", (v) => {
 		view.value = v;
 	});
+	mv.on("preloadprogress", (p) => {
+		preloadProgress.value = p;
+	});
 	initTools(mv);
 	mapView.value = mv;
 	effect(() =>
@@ -223,6 +227,12 @@ export async function boot(container: HTMLElement) {
 		);
 		lastDim = dim;
 		lastOnly = only;
+	});
+	effect(() => {
+		const dim = currentMap.value?.dimensions.find(
+			(d) => d.slug === dimSlug.value,
+		);
+		mv.setPreload(settings.value.preloadSpawn ? (dim?.preload ?? []) : []);
 	});
 
 	// Reload layers whenever what we are looking at (head, dimension, time) changes.

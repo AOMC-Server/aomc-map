@@ -1,0 +1,1 @@
+ALTER TABLE `dimensions` ADD `preload` text DEFAULT '[{"level":2,"radius":2048},{"level":3,"radius":8192},{"level":4,"radius":16384}]' NOT NULL;
