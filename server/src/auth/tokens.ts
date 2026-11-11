@@ -1,4 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
+import { TOKEN_SCOPES, type TokenScope } from "@aomc/shared";
 import { and, count, eq } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { apiTokens, users } from "../db/schema";
@@ -22,6 +23,7 @@ export async function createApiToken(
 	userId: string,
 	name: string,
 	expiresInDays: number | null = null,
+	scopes: TokenScope[] = [...TOKEN_SCOPES],
 ) {
 	const token = TOKEN_PREFIX + randomToken(24);
 	const [row] = await db
@@ -32,12 +34,14 @@ export async function createApiToken(
 			tokenHash: sha256Hex(token),
 			expiresAt:
 				expiresInDays === null ? null : Date.now() + expiresInDays * DAY_MS,
+			scopes,
 		})
 		.returning({
 			id: apiTokens.id,
 			name: apiTokens.name,
 			createdAt: apiTokens.createdAt,
 			expiresAt: apiTokens.expiresAt,
+			scopes: apiTokens.scopes,
 		});
 	if (!row) throw new Error("token insert returned no row");
 	return { ...row, token };
@@ -59,6 +63,7 @@ export function listApiTokens(db: Db, userId: string) {
 			createdAt: apiTokens.createdAt,
 			lastUsedAt: apiTokens.lastUsedAt,
 			expiresAt: apiTokens.expiresAt,
+			scopes: apiTokens.scopes,
 		})
 		.from(apiTokens)
 		.where(eq(apiTokens.userId, userId))
@@ -80,12 +85,13 @@ export async function deleteApiToken(
 export async function verifyApiToken(
 	db: Db,
 	token: string,
-): Promise<User | null> {
+): Promise<{ user: User; scopes: TokenScope[] } | null> {
 	if (!token.startsWith(TOKEN_PREFIX)) return null;
 	const [row] = await db
 		.select({
 			tokenId: apiTokens.id,
 			expiresAt: apiTokens.expiresAt,
+			scopes: apiTokens.scopes,
 			id: users.id,
 			username: users.username,
 			avatarUrl: users.avatarUrl,
@@ -99,5 +105,8 @@ export async function verifyApiToken(
 		.update(apiTokens)
 		.set({ lastUsedAt: Date.now() })
 		.where(eq(apiTokens.id, row.tokenId));
-	return { id: row.id, username: row.username, avatarUrl: row.avatarUrl };
+	return {
+		user: { id: row.id, username: row.username, avatarUrl: row.avatarUrl },
+		scopes: row.scopes,
+	};
 }

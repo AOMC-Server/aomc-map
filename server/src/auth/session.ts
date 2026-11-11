@@ -60,12 +60,14 @@ export const authMiddleware = createMiddleware<AppEnv>(async (c, next) => {
 	const header = c.req.header("Authorization");
 	c.set("user", null);
 	c.set("authVia", null);
+	c.set("scopes", null);
 
 	if (header?.startsWith("Bearer ")) {
-		const user = await verifyApiToken(db, header.slice(7).trim());
-		if (!user) return c.json({ error: "invalid token" }, 401);
-		c.set("user", user);
+		const verified = await verifyApiToken(db, header.slice(7).trim());
+		if (!verified) return c.json({ error: "invalid token" }, 401);
+		c.set("user", verified.user);
 		c.set("authVia", "token");
+		c.set("scopes", verified.scopes);
 		return next();
 	}
 

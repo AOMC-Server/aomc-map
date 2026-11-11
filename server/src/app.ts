@@ -1,12 +1,13 @@
 import { Hono, type MiddlewareHandler } from "hono";
 import { openAPIRouteHandler } from "hono-openapi";
 import { asyncApiDocument } from "./asyncapi";
+import { isRead, roleCap, scopeMiddleware } from "./auth/scopes";
 import { authMiddleware } from "./auth/session";
 import type { Db } from "./db/client";
 import { docsRoutes } from "./docs";
 import type { Env } from "./env";
 import { apiDescription, securitySchemes, tags } from "./openapi";
-import { loadAccess } from "./permissions";
+import { atLeast, loadAccess } from "./permissions";
 import { adminRoutes } from "./routes/admin";
 import { authRoutes } from "./routes/auth";
 import { blobRoutes } from "./routes/blobs";
@@ -47,10 +48,14 @@ export function createApp({ db, env, services, fetch: fetchFn }: AppDeps) {
 		// Registered before auth: blobs are public and need no user lookup.
 		.route("/blobs", blobRoutes)
 		.use(authMiddleware)
+		.use(scopeMiddleware)
 		.use("/api/*", async (c, next) => {
 			const { map, role } = await loadAccess(db, c.var.user);
 			c.set("map", map);
-			c.set("role", role);
+			// A token writes with no more of its user's powers than its scopes allow.
+			const cap =
+				c.var.scopes && !isRead(c.req.method) ? roleCap(c.var.scopes) : null;
+			c.set("role", cap && !atLeast(cap, role) ? cap : role);
 			await next();
 		})
 		.route("/auth", authRoutes(fetchFn))

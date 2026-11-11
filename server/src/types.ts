@@ -1,4 +1,4 @@
-import type { Role } from "@aomc/shared";
+import type { Role, TokenScope } from "@aomc/shared";
 import type { Db } from "./db/client";
 import type { mapInfo } from "./db/schema";
 import type { Env } from "./env";
@@ -19,6 +19,8 @@ export type AppEnv = {
 		svc: Services;
 		user: User | null;
 		authVia: "session" | "token" | null;
+		/** The API token's scopes; null unless authVia is "token". */
+		scopes: TokenScope[] | null;
 		/** Set for every /api request. */
 		map: MapRow;
 		role: Role;

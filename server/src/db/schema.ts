@@ -1,4 +1,4 @@
-import { DIMENSION_THEMES } from "@aomc/shared";
+import { DIMENSION_THEMES, TOKEN_SCOPES, type TokenScope } from "@aomc/shared";
 import {
 	index,
 	integer,
@@ -42,6 +42,11 @@ export const apiTokens = sqliteTable("api_tokens", {
 	lastUsedAt: integer("last_used_at"),
 	/** null = never expires. */
 	expiresAt: integer("expires_at"),
+	/** See TOKEN_SCOPES. Tokens from before scopes existed have all of them. */
+	scopes: text("scopes", { mode: "json" })
+		.$type<TokenScope[]>()
+		.notNull()
+		.default([...TOKEN_SCOPES]),
 });
 
 /** The one map this server hosts: a single row, created on first boot. */

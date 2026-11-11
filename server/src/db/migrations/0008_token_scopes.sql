@@ -1,0 +1,1 @@
+ALTER TABLE `api_tokens` ADD `scopes` text DEFAULT '["read","upload","features","moderate","manage"]' NOT NULL;

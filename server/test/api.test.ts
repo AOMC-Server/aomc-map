@@ -1,7 +1,10 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { MAX_TOKENS_PER_USER } from "@aomc/shared";
+import { MAX_TOKENS_PER_USER, type TokenScope } from "@aomc/shared";
 import { eq } from "drizzle-orm";
 import { upsertUser } from "../src/auth/discord";
+import { writeScopeFor } from "../src/auth/scopes";
+import { createApiToken } from "../src/auth/tokens";
+import type { Db } from "../src/db/client";
 import { apiTokens, mapInfo, members, pendingOwners } from "../src/db/schema";
 import { parseEnv } from "../src/env";
 import { runSetup } from "../src/setup";
@@ -343,6 +346,119 @@ describe("api tokens", () => {
 	test("anonymous cannot list tokens", async () => {
 		const { app } = boot();
 		expect((await app.request("/api/tokens")).status).toBe(401);
+	});
+
+	/** A token for user `id` with the given scopes. */
+	async function scoped(db: Db, id: string, scopes: TokenScope[]) {
+		const { token } = await createApiToken(db, id, "scoped", null, scopes);
+		return { auth: { Authorization: `Bearer ${token}` } };
+	}
+
+	test("scopes default to read, upload and features; manage implies moderate", async () => {
+		const { app, headers } = await sessionUser();
+		const post = async (body: unknown) =>
+			app.request("/api/tokens", {
+				method: "POST",
+				body: JSON.stringify(body),
+				headers,
+			});
+		expect((await (await post({ name: "a" })).json()).scopes).toEqual([
+			"read",
+			"upload",
+			"features",
+		]);
+		const owner = await (
+			await post({ name: "b", scopes: ["manage", "read", "read"] })
+		).json();
+		expect(owner.scopes).toEqual(["read", "moderate", "manage"]);
+		expect((await post({ name: "c", scopes: [] })).status).toBe(400);
+		expect((await post({ name: "d", scopes: ["root"] })).status).toBe(400);
+
+		const me = await app.request("/api/me", {
+			headers: { Authorization: `Bearer ${owner.token}` },
+		});
+		expect((await me.json()).scopes).toEqual(["read", "moderate", "manage"]);
+	});
+
+	test("writes need the endpoint's scope", async () => {
+		const t = boot();
+		await makeUser(t.db, "1");
+		const readOnly = await scoped(t.db, "1", ["read"]);
+		const drawer = await scoped(t.db, "1", ["features"]);
+		const layer = { dimension: "overworld", name: "L" };
+
+		const denied = await call(t, readOnly, "POST", "/api/layers", layer);
+		expect(denied.status).toBe(403);
+		expect(denied.body.error).toContain('"features"');
+		expect((await call(t, drawer, "POST", "/api/layers", layer)).status).toBe(
+			201,
+		);
+		const upload = await t.app.request("/api/dimensions/overworld/uploads", {
+			method: "POST",
+			body: new FormData(),
+			headers: drawer.auth,
+		});
+		expect(upload.status).toBe(403);
+	});
+
+	test("without read, GETs are anonymous but /api/me still names the user", async () => {
+		const t = boot();
+		await makeUser(t.db, "1", "alice");
+		const uploader = await scoped(t.db, "1", ["upload"]);
+		expect((await call(t, uploader, "GET", "/api/map")).body.role).toBe(
+			"viewer",
+		);
+		expect((await call(t, uploader, "GET", "/api/me")).body.user.username).toBe(
+			"alice",
+		);
+		expect((await call(t, uploader, "GET", "/api/tokens")).status).toBe(401);
+	});
+
+	test("an owner's token only has the powers its scopes allow", async () => {
+		const t = boot();
+		await makeUser(t.db, "1");
+		await addMember(t, "1", "owner");
+		const editorLevel = await scoped(t.db, "1", ["read", "features"]);
+		const moderator = await scoped(t.db, "1", ["moderate"]);
+		const owner = await scoped(t.db, "1", ["manage"]);
+
+		// Reading still shows the full role.
+		expect((await call(t, editorLevel, "GET", "/api/map")).body.role).toBe(
+			"owner",
+		);
+		const dim = { slug: "x", name: "X" };
+		expect(
+			(await call(t, editorLevel, "POST", "/api/dimensions", dim)).status,
+		).toBe(403);
+		expect(
+			(await call(t, moderator, "POST", "/api/dimensions", dim)).status,
+		).toBe(201);
+		expect(
+			(await call(t, moderator, "PATCH", "/api/map", { name: "N" })).status,
+		).toBe(403);
+		expect(
+			(await call(t, owner, "PATCH", "/api/map", { name: "N" })).status,
+		).toBe(200);
+	});
+
+	test("every write endpoint has a scope or is session only", () => {
+		const { app } = boot();
+		const writes = app.routes.filter(
+			(r) =>
+				r.path.startsWith("/api/") &&
+				["POST", "PUT", "PATCH", "DELETE"].includes(r.method),
+		);
+		expect(writes.length).toBeGreaterThan(20);
+		// app.routes lists each middleware of a route too.
+		const unscoped = new Set(
+			writes
+				.filter((r) => !writeScopeFor(r.path.replace(/:[a-zA-Z]+/g, "1")))
+				.map((r) => `${r.method} ${r.path}`),
+		);
+		expect([...unscoped]).toEqual([
+			"POST /api/tokens",
+			"DELETE /api/tokens/:id",
+		]);
 	});
 });
 

@@ -80,6 +80,35 @@ export const DEFAULT_TOKEN_EXPIRY_DAYS = 180;
 export const MAX_TOKEN_EXPIRY_DAYS = 3650;
 export const MAX_TOKENS_PER_USER = 25;
 
+/**
+ * What an API token may do, on top of its owner's role:
+ * - read: see what the owner sees (private layers, their role); without it GETs are anonymous
+ * - upload: upload Xaero exports and delete your own uploads
+ * - features: create and edit layers, pins, lines and areas, and share layers
+ * - moderate: use moderator powers (delete any upload, restore features, edit dimensions)
+ * - manage: use owner powers (members, map invites, map settings); implies moderate
+ */
+export const TOKEN_SCOPES = [
+	"read",
+	"upload",
+	"features",
+	"moderate",
+	"manage",
+] as const;
+export type TokenScope = (typeof TOKEN_SCOPES)[number];
+export const DEFAULT_TOKEN_SCOPES: TokenScope[] = [
+	"read",
+	"upload",
+	"features",
+];
+
+/** Sorted, without duplicates, and with the scopes that `manage` implies. */
+export function normalizeScopes(scopes: readonly TokenScope[]): TokenScope[] {
+	const set = new Set(scopes);
+	if (set.has("manage")) set.add("moderate");
+	return TOKEN_SCOPES.filter((s) => set.has(s));
+}
+
 export const createTokenSchema = z.object({
 	name: z.string().trim().min(1).max(100),
 	/** null = never expires. */
@@ -90,6 +119,11 @@ export const createTokenSchema = z.object({
 		.max(MAX_TOKEN_EXPIRY_DAYS)
 		.nullable()
 		.default(DEFAULT_TOKEN_EXPIRY_DAYS),
+	scopes: z
+		.array(z.enum(TOKEN_SCOPES))
+		.min(1)
+		.default(DEFAULT_TOKEN_SCOPES)
+		.transform(normalizeScopes),
 });
 
 export const STATS_RANGES = ["all", "30d", "7d"] as const;

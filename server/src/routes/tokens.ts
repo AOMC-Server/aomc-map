@@ -34,7 +34,7 @@ export const tokenRoutes = new Hono<AppEnv>()
 			tag: "Session",
 			summary: "Create an API token",
 			description:
-				"Needs a browser session; a token cannot create tokens. The secret is only in this response.",
+				"Needs a browser session; a token cannot create tokens. The secret is only in this response. `scopes` defaults to read, upload and features; `manage` implies `moderate`.",
 			ok: { 201: "Token created" },
 			fails: [403, 409],
 			login: true,
@@ -49,9 +49,9 @@ export const tokenRoutes = new Hono<AppEnv>()
 					409,
 				);
 			}
-			const { name, expiresInDays } = c.req.valid("json");
+			const { name, expiresInDays, scopes } = c.req.valid("json");
 			return c.json(
-				await createApiToken(c.var.db, userId, name, expiresInDays),
+				await createApiToken(c.var.db, userId, name, expiresInDays, scopes),
 				201,
 			);
 		},

@@ -1,4 +1,11 @@
-import { DEFAULT_TOKEN_EXPIRY_DAYS, MAX_TOKENS_PER_USER } from "@aomc/shared";
+import {
+	DEFAULT_TOKEN_EXPIRY_DAYS,
+	DEFAULT_TOKEN_SCOPES,
+	MAX_TOKENS_PER_USER,
+	normalizeScopes,
+	TOKEN_SCOPES,
+	type TokenScope,
+} from "@aomc/shared";
 import type { InferResponseType } from "hono/client";
 import { useEffect, useState } from "preact/hooks";
 import { api, ok, run, showNotice } from "../api";
@@ -17,6 +24,29 @@ const EXPIRIES: { label: string; days: number | null }[] = [
 	{ label: "Never", days: null },
 ];
 
+const SCOPE_INFO: Record<TokenScope, { label: string; hint: string }> = {
+	read: {
+		label: "Read",
+		hint: "See what you can see, such as private layers. Without it, reads are anonymous.",
+	},
+	upload: {
+		label: "Upload",
+		hint: "Upload Xaero exports and delete your own uploads.",
+	},
+	features: {
+		label: "Layers and features",
+		hint: "Create and edit layers, pins, lines and areas, and share layers.",
+	},
+	moderate: {
+		label: "Moderate",
+		hint: "Use moderator powers: delete any upload, restore features, edit dimensions.",
+	},
+	manage: {
+		label: "Manage",
+		hint: "Use owner powers: members, map invites and map settings. Includes Moderate.",
+	},
+};
+
 function expiryText(t: TokenInfo, now: number): string {
 	if (t.expiresAt === null) return "never expires";
 	return t.expiresAt <= now
@@ -29,6 +59,7 @@ export function ApiTokens() {
 	const [tokens, setTokens] = useState<TokenInfo[] | null>(null);
 	const [name, setName] = useState("");
 	const [days, setDays] = useState<number | null>(DEFAULT_TOKEN_EXPIRY_DAYS);
+	const [scopes, setScopes] = useState<TokenScope[]>(DEFAULT_TOKEN_SCOPES);
 	const [busy, setBusy] = useState(false);
 	// Shown once, right after creation; kept only in this component's state.
 	const [created, setCreated] = useState<{
@@ -50,7 +81,9 @@ export function ApiTokens() {
 		if (!trimmed) return;
 		setBusy(true);
 		const body = await run(() =>
-			api.api.tokens.$post({ json: { name: trimmed, expiresInDays: days } }),
+			api.api.tokens.$post({
+				json: { name: trimmed, expiresInDays: days, scopes },
+			}),
 		);
 		setBusy(false);
 		if (body) {
@@ -83,6 +116,16 @@ export function ApiTokens() {
 		}
 	};
 
+	const toggleScope = (scope: TokenScope, on: boolean) => {
+		const next = on ? [...scopes, scope] : scopes.filter((s) => s !== scope);
+		// Unticking Moderate also unticks Manage, which implies it.
+		setScopes(
+			normalizeScopes(
+				!on && scope === "moderate" ? next.filter((s) => s !== "manage") : next,
+			),
+		);
+	};
+
 	const now = Date.now();
 	const full = (tokens?.length ?? 0) >= MAX_TOKENS_PER_USER;
 
@@ -91,8 +134,9 @@ export function ApiTokens() {
 			<h2>API tokens</h2>
 			<p class="muted">
 				Tokens let scripts act as you. Send one as{" "}
-				<code>Authorization: Bearer &lt;token&gt;</code>. A token has the same
-				access as your account, so keep it secret.
+				<code>Authorization: Bearer &lt;token&gt;</code>. A token can do what
+				its scopes allow, and never more than your account can, so give it only
+				the scopes it needs and keep it secret.
 			</p>
 
 			{created && (
@@ -156,10 +200,26 @@ export function ApiTokens() {
 						))}
 					</select>
 				</label>
+				<fieldset class="token-scopes">
+					<legend class="label">Scopes</legend>
+					{TOKEN_SCOPES.map((s) => (
+						<label key={s} title={SCOPE_INFO[s].hint}>
+							<input
+								type="checkbox"
+								checked={scopes.includes(s)}
+								onChange={(e) => toggleScope(s, e.currentTarget.checked)}
+							/>
+							<span>
+								{SCOPE_INFO[s].label}
+								<span class="muted hint"> — {SCOPE_INFO[s].hint}</span>
+							</span>
+						</label>
+					))}
+				</fieldset>
 				<button
 					type="submit"
 					class="btn primary"
-					disabled={busy || full || !name.trim()}
+					disabled={busy || full || !name.trim() || scopes.length === 0}
 				>
 					Generate token
 				</button>
@@ -192,6 +252,9 @@ export function ApiTokens() {
 										? "never used"
 										: `last used ${formatTime(t.lastUsedAt)}`}{" "}
 									· {expiryText(t, now)}
+								</div>
+								<div class="muted hint">
+									{t.scopes.map((s) => SCOPE_INFO[s].label).join(", ")}
 								</div>
 							</div>
 							<button

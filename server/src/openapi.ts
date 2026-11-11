@@ -3,6 +3,7 @@ import { describeRoute } from "hono-openapi";
 export const apiDescription = [
 	"Authentication is a session cookie (browser) or `Authorization: Bearer aomc_…` (scripts).",
 	"Tokens are created on the Settings page or with `POST /api/tokens` (session only).",
+	"A token has scopes (`read`, `upload`, `features`, `moderate`, `manage`) and never more access than its user: without `read`, GETs are answered as to an anonymous visitor; a write outside its scopes answers 403.",
 	"Writes made with a cookie must come from `PUBLIC_URL` (CSRF check); Bearer requests need no such check.",
 	'Errors are JSON `{"error": "…"}`. Resources you may not see answer 404.',
 ].join(" ");
