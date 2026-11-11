@@ -1,6 +1,7 @@
 import { rm } from "node:fs/promises";
 import { asc, eq } from "drizzle-orm";
 import { jobs, revisions } from "../db/schema";
+import { recordStorage } from "../storage";
 import { failRevision } from "../tiles/history";
 import { eraseUpload } from "./eraseUpload";
 import { processUpload } from "./processUpload";
@@ -47,6 +48,11 @@ export function createWorker(ctx: JobContext) {
 				throw new Error(`unknown job type ${job.type}`);
 			}
 			await db.update(jobs).set({ status: "done" }).where(eq(jobs.id, job.id));
+			try {
+				recordStorage(db, isErase ? "erase" : "upload");
+			} catch (err) {
+				console.error("recording storage failed:", err);
+			}
 			const [rev] = await db
 				.select({ rev: revisions.rev })
 				.from(revisions)

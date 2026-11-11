@@ -33,6 +33,21 @@ describe("parseSettings", () => {
 			DEFAULT_SETTINGS,
 		);
 	});
+
+	test("keeps a known mode and style and drops unknown ones", () => {
+		const s = parseSettings(
+			JSON.stringify({ mode: "light", style: "xp", dimensionColours: false }),
+		);
+		expect(s).toEqual({
+			...DEFAULT_SETTINGS,
+			mode: "light",
+			style: "xp",
+			dimensionColours: false,
+		});
+		expect(
+			parseSettings(JSON.stringify({ mode: "dim", style: "vista" })),
+		).toEqual(DEFAULT_SETTINGS);
+	});
 });
 
 describe("parsePosition", () => {

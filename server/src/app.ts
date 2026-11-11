@@ -7,6 +7,7 @@ import { docsRoutes } from "./docs";
 import type { Env } from "./env";
 import { apiDescription, securitySchemes, tags } from "./openapi";
 import { loadAccess } from "./permissions";
+import { adminRoutes } from "./routes/admin";
 import { authRoutes } from "./routes/auth";
 import { blobRoutes } from "./routes/blobs";
 import { dimensionRoutes } from "./routes/dimensions";
@@ -19,6 +20,7 @@ import { memberRoutes } from "./routes/members";
 import { previewRoutes } from "./routes/preview";
 import { revisionRoutes } from "./routes/revisions";
 import { staticRoutes } from "./routes/static";
+import { statsRoutes } from "./routes/stats";
 import { tokenRoutes } from "./routes/tokens";
 import type { Services } from "./services";
 import type { AppEnv } from "./types";
@@ -41,6 +43,7 @@ export function createApp({ db, env, services, fetch: fetchFn }: AppDeps) {
 			c.set("svc", services);
 			await next();
 		})
+		.use(services.traffic.middleware)
 		// Registered before auth: blobs are public and need no user lookup.
 		.route("/blobs", blobRoutes)
 		.use(authMiddleware)
@@ -61,6 +64,8 @@ export function createApp({ db, env, services, fetch: fetchFn }: AppDeps) {
 		.route("/api/invites", inviteRoutes)
 		.route("/api/preview.png", previewRoutes)
 		.route("/api/features", featureRoutes)
+		.route("/api/stats", statsRoutes)
+		.route("/api/admin", adminRoutes)
 		.get("/api/asyncapi.json", (c) => c.json(asyncApiDocument(env)))
 		.route("/scalar", docsRoutes)
 		.get("/api/openapi.json", (c, next) => {

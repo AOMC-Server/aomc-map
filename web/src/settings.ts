@@ -1,5 +1,6 @@
 import type { View } from "@aomc/shared/view";
 import { signal } from "@preact/signals";
+import { isModeChoice, isStyle, type ModeChoice, type StyleId } from "./theme";
 
 /** Per-browser preferences, kept in localStorage. */
 export type Settings = {
@@ -9,6 +10,10 @@ export type Settings = {
 	rememberPosition: boolean;
 	/** Dimension slug to open when the URL names none; null = the first one. */
 	defaultDimension: string | null;
+	mode: ModeChoice;
+	style: StyleId;
+	/** Colour the interface after the dimension being viewed, rather than always the overworld. */
+	dimensionColours: boolean;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -17,8 +22,12 @@ export const DEFAULT_SETTINGS: Settings = {
 	showScale: true,
 	rememberPosition: false,
 	defaultDimension: null,
+	mode: "dark",
+	style: "bedrock",
+	dimensionColours: true,
 };
 
+/** Also read by the inline script in index.html, which sets the theme before first paint. */
 const SETTINGS_KEY = "aomc.settings";
 const POSITION_KEY = "aomc.position";
 
@@ -39,6 +48,7 @@ export function parseSettings(raw: string | null): Settings {
 		"showOverworldEquivalent",
 		"showScale",
 		"rememberPosition",
+		"dimensionColours",
 	] as const) {
 		if (typeof stored[key] === "boolean") result[key] = stored[key];
 	}
@@ -48,6 +58,8 @@ export function parseSettings(raw: string | null): Settings {
 	) {
 		result.defaultDimension = stored.defaultDimension;
 	}
+	if (isModeChoice(stored.mode)) result.mode = stored.mode;
+	if (isStyle(stored.style)) result.style = stored.style;
 	return result;
 }
 

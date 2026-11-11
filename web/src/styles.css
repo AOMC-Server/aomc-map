@@ -1,6 +1,7 @@
 /*
- * Bedrock / minecraft.net style: flat layered surfaces with thick dark outlines, buttons with a
- * solid "depth" edge along the bottom, and the pixel font for headings only.
+ * The rules are written for the Bedrock style (flat layered surfaces, thick dark outlines,
+ * buttons with a solid depth edge, the pixel font for headings) in terms of the colour and
+ * style variables defined under "Appearance", so that other palettes and styles slot in.
  */
 @font-face {
 	font-family: "Minecraft";
@@ -9,42 +10,8 @@
 }
 
 :root {
-	--display: "Minecraft", ui-monospace, monospace;
-	--sans:
-		"Noto Sans", "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue",
-		Arial, sans-serif;
 	/* Size of the pixel font, set from the device pixel ratio by main.tsx so it stays crisp. */
 	--fs-display: 24px;
-
-	/* Surfaces, from the outline colour up to the lightest layer. */
-	--ink: #1e1e1f;
-	--s1: #313233;
-	--s2: #48494a;
-	--s3: #58585a;
-	--s4: #6d6d6f;
-	--text: #ffffff;
-	--muted: #b1b2b5;
-	--faint: #8c8d90;
-
-	--light: #d0d1d4;
-	--light-hover: #e6e8eb;
-	--light-hi: #ecedee;
-	--light-lo: #58585a;
-	--green: #3c8527;
-	--green-hover: #2a641c;
-	--green-hi: #52a535;
-	--green-lo: #1d4d13;
-	--red: #c33636;
-	--red-hover: #ad1d1d;
-	--red-hi: #e25858;
-	--red-lo: #6e1717;
-	--yellow: #ffe866;
-	--link: #7ed957;
-	--ok: #7ed957;
-	--err: #ff7b7b;
-
-	/* Floating layers sit on a solid shadow rather than a blur. */
-	--lift: 0 4px 0 rgba(0, 0, 0, 0.35);
 
 	--safe-top: env(safe-area-inset-top, 0px);
 	--safe-bottom: env(safe-area-inset-bottom, 0px);
@@ -52,8 +19,403 @@
 	--above-hotbar: calc(var(--safe-bottom) + var(--hotbar-h) + 16px);
 	--panel-w: min(400px, calc(100vw - 16px));
 
+	--danger: #c33636;
+	--danger-hover: #ad1d1d;
+	--danger-hi: #e25858;
+	--danger-lo: #6e1717;
+	/* Text on accent and danger buttons. */
+	--on-accent: #ffffff;
+
+	scrollbar-color: var(--s4) var(--well);
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * Appearance. Three attributes on <html>, set by main.tsx (see theme.ts), combine:
+ * - data-palette + data-mode: the colours, from the dimension being viewed, dark or light;
+ * - data-style: the shapes. Styles only use the colour variables, so any style works with any
+ *   palette. Their tokens are just below; what tokens can't express is at the end of the file.
+ * Any element can carry these attributes to preview another look (the settings page does).
+ * ------------------------------------------------------------------------------------------- */
+:root,
+[data-palette="overworld"][data-mode="dark"] {
+	/* Surfaces: the outline colour, recessed wells (inputs, trays, slots), then layers s1-s4. */
+	--ink: #1e1e1f;
+	--well: #1e1e1f;
+	--s1: #313233;
+	--s2: #48494a;
+	--s3: #58585a;
+	--s4: #6d6d6f;
+	/* Depth edge along the bottom of cards, and the highlight along their top. */
+	--card-lo: #3a3b3c;
+	--sheen: rgba(255, 255, 255, 0.07);
+	--text: #ffffff;
+	--muted: #b1b2b5;
+	--faint: #8c8d90;
+	/* Focus rings and the selected hotbar slot. */
+	--focus: #ffffff;
+
+	--light: #d0d1d4;
+	--light-hover: #e6e8eb;
+	--light-hi: #ecedee;
+	--light-lo: #58585a;
+	--accent: #3c8527;
+	--accent-hover: #2a641c;
+	--accent-hi: #52a535;
+	--accent-lo: #1d4d13;
+	/* A second, bolder colour: the title bars of the Windows XP style. */
+	--chrome: #2458c8;
+	--yellow: #ffe866;
+	--link: #7ed957;
+	--ok: #7ed957;
+	--err: #ff7b7b;
+	/* Mixed into the dye text colours, which are tuned to read on dark surfaces. */
+	--dye-shade: #000 0%;
+
+	--shadow: rgba(0, 0, 0, 0.35);
+	--backdrop: rgba(16, 16, 17, 0.72);
+	--map-bg: #1b1d22;
+	--arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 4' shape-rendering='crispEdges'%3E%3Cpath fill='%23ffffff' d='M0 0h7v1H0zM1 1h5v1H1zM2 2h3v1H2zM3 3h1v1H3z'/%3E%3C/svg%3E");
+
 	color-scheme: dark;
-	scrollbar-color: var(--s4) var(--ink);
+}
+
+/* Overworld, light: Java Edition's inventory grey, close to Windows' button face. */
+[data-palette="overworld"][data-mode="light"] {
+	--ink: #1e1e1f;
+	--well: #f4f4f4;
+	--s1: #c6c6c6;
+	--s2: #d6d6d6;
+	--s3: #e4e4e4;
+	--s4: #8b8b8b;
+	--card-lo: #a8a8a8;
+	--sheen: rgba(255, 255, 255, 0.7);
+	--text: #1e1e1f;
+	--muted: #4d4d50;
+	--faint: #707074;
+	--focus: #1e1e1f;
+
+	--light: #ededed;
+	--light-hover: #ffffff;
+	--light-hi: #ffffff;
+	--light-lo: #8b8b8b;
+	--accent: #3c8527;
+	--accent-hover: #2a641c;
+	--accent-hi: #52a535;
+	--accent-lo: #1d4d13;
+	--chrome: #2458c8;
+	--yellow: #8a6500;
+	--link: #2f6f1f;
+	--ok: #2f6f1f;
+	--err: #b3261e;
+	--dye-shade: #000 45%;
+
+	--shadow: rgba(0, 0, 0, 0.25);
+	--backdrop: rgba(40, 40, 40, 0.5);
+	--map-bg: #1b1d22;
+	--arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 4' shape-rendering='crispEdges'%3E%3Cpath fill='%231e1e1f' d='M0 0h7v1H0zM1 1h5v1H1zM2 2h3v1H2zM3 3h1v1H3z'/%3E%3C/svg%3E");
+
+	color-scheme: light;
+}
+
+/* Nether: netherrack reds, quartz buttons and warped-teal accents. */
+[data-palette="nether"][data-mode="dark"] {
+	--ink: #1a0a0a;
+	--well: #1a0a0a;
+	--s1: #2e1414;
+	--s2: #431c1c;
+	--s3: #552424;
+	--s4: #6e3030;
+	--card-lo: #331414;
+	--sheen: rgba(255, 220, 200, 0.07);
+	--text: #ffffff;
+	--muted: #d4b4ac;
+	--faint: #a37f77;
+	--focus: #ffffff;
+
+	--light: #e3d4c6;
+	--light-hover: #f1e6dc;
+	--light-hi: #f8f1ea;
+	--light-lo: #7a5a4a;
+	--accent: #167e86;
+	--accent-hover: #0f5f66;
+	--accent-hi: #2aa5ad;
+	--accent-lo: #0a3f44;
+	--chrome: #9e2323;
+	--yellow: #ffcf5c;
+	--link: #5fd6d6;
+	--ok: #5fd6d6;
+	--err: #ff8a7a;
+	--dye-shade: #000 0%;
+
+	--shadow: rgba(0, 0, 0, 0.4);
+	--backdrop: rgba(20, 6, 6, 0.75);
+	--map-bg: #1d0d0d;
+	--arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 4' shape-rendering='crispEdges'%3E%3Cpath fill='%23ffffff' d='M0 0h7v1H0zM1 1h5v1H1zM2 2h3v1H2zM3 3h1v1H3z'/%3E%3C/svg%3E");
+
+	color-scheme: dark;
+}
+
+[data-palette="nether"][data-mode="light"] {
+	--ink: #2a1010;
+	--well: #fbf4f1;
+	--s1: #e3cfc8;
+	--s2: #eddcd6;
+	--s3: #f5e9e5;
+	--s4: #a07870;
+	--card-lo: #c4a69e;
+	--sheen: rgba(255, 255, 255, 0.6);
+	--text: #2a1010;
+	--muted: #5c3a34;
+	--faint: #7d5d56;
+	--focus: #2a1010;
+
+	--light: #f6ece6;
+	--light-hover: #ffffff;
+	--light-hi: #ffffff;
+	--light-lo: #a07870;
+	--accent: #12707a;
+	--accent-hover: #0c565e;
+	--accent-hi: #23959e;
+	--accent-lo: #08393e;
+	--chrome: #a52a2a;
+	--yellow: #8a5a00;
+	--link: #0f6a70;
+	--ok: #0f6a70;
+	--err: #b3261e;
+	--dye-shade: #000 45%;
+
+	--shadow: rgba(42, 16, 16, 0.25);
+	--backdrop: rgba(42, 16, 16, 0.45);
+	--map-bg: #1d0d0d;
+	--arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 4' shape-rendering='crispEdges'%3E%3Cpath fill='%232a1010' d='M0 0h7v1H0zM1 1h5v1H1zM2 2h3v1H2zM3 3h1v1H3z'/%3E%3C/svg%3E");
+
+	color-scheme: light;
+}
+
+/* The End: deep purples, end stone buttons and chorus-purple accents. */
+[data-palette="end"][data-mode="dark"] {
+	--ink: #120d17;
+	--well: #120d17;
+	--s1: #241a2e;
+	--s2: #34273f;
+	--s3: #44344f;
+	--s4: #574466;
+	--card-lo: #281d31;
+	--sheen: rgba(240, 220, 255, 0.07);
+	--text: #ffffff;
+	--muted: #c9bfd6;
+	--faint: #9a8ca8;
+	--focus: #ffffff;
+
+	--light: #e4e0b0;
+	--light-hover: #f0edc4;
+	--light-hi: #f8f6d8;
+	--light-lo: #8e8a5e;
+	--accent: #8932b8;
+	--accent-hover: #6d2496;
+	--accent-hi: #a64fd6;
+	--accent-lo: #4a1666;
+	--chrome: #6a2c91;
+	--yellow: #f4ee9a;
+	--link: #d48cff;
+	--ok: #c58aff;
+	--err: #ff7b9b;
+	--dye-shade: #000 0%;
+
+	--shadow: rgba(0, 0, 0, 0.4);
+	--backdrop: rgba(10, 6, 14, 0.75);
+	--map-bg: #0d0a10;
+	--arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 4' shape-rendering='crispEdges'%3E%3Cpath fill='%23ffffff' d='M0 0h7v1H0zM1 1h5v1H1zM2 2h3v1H2zM3 3h1v1H3z'/%3E%3C/svg%3E");
+
+	color-scheme: dark;
+}
+
+[data-palette="end"][data-mode="light"] {
+	--ink: #1f1428;
+	--well: #fdfcf0;
+	--s1: #e6e2bf;
+	--s2: #eeebcf;
+	--s3: #f5f3df;
+	--s4: #a39a72;
+	--card-lo: #c7c19a;
+	--sheen: rgba(255, 255, 255, 0.6);
+	--text: #1f1428;
+	--muted: #4f4260;
+	--faint: #6c6180;
+	--focus: #1f1428;
+
+	--light: #f7f5e4;
+	--light-hover: #ffffff;
+	--light-hi: #ffffff;
+	--light-lo: #9a9370;
+	--accent: #8932b8;
+	--accent-hover: #6d2496;
+	--accent-hi: #a64fd6;
+	--accent-lo: #4a1666;
+	--chrome: #7b3aa8;
+	--yellow: #7a5d00;
+	--link: #6d2496;
+	--ok: #6d2496;
+	--err: #b3261e;
+	--dye-shade: #000 45%;
+
+	--shadow: rgba(31, 20, 40, 0.25);
+	--backdrop: rgba(31, 20, 40, 0.45);
+	--map-bg: #0d0a10;
+	--arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 4' shape-rendering='crispEdges'%3E%3Cpath fill='%231f1428' d='M0 0h7v1H0zM1 1h5v1H1zM2 2h3v1H2zM3 3h1v1H3z'/%3E%3C/svg%3E");
+
+	color-scheme: light;
+}
+
+/* Bedrock / minecraft.net: flat layers, thick dark outlines, a solid depth edge under buttons. */
+:root,
+[data-style="bedrock"] {
+	--sans:
+		"Noto Sans", "Segoe UI", system-ui, -apple-system, Roboto, "Helvetica Neue",
+		Arial, sans-serif;
+	--display: "Minecraft", ui-monospace, monospace;
+	--display-size: var(--fs-display);
+	--display-weight: normal;
+	--text-shadow: none;
+
+	/* Containers (panels, cards) and controls (buttons, inputs); toggles have their own. */
+	--radius: 0;
+	--radius-sm: 0;
+	--toggle-radius: 0;
+	--bw: 2px;
+	--line: var(--ink);
+
+	/*
+	 * Raised things (buttons, cards) have a dark edge below and a light one along the top and
+	 * left, as box-shadow offsets; pressed buttons show only the dark one at --edge-press.
+	 * --depth is the room the bottom edge takes, which a pressed button's label moves into.
+	 */
+	--edge-lo: 0 -4px;
+	--edge-hi: 2px 2px;
+	--edge-press: 0 2px;
+	--depth: 4px;
+	/* Drawn over a button's colour. */
+	--btn-face: none;
+
+	/* Floating layers have a light top-left edge and sit on a solid shadow rather than a blur. */
+	--surface-shadow: inset 2px 2px 0 var(--bevel-soft), 0 4px 0 var(--shadow);
+	--head-bg: var(--s2);
+	--head-fg: var(--text);
+}
+
+/* Light bevel edges, softened in dark mode where pure white would glare. */
+:root,
+[data-mode="dark"] {
+	--bevel-light: rgba(255, 255, 255, 0.32);
+	--bevel-soft: rgba(255, 255, 255, 0.12);
+}
+
+[data-mode="light"] {
+	--bevel-light: #ffffff;
+	--bevel-soft: rgba(255, 255, 255, 0.55);
+}
+
+/*
+ * Windows 98: no outlines; everything is a 3D bevel instead, raised (buttons, windows) or sunk
+ * (fields, wells). Gradient title bars inset in the window frame.
+ */
+[data-style="win98"] {
+	--sans:
+		"Microsoft Sans Serif", "MS Sans Serif", Tahoma, Arial, system-ui,
+		sans-serif;
+	--display: var(--sans);
+	--display-size: 16px;
+	--display-weight: 700;
+	--text-shadow: none;
+
+	--radius: 0;
+	--radius-sm: 0;
+	--toggle-radius: 0;
+	--bw: 0px;
+	--line: #000;
+
+	--edge-lo: 0 0;
+	--edge-hi: 0 0;
+	--edge-press: 0 0;
+	--depth: 0px;
+	--btn-face: none;
+
+	--bevel-out:
+		inset -1px -1px 0 rgba(0, 0, 0, 0.85), inset 1px 1px 0 var(--bevel-light),
+		inset -2px -2px 0 rgba(0, 0, 0, 0.3), inset 2px 2px 0 var(--bevel-soft);
+	--bevel-in:
+		inset 1px 1px 0 rgba(0, 0, 0, 0.3), inset -1px -1px 0 var(--bevel-light),
+		inset 2px 2px 0 rgba(0, 0, 0, 0.85), inset -2px -2px 0 var(--bevel-soft);
+	--surface-shadow: var(--bevel-out);
+	--head-bg: linear-gradient(
+		90deg,
+		color-mix(in srgb, var(--chrome), #000 50%),
+		color-mix(in srgb, var(--chrome), #fff 25%)
+	);
+	--head-fg: #ffffff;
+}
+
+/* Windows XP (Luna): glossy title bars in the palette's chrome colour, soft corners, Tahoma. */
+[data-style="xp"] {
+	--sans: Tahoma, Verdana, "Segoe UI", system-ui, sans-serif;
+	--display: "Trebuchet MS", Tahoma, Verdana, system-ui, sans-serif;
+	--display-size: 17px;
+	--display-weight: 700;
+	--text-shadow: none;
+
+	--radius: 6px;
+	--radius-sm: 3px;
+	--toggle-radius: 3px;
+	--bw: 1px;
+	--line: color-mix(in srgb, var(--chrome) 55%, #000);
+
+	--edge-lo: 0 0;
+	--edge-hi: 0 0;
+	--edge-press: 0 0;
+	--depth: 0px;
+	--btn-face: linear-gradient(
+		rgba(255, 255, 255, 0.55),
+		rgba(255, 255, 255, 0) 45%,
+		rgba(0, 0, 0, 0.06) 85%,
+		rgba(0, 0, 0, 0.16)
+	);
+
+	--surface-shadow: 2px 3px 8px var(--shadow);
+	--head-bg: linear-gradient(
+		color-mix(in srgb, var(--chrome), #fff 30%),
+		var(--chrome) 20%,
+		color-mix(in srgb, var(--chrome), #000 6%) 80%,
+		color-mix(in srgb, var(--chrome), #000 28%)
+	);
+	--head-fg: #ffffff;
+}
+
+/* Modern: rounded corners, hairline borders, blurred shadows and frosted panels. */
+[data-style="modern"] {
+	--sans:
+		system-ui, -apple-system, "Segoe UI", Roboto, "Noto Sans", "Helvetica Neue",
+		Arial, sans-serif;
+	--display: var(--sans);
+	--display-size: 20px;
+	--display-weight: 650;
+	--text-shadow: none;
+
+	--radius: 14px;
+	--radius-sm: 9px;
+	--toggle-radius: 999px;
+	--bw: 1px;
+	--line: color-mix(in srgb, var(--text) 14%, transparent);
+
+	--edge-lo: 0 0;
+	--edge-hi: 0 0;
+	--edge-press: 0 0;
+	--depth: 0px;
+	--btn-face: none;
+
+	--surface-shadow:
+		0 12px 32px rgba(0, 0, 0, 0.28), 0 2px 6px rgba(0, 0, 0, 0.16);
+	--head-bg: transparent;
+	--head-fg: var(--text);
 }
 
 * {
@@ -67,7 +429,7 @@ body,
 	height: 100%;
 	overflow: hidden;
 	overscroll-behavior: none;
-	background: var(--ink);
+	background: var(--well);
 	color: var(--text);
 	font: 15px / 1.45 var(--sans);
 }
@@ -77,9 +439,10 @@ h2,
 h3 {
 	margin: 0;
 	font-family: var(--display);
-	font-size: var(--fs-display);
-	font-weight: normal;
+	font-size: var(--display-size);
+	font-weight: var(--display-weight);
 	line-height: 1.1;
+	text-shadow: var(--text-shadow);
 }
 
 a {
@@ -88,6 +451,7 @@ a {
 
 img.banner,
 img.avatar,
+.block-icon,
 .pixel-icon {
 	image-rendering: pixelated;
 	flex: none;
@@ -98,9 +462,10 @@ img.avatar,
 }
 
 code {
+	border-radius: var(--radius-sm);
 	padding: 1px 5px;
 	font-size: 13px;
-	background: var(--ink);
+	background: var(--well);
 	border: 1px solid var(--s3);
 	word-break: break-all;
 }
@@ -109,6 +474,7 @@ code {
  * Buttons: light by default, green for the main action, red for destructive ones.
  * ------------------------------------------------------------------------------------------- */
 .btn {
+	border-radius: var(--radius-sm);
 	--bg: var(--light);
 	--bg-hover: var(--light-hover);
 	--hi: var(--light-hi);
@@ -118,78 +484,79 @@ code {
 	justify-content: center;
 	gap: 8px;
 	min-height: 40px;
-	padding: 0 16px 4px;
+	padding: 0 16px var(--depth);
 	font: 600 15px / 1 var(--sans);
 	color: var(--ink);
 	text-decoration: none;
+	text-shadow: var(--text-shadow);
 	white-space: nowrap;
-	background: var(--bg);
-	border: 2px solid var(--ink);
-	border-radius: 0;
+	background-color: var(--bg);
+	background-image: var(--btn-face);
+	border: var(--bw) solid var(--line);
 	box-shadow:
-		inset 0 -4px 0 var(--lo),
-		inset 0 2px 0 var(--hi);
+		inset var(--edge-lo) 0 var(--lo),
+		inset var(--edge-hi) 0 var(--hi);
 	cursor: pointer;
 	user-select: none;
 }
 
 .btn:hover {
-	background: var(--bg-hover);
+	background-color: var(--bg-hover);
 }
 
 .btn:focus-visible {
-	outline: 2px solid #fff;
+	outline: 2px solid var(--focus);
 	outline-offset: 2px;
 }
 
 /* Pressed: the depth edge goes away and the face sinks into its place. */
 .btn:active {
-	padding-top: 4px;
+	padding-top: var(--depth);
 	padding-bottom: 0;
-	box-shadow: inset 0 2px 0 var(--lo);
+	box-shadow: inset var(--edge-press) 0 var(--lo);
 }
 
 .btn.primary,
 .btn.active {
-	--bg: var(--green);
-	--bg-hover: var(--green-hover);
-	--hi: var(--green-hi);
-	--lo: var(--green-lo);
-	color: #fff;
+	--bg: var(--accent);
+	--bg-hover: var(--accent-hover);
+	--hi: var(--accent-hi);
+	--lo: var(--accent-lo);
+	color: var(--on-accent);
 }
 
 .btn.danger {
-	--bg: var(--red);
-	--bg-hover: var(--red-hover);
-	--hi: var(--red-hi);
-	--lo: var(--red-lo);
-	color: #fff;
+	--bg: var(--danger);
+	--bg-hover: var(--danger-hover);
+	--hi: var(--danger-hi);
+	--lo: var(--danger-lo);
+	color: var(--on-accent);
 }
 
 .btn:disabled,
 .btn:disabled:hover,
 .btn:disabled:active {
 	color: var(--faint);
-	background: var(--s2);
-	box-shadow: inset 0 -4px 0 #3a3b3c;
+	background-color: var(--s2);
+	box-shadow: inset var(--edge-lo) 0 var(--card-lo);
 	padding-top: 0;
-	padding-bottom: 4px;
+	padding-bottom: var(--depth);
 	cursor: default;
 }
 
 .btn.small {
 	min-height: 32px;
-	padding: 0 10px 4px;
+	padding: 0 10px var(--depth);
 	font-size: 14px;
 }
 
 .btn.small:active {
-	padding: 4px 10px 0;
+	padding: var(--depth) 10px 0;
 }
 
 .btn.close {
 	width: 32px;
-	padding: 0 0 4px;
+	padding: 0 0 var(--depth);
 	font-size: 18px;
 }
 
@@ -215,7 +582,7 @@ code {
 }
 
 .link:hover {
-	color: #fff;
+	color: var(--text);
 }
 
 .group {
@@ -231,11 +598,12 @@ code {
 /* A dark tray holding a row of buttons; only the selected one is raised. */
 .tabbar,
 .segmented {
+	border-radius: var(--radius-sm);
 	display: flex;
 	flex-wrap: wrap;
 	gap: 4px;
 	padding: 4px;
-	background: var(--ink);
+	background: var(--well);
 }
 
 .segmented .btn {
@@ -245,7 +613,7 @@ code {
 .tabbar .btn:not(.active),
 .segmented .btn:not(.active),
 .tab:not(.active) {
-	color: #fff;
+	color: var(--text);
 	background: transparent;
 	border-color: transparent;
 	box-shadow: none;
@@ -272,14 +640,14 @@ code {
 input[type="text"],
 textarea,
 select {
+	border-radius: var(--radius-sm);
 	width: 100%;
 	min-height: 40px;
 	padding: 8px 10px;
 	font: 15px / 1.3 var(--sans);
-	color: #fff;
-	background: var(--ink);
+	color: var(--text);
+	background: var(--well);
 	border: 2px solid var(--s4);
-	border-radius: 0;
 	box-shadow: inset 0 2px 0 rgba(0, 0, 0, 0.45);
 	outline: none;
 }
@@ -293,7 +661,7 @@ select:hover {
 input[type="text"]:focus,
 textarea:focus,
 select:focus {
-	border-color: #fff;
+	border-color: var(--focus);
 }
 
 input::placeholder,
@@ -313,10 +681,7 @@ select {
 	appearance: none;
 	padding-right: 34px;
 	cursor: pointer;
-	background:
-		var(--ink)
-		url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 4' shape-rendering='crispEdges'%3E%3Cpath fill='%23ffffff' d='M0 0h7v1H0zM1 1h5v1H1zM2 2h3v1H2zM3 3h1v1H3z'/%3E%3C/svg%3E")
-		no-repeat right 12px center / 14px 8px;
+	background: var(--well) var(--arrow) no-repeat right 12px center / 14px 8px;
 }
 
 select:disabled {
@@ -325,12 +690,13 @@ select:disabled {
 }
 
 option {
-	background: var(--ink);
-	color: #fff;
+	background: var(--well);
+	color: var(--text);
 }
 
 /* Checkboxes are drawn as Bedrock toggles: a square knob that slides over a green track. */
 input[type="checkbox"] {
+	border-radius: var(--toggle-radius);
 	appearance: none;
 	position: relative;
 	flex: none;
@@ -338,12 +704,13 @@ input[type="checkbox"] {
 	height: 26px;
 	margin: 0;
 	background: var(--s3);
-	border: 2px solid var(--ink);
+	border: var(--bw) solid var(--line);
 	box-shadow: inset 0 2px 0 rgba(0, 0, 0, 0.35);
 	cursor: pointer;
 }
 
 input[type="checkbox"]::before {
+	border-radius: var(--toggle-radius);
 	content: "";
 	position: absolute;
 	top: -2px;
@@ -351,15 +718,15 @@ input[type="checkbox"]::before {
 	width: 26px;
 	height: 26px;
 	background: var(--light);
-	border: 2px solid var(--ink);
+	border: var(--bw) solid var(--line);
 	box-shadow:
-		inset 0 -4px 0 var(--light-lo),
-		inset 0 2px 0 var(--light-hi);
+		inset var(--edge-lo) 0 var(--light-lo),
+		inset var(--edge-hi) 0 var(--light-hi);
 	transition: left 0.1s;
 }
 
 input[type="checkbox"]:checked {
-	background: var(--green);
+	background: var(--accent);
 }
 
 input[type="checkbox"]:checked::before {
@@ -374,49 +741,51 @@ input[type="checkbox"]:checked::after {
 	left: 9px;
 	width: 2px;
 	height: 10px;
-	background: #fff;
+	background: var(--on-accent);
 }
 
 input[type="checkbox"]:focus-visible {
-	outline: 2px solid #fff;
+	outline: 2px solid var(--focus);
 	outline-offset: 2px;
 }
 
 input[type="range"] {
+	border-radius: var(--radius-sm);
 	appearance: none;
 	width: 100%;
 	height: 12px;
 	margin: 14px 0;
-	background: var(--ink);
-	border: 2px solid var(--ink);
+	background: var(--well);
+	border: var(--bw) solid var(--line);
 	box-shadow: inset 0 0 0 2px var(--s3);
 	cursor: pointer;
 }
 
 input[type="range"]::-webkit-slider-thumb {
+	border-radius: var(--toggle-radius);
 	appearance: none;
 	width: 18px;
 	height: 30px;
 	background: var(--light);
-	border: 2px solid var(--ink);
+	border: var(--bw) solid var(--line);
 	box-shadow:
-		inset 0 -4px 0 var(--light-lo),
-		inset 0 2px 0 var(--light-hi);
+		inset var(--edge-lo) 0 var(--light-lo),
+		inset var(--edge-hi) 0 var(--light-hi);
 }
 
 input[type="range"]::-moz-range-thumb {
+	border-radius: var(--toggle-radius);
 	width: 14px;
 	height: 26px;
 	background: var(--light);
-	border: 2px solid var(--ink);
-	border-radius: 0;
+	border: var(--bw) solid var(--line);
 	box-shadow:
-		inset 0 -4px 0 var(--light-lo),
-		inset 0 2px 0 var(--light-hi);
+		inset var(--edge-lo) 0 var(--light-lo),
+		inset var(--edge-hi) 0 var(--light-hi);
 }
 
 input[type="range"]:focus-visible {
-	outline: 2px solid #fff;
+	outline: 2px solid var(--focus);
 	outline-offset: 4px;
 }
 
@@ -431,12 +800,12 @@ input[type="range"]:disabled {
 }
 
 ::-webkit-scrollbar-track {
-	background: var(--ink);
+	background: var(--well);
 }
 
 ::-webkit-scrollbar-thumb {
 	background: var(--s4);
-	border: 2px solid var(--ink);
+	border: var(--bw) solid var(--line);
 }
 
 /* ---------------------------------------------------------------------------------------------
@@ -462,6 +831,7 @@ input[type="range"]:disabled {
 }
 
 .badge {
+	border-radius: var(--radius-sm);
 	display: inline-block;
 	padding: 2px 6px;
 	font-size: 11px;
@@ -470,7 +840,7 @@ input[type="range"]:disabled {
 	letter-spacing: 0.04em;
 	text-transform: uppercase;
 	color: var(--muted);
-	background: var(--ink);
+	background: var(--well);
 	white-space: nowrap;
 }
 
@@ -528,13 +898,14 @@ input[type="range"]:disabled {
 
 /* Docks: the dark trays that float over the map. */
 .dock {
+	border-radius: var(--radius);
 	display: flex;
 	align-items: center;
 	gap: 4px;
 	padding: 4px;
 	background: var(--s1);
-	border: 2px solid var(--ink);
-	box-shadow: var(--lift);
+	border: var(--bw) solid var(--line);
+	box-shadow: var(--surface-shadow);
 }
 
 /* Cards: the lighter layer inside panels and pages. */
@@ -545,11 +916,12 @@ input[type="range"]:disabled {
 .invite-list li,
 .feature-history li,
 .new-link {
+	border-radius: var(--radius);
 	background: var(--s2);
-	border: 2px solid var(--ink);
+	border: var(--bw) solid var(--line);
 	box-shadow:
-		inset 0 -4px 0 #3a3b3c,
-		inset 0 2px 0 rgba(255, 255, 255, 0.07);
+		inset var(--edge-lo) 0 var(--card-lo),
+		inset var(--edge-hi) 0 var(--sheen);
 }
 
 /* ---------------------------------------------------------------------------------------------
@@ -563,7 +935,7 @@ input[type="range"]:disabled {
 .map-host {
 	position: absolute;
 	inset: 0;
-	background: #1b1d22;
+	background: var(--map-bg);
 	cursor: grab;
 	-webkit-tap-highlight-color: transparent;
 	user-select: none;
@@ -574,6 +946,7 @@ input[type="range"]:disabled {
 }
 
 .load-error {
+	border-radius: var(--radius);
 	position: absolute;
 	top: 50%;
 	left: 50%;
@@ -583,8 +956,8 @@ input[type="range"]:disabled {
 	padding: 18px 20px;
 	text-align: center;
 	background: var(--s1);
-	border: 2px solid var(--ink);
-	box-shadow: var(--lift);
+	border: var(--bw) solid var(--line);
+	box-shadow: var(--surface-shadow);
 }
 
 .load-error h2 {
@@ -634,7 +1007,7 @@ input[type="range"]:disabled {
 
 .btn.dim .block-icon {
 	image-rendering: pixelated;
-	outline: 2px solid var(--ink);
+	outline: var(--bw) solid var(--line);
 }
 
 .player {
@@ -646,10 +1019,11 @@ input[type="range"]:disabled {
 }
 
 .avatar {
+	border-radius: var(--radius-sm);
 	display: block;
 	width: 32px;
 	height: 32px;
-	border: 2px solid var(--ink);
+	border: var(--bw) solid var(--line);
 	background: var(--s3);
 }
 
@@ -668,6 +1042,7 @@ input[type="range"]:disabled {
 }
 
 .hotbar-slot {
+	border-radius: var(--radius-sm);
 	position: relative;
 	display: grid;
 	place-items: center;
@@ -677,7 +1052,7 @@ input[type="range"]:disabled {
 	font: inherit;
 	color: inherit;
 	text-decoration: none;
-	background: var(--ink);
+	background: var(--well);
 	border: 0;
 	box-shadow: inset 0 3px 0 rgba(0, 0, 0, 0.45);
 	cursor: pointer;
@@ -698,8 +1073,8 @@ input[type="range"]:disabled {
 	position: absolute;
 	inset: -4px;
 	z-index: 1;
-	border: 4px solid #fff;
-	outline: 2px solid var(--ink);
+	border: 4px solid var(--focus);
+	outline: var(--bw) solid var(--line);
 	pointer-events: none;
 }
 
@@ -731,10 +1106,11 @@ input[type="range"]:disabled {
 /* Tooltips */
 .slot-tip,
 .tooltip {
-	color: #fff;
-	background: var(--ink);
+	border-radius: var(--radius);
+	color: var(--text);
+	background: var(--well);
 	border: 2px solid var(--s3);
-	box-shadow: var(--lift);
+	box-shadow: var(--surface-shadow);
 }
 
 .slot-tip {
@@ -767,6 +1143,7 @@ input[type="range"]:disabled {
 }
 
 .tip-key {
+	border-radius: var(--radius-sm);
 	margin-top: 4px;
 	padding: 0 6px;
 	font-size: 12px;
@@ -789,6 +1166,7 @@ input[type="range"]:disabled {
 
 /* Cursor position, scale and measurements. */
 .debug {
+	border-radius: var(--radius);
 	position: absolute;
 	left: 8px;
 	bottom: calc(var(--safe-bottom) + 8px);
@@ -800,8 +1178,8 @@ input[type="range"]:disabled {
 	font-size: 13px;
 	font-weight: 600;
 	font-variant-numeric: tabular-nums;
-	background: rgba(30, 30, 31, 0.82);
-	border: 2px solid var(--ink);
+	background: color-mix(in srgb, var(--well) 82%, transparent);
+	border: var(--bw) solid var(--line);
 	pointer-events: none;
 }
 
@@ -825,6 +1203,7 @@ input[type="range"]:disabled {
 
 /* Messages above the hotbar. */
 .toast {
+	border-radius: var(--radius);
 	position: absolute;
 	left: 50%;
 	bottom: var(--above-hotbar);
@@ -834,14 +1213,14 @@ input[type="range"]:disabled {
 	padding: 10px 14px 10px 12px;
 	font-weight: 600;
 	background: var(--s1);
-	border: 2px solid var(--ink);
-	border-left: 8px solid var(--green);
-	box-shadow: var(--lift);
+	border: var(--bw) solid var(--line);
+	border-left: 8px solid var(--accent);
+	box-shadow: var(--surface-shadow);
 	animation: toast-in 0.15s ease-out;
 }
 
 .toast.error {
-	border-left-color: var(--red);
+	border-left-color: var(--danger);
 }
 
 @keyframes toast-in {
@@ -873,14 +1252,15 @@ input[type="range"]:disabled {
 }
 
 .bossbar {
+	border-radius: var(--radius);
 	display: flex;
 	align-items: center;
 	gap: 12px;
 	width: min(520px, 100%);
 	padding: 8px 8px 8px 12px;
 	background: var(--s1);
-	border: 2px solid var(--ink);
-	box-shadow: var(--lift);
+	border: var(--bw) solid var(--line);
+	box-shadow: var(--surface-shadow);
 	pointer-events: auto;
 }
 
@@ -895,9 +1275,10 @@ input[type="range"]:disabled {
 }
 
 .bossbar-track {
+	border-radius: var(--radius-sm);
 	height: 10px;
-	background: var(--ink);
-	border: 2px solid var(--ink);
+	background: var(--well);
+	border: var(--bw) solid var(--line);
 }
 
 .bossbar-track > span {
@@ -918,6 +1299,9 @@ input[type="range"]:disabled {
  * Side panel (layers, history, feature editor)
  * ------------------------------------------------------------------------------------------- */
 .panel {
+	border-radius: var(--radius);
+	/* The header is flush with the top, so clip it to the corners. */
+	overflow: hidden;
 	position: absolute;
 	top: calc(var(--safe-top) + var(--toolbar-h, 48px) + 16px);
 	right: 8px;
@@ -927,8 +1311,8 @@ input[type="range"]:disabled {
 	display: flex;
 	flex-direction: column;
 	background: var(--s1);
-	border: 2px solid var(--ink);
-	box-shadow: var(--lift);
+	border: var(--bw) solid var(--line);
+	box-shadow: var(--surface-shadow);
 }
 
 .panel-head,
@@ -938,9 +1322,10 @@ input[type="range"]:disabled {
 	gap: 8px;
 	min-height: 52px;
 	padding: 8px 8px 8px 14px;
-	background: var(--s2);
-	border-bottom: 2px solid var(--ink);
-	box-shadow: inset 0 2px 0 rgba(255, 255, 255, 0.07);
+	color: var(--head-fg);
+	background: var(--head-bg);
+	border-bottom: var(--bw) solid var(--line);
+	box-shadow: inset var(--edge-hi) 0 var(--sheen);
 }
 
 .panel-head h2,
@@ -963,7 +1348,7 @@ input[type="range"]:disabled {
 	gap: 8px;
 	padding: 10px 12px;
 	background: var(--s2);
-	border-top: 2px solid var(--ink);
+	border-top: var(--bw) solid var(--line);
 }
 
 /* Layers */
@@ -1020,13 +1405,14 @@ input[type="range"]:disabled {
 }
 
 .count {
+	border-radius: var(--radius-sm);
 	margin-left: auto;
 	min-width: 24px;
 	padding: 0 6px;
 	font-size: 12px;
 	text-align: center;
 	color: var(--muted);
-	background: var(--ink);
+	background: var(--well);
 }
 
 .chevron {
@@ -1038,6 +1424,7 @@ input[type="range"]:disabled {
 
 /* The open part of a card is recessed, one layer down. */
 .layer-body {
+	border-radius: var(--radius-sm);
 	margin: 0 6px 6px;
 	padding: 8px 10px;
 	background: var(--s1);
@@ -1080,6 +1467,7 @@ input[type="range"]:disabled {
 }
 
 .feature-link .type {
+	border-radius: var(--radius-sm);
 	flex: none;
 	padding: 1px 5px;
 	font-size: 10px;
@@ -1087,7 +1475,7 @@ input[type="range"]:disabled {
 	letter-spacing: 0.06em;
 	text-transform: uppercase;
 	color: var(--muted);
-	background: var(--ink);
+	background: var(--well);
 }
 
 .feature-actions {
@@ -1106,6 +1494,7 @@ input[type="range"]:disabled {
 
 /* Dye picker: the banner colours as a grid of slots. */
 .dye-picker {
+	border-radius: var(--radius-sm);
 	min-width: 0;
 	margin: 0;
 	padding: 4px;
@@ -1113,10 +1502,11 @@ input[type="range"]:disabled {
 	display: grid;
 	grid-template-columns: repeat(auto-fill, 36px);
 	gap: 4px;
-	background: var(--ink);
+	background: var(--well);
 }
 
 .dye-picker .slot {
+	border-radius: var(--radius-sm);
 	position: relative;
 	display: grid;
 	place-items: center;
@@ -1126,7 +1516,7 @@ input[type="range"]:disabled {
 	font: inherit;
 	background: var(--s2);
 	border: 0;
-	box-shadow: inset 0 -3px 0 #3a3b3c;
+	box-shadow: inset 0 -3px 0 var(--card-lo);
 	cursor: pointer;
 }
 
@@ -1148,8 +1538,8 @@ input[type="range"]:disabled {
 	right: 3px;
 	width: 6px;
 	height: 6px;
-	background: var(--green);
-	outline: 2px solid var(--ink);
+	background: var(--accent);
+	outline: var(--bw) solid var(--line);
 }
 
 /* Feature editor */
@@ -1192,7 +1582,7 @@ input[type="range"]:disabled {
 }
 
 .revision.active {
-	border-color: #fff;
+	border-color: var(--focus);
 }
 
 .rev-what {
@@ -1205,7 +1595,7 @@ input[type="range"]:disabled {
 }
 
 .revision.failed {
-	background: #5a3a3a;
+	background: color-mix(in srgb, var(--danger) 30%, var(--s2));
 }
 
 .revision-main {
@@ -1222,6 +1612,7 @@ input[type="range"]:disabled {
 }
 
 .rev-no {
+	border-radius: var(--radius-sm);
 	grid-row: span 2;
 	align-self: center;
 	min-width: 2.6em;
@@ -1229,7 +1620,7 @@ input[type="range"]:disabled {
 	font-weight: 700;
 	text-align: center;
 	color: var(--yellow);
-	background: var(--ink);
+	background: var(--well);
 }
 
 .rev-meta {
@@ -1270,14 +1661,16 @@ input[type="range"]:disabled {
  * Feature popup
  * ------------------------------------------------------------------------------------------- */
 .popup {
+	border-radius: var(--radius);
+	overflow: hidden;
 	position: absolute;
 	z-index: 6;
 	width: 320px;
 	max-width: calc(100vw - 20px);
 	transform: translate(-50%, -100%);
 	background: var(--s1);
-	border: 2px solid var(--ink);
-	box-shadow: var(--lift);
+	border: var(--bw) solid var(--line);
+	box-shadow: var(--surface-shadow);
 }
 
 .popup.below {
@@ -1290,8 +1683,9 @@ input[type="range"]:disabled {
 	align-items: center;
 	min-height: 52px;
 	padding: 10px 50px 8px 12px;
-	background: var(--s2);
-	border-bottom: 2px solid var(--ink);
+	color: var(--head-fg);
+	background: var(--head-bg);
+	border-bottom: var(--bw) solid var(--line);
 	overflow-wrap: anywhere;
 }
 
@@ -1323,52 +1717,52 @@ input[type="range"]:disabled {
 
 /* Feature names in their dye colour, brightened to read on the dark header. */
 .dye-white {
-	color: #ffffff;
+	color: color-mix(in srgb, #ffffff, var(--dye-shade));
 }
 .dye-light_gray {
-	color: #d8d8d8;
+	color: color-mix(in srgb, #d8d8d8, var(--dye-shade));
 }
 .dye-gray {
-	color: #b1b2b5;
+	color: color-mix(in srgb, #b1b2b5, var(--dye-shade));
 }
 .dye-black {
-	color: #9a9a9a;
+	color: color-mix(in srgb, #9a9a9a, var(--dye-shade));
 }
 .dye-brown {
-	color: #d29a62;
+	color: color-mix(in srgb, #d29a62, var(--dye-shade));
 }
 .dye-red {
-	color: #ff6b6b;
+	color: color-mix(in srgb, #ff6b6b, var(--dye-shade));
 }
 .dye-orange {
-	color: #ffaa33;
+	color: color-mix(in srgb, #ffaa33, var(--dye-shade));
 }
 .dye-yellow {
-	color: #ffe866;
+	color: color-mix(in srgb, #ffe866, var(--dye-shade));
 }
 .dye-lime {
-	color: #8de34f;
+	color: color-mix(in srgb, #8de34f, var(--dye-shade));
 }
 .dye-green {
-	color: #7fc94a;
+	color: color-mix(in srgb, #7fc94a, var(--dye-shade));
 }
 .dye-cyan {
-	color: #5fe3e3;
+	color: color-mix(in srgb, #5fe3e3, var(--dye-shade));
 }
 .dye-light_blue {
-	color: #8ad8ff;
+	color: color-mix(in srgb, #8ad8ff, var(--dye-shade));
 }
 .dye-blue {
-	color: #8c94ff;
+	color: color-mix(in srgb, #8c94ff, var(--dye-shade));
 }
 .dye-purple {
-	color: #c58aff;
+	color: color-mix(in srgb, #c58aff, var(--dye-shade));
 }
 .dye-magenta {
-	color: #ff86f0;
+	color: color-mix(in srgb, #ff86f0, var(--dye-shade));
 }
 .dye-pink {
-	color: #ffb3cc;
+	color: color-mix(in srgb, #ffb3cc, var(--dye-shade));
 }
 
 /* ---------------------------------------------------------------------------------------------
@@ -1382,19 +1776,21 @@ input[type="range"]:disabled {
 	align-items: center;
 	justify-content: center;
 	padding: 12px;
-	background: rgba(16, 16, 17, 0.72);
+	background: var(--backdrop);
 }
 
 .modal,
 .invite-card {
+	border-radius: var(--radius);
+	overflow: hidden;
 	position: relative;
 	display: flex;
 	flex-direction: column;
 	width: min(600px, 100%);
 	max-height: 100%;
 	background: var(--s1);
-	border: 2px solid var(--ink);
-	box-shadow: var(--lift);
+	border: var(--bw) solid var(--line);
+	box-shadow: var(--surface-shadow);
 }
 
 .modal-body {
@@ -1439,6 +1835,7 @@ input[type="range"]:disabled {
 }
 
 .dropzone {
+	border-radius: var(--radius-sm);
 	display: flex;
 	align-items: center;
 	justify-content: center;
@@ -1447,16 +1844,16 @@ input[type="range"]:disabled {
 	font-weight: 600;
 	text-align: center;
 	color: var(--muted);
-	background: var(--ink);
+	background: var(--well);
 	border: 2px dashed var(--s4);
 	cursor: pointer;
 }
 
 .dropzone:hover,
 .dropzone.dragging {
-	color: #fff;
-	border-color: var(--green-hi);
-	background: rgba(60, 133, 39, 0.15);
+	color: var(--text);
+	border-color: var(--accent-hi);
+	background: color-mix(in srgb, var(--accent) 15%, transparent);
 }
 
 .folder-pick {
@@ -1479,18 +1876,19 @@ input[type="range"]:disabled {
 }
 
 .progress {
+	border-radius: var(--radius-sm);
 	height: 16px;
 	margin-bottom: 8px;
 	overflow: hidden;
-	background: var(--ink);
-	border: 2px solid var(--ink);
+	background: var(--well);
+	border: var(--bw) solid var(--line);
 	box-shadow: inset 0 0 0 2px var(--s2);
 }
 
 .progress .bar {
 	height: 100%;
-	background: var(--green);
-	box-shadow: inset 0 2px 0 var(--green-hi);
+	background: var(--accent);
+	box-shadow: inset 0 2px 0 var(--accent-hi);
 	transition: width 0.15s;
 }
 
@@ -1541,7 +1939,8 @@ input[type="range"]:disabled {
 }
 
 .member-list select,
-.add-member select {
+.add-member select,
+.theme-select {
 	width: auto;
 }
 
@@ -1584,7 +1983,7 @@ input[type="range"]:disabled {
 .new-link {
 	margin: 12px 0;
 	padding: 12px 12px 16px;
-	border-color: var(--green-hi);
+	border-color: var(--accent-hi);
 }
 
 .new-link p {
@@ -1621,8 +2020,11 @@ input[type="range"]:disabled {
 .page-root,
 .invite-page {
 	background:
-		linear-gradient(rgba(30, 30, 31, 0.92), rgba(30, 30, 31, 0.92)),
-		repeating-linear-gradient(45deg, var(--s1) 0 16px, var(--ink) 16px 32px);
+		linear-gradient(
+			color-mix(in srgb, var(--well) 92%, transparent),
+			color-mix(in srgb, var(--well) 92%, transparent)
+		),
+		repeating-linear-gradient(45deg, var(--s1) 0 16px, var(--well) 16px 32px);
 }
 
 .page-root {
@@ -1641,8 +2043,8 @@ input[type="range"]:disabled {
 	gap: 14px;
 	padding: calc(var(--safe-top) + 10px) 16px 10px;
 	background: var(--s1);
-	border-bottom: 2px solid var(--ink);
-	box-shadow: var(--lift);
+	border-bottom: var(--bw) solid var(--line);
+	box-shadow: var(--surface-shadow);
 }
 
 .page-head h1 {
@@ -1661,11 +2063,12 @@ input[type="range"]:disabled {
 }
 
 .page-section {
+	border-radius: var(--radius);
 	margin: 0 0 20px;
 	padding: 16px 18px 18px;
 	background: var(--s1);
-	border: 2px solid var(--ink);
-	box-shadow: var(--lift);
+	border: var(--bw) solid var(--line);
+	box-shadow: var(--surface-shadow);
 }
 
 .page-section h2 {
@@ -1692,14 +2095,114 @@ input[type="range"]:disabled {
 	height: 48px;
 }
 
+/* Statistics page */
+.stats-range {
+	width: fit-content;
+	min-width: 0;
+	margin: 0 auto 16px;
+	padding: 0;
+	border: 0;
+}
+
+.stats-account {
+	margin-bottom: 12px;
+}
+
+.stats-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+	gap: 8px;
+	margin-bottom: 8px;
+}
+
+.stats-tile {
+	border-radius: var(--radius);
+	padding: 10px 12px;
+	background: var(--s2);
+	border: var(--bw) solid var(--line);
+}
+
+.stats-tile .hint {
+	margin: 2px 0 0;
+}
+
+.stats-value {
+	font-family: var(--display);
+	font-size: var(--display-size);
+	font-weight: var(--display-weight);
+	line-height: 1.2;
+	color: var(--yellow);
+	font-variant-numeric: tabular-nums;
+}
+
+.stats-table-wrap {
+	overflow-x: auto;
+}
+
+.stats-table {
+	width: 100%;
+	border-collapse: collapse;
+	font-size: 14px;
+}
+
+.stats-table th,
+.stats-table td {
+	padding: 6px 8px;
+	text-align: left;
+	white-space: nowrap;
+	border-bottom: 1px solid var(--s2);
+}
+
+.stats-table .stats-num {
+	text-align: right;
+	font-variant-numeric: tabular-nums;
+}
+
+.stats-rank {
+	width: 1%;
+	color: var(--muted);
+}
+
+.stats-sort {
+	padding: 0;
+	font: inherit;
+	font-weight: 600;
+	color: var(--muted);
+	background: none;
+	border: 0;
+	cursor: pointer;
+}
+
+.stats-sort:hover,
+.stats-sort.active {
+	color: var(--text);
+}
+
+.stats-player {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	font-weight: 600;
+}
+
+.stats-player .avatar {
+	width: 24px;
+	height: 24px;
+}
+
+.stats-me td {
+	background: var(--s2);
+}
+
 .toggle {
+	border-radius: var(--radius);
 	display: flex;
 	align-items: center;
 	gap: 14px;
 	margin: 8px 0;
 	padding: 10px 12px;
 	background: var(--s2);
-	border: 2px solid var(--ink);
+	border: var(--bw) solid var(--line);
 	cursor: pointer;
 }
 
@@ -1715,27 +2218,141 @@ input[type="range"]:disabled {
 	font-weight: 400;
 }
 
+.visually-hidden {
+	position: absolute;
+	width: 1px;
+	height: 1px;
+	overflow: hidden;
+	clip-path: inset(50%);
+	white-space: nowrap;
+}
+
+/* Appearance settings: a card per style, each with a small window drawn in that style. */
+.style-picker {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(160px, 1fr));
+	gap: 8px;
+	min-width: 0;
+	margin: 14px 0;
+	padding: 0;
+	border: 0;
+}
+
+.style-picker legend,
+.mode-picker legend {
+	padding: 0;
+}
+
+.mode-picker {
+	min-width: 0;
+	margin: 14px 0;
+	padding: 0;
+	border: 0;
+}
+
+.style-option {
+	border-radius: var(--radius);
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	padding: 8px 8px 12px;
+	background: var(--s2);
+	border: var(--bw) solid var(--line);
+	box-shadow:
+		inset var(--edge-lo) 0 var(--card-lo),
+		inset var(--edge-hi) 0 var(--sheen);
+	cursor: pointer;
+}
+
+.style-option:hover {
+	background: var(--s3);
+}
+
+.style-option.selected {
+	outline: 4px solid var(--focus);
+	outline-offset: -6px;
+}
+
+.style-option:has(:focus-visible) {
+	outline: 2px solid var(--focus);
+	outline-offset: 2px;
+}
+
+.style-option .hint {
+	margin: 0;
+}
+
+.style-name {
+	font-weight: 600;
+}
+
+/* Previews set their own data-style, so they pick up that style's fonts and shapes. */
+.style-preview {
+	display: block;
+	margin-bottom: 6px;
+	padding: 10px;
+	font-family: var(--sans);
+	color: var(--text);
+	background: var(--well);
+	pointer-events: none;
+}
+
+.preview-window {
+	border-radius: var(--radius);
+	overflow: hidden;
+	display: block;
+	background: var(--s1);
+	border: var(--bw) solid var(--line);
+	box-shadow: var(--surface-shadow);
+}
+
+.preview-head {
+	display: block;
+	padding: 6px 8px 4px;
+	font-family: var(--display);
+	font-size: var(--display-size);
+	font-weight: var(--display-weight);
+	line-height: 1.1;
+	text-shadow: var(--text-shadow);
+	color: var(--head-fg);
+	background: var(--head-bg);
+	border-bottom: var(--bw) solid var(--line);
+}
+
+.preview-body {
+	display: flex;
+	gap: 6px;
+	padding: 8px;
+}
+
+.preview-body .btn {
+	flex: 1;
+	padding-left: 4px;
+	padding-right: 4px;
+}
+
 .tabs {
 	justify-content: center;
 	width: fit-content;
 	margin: 0 auto 16px;
 	background: var(--s1);
-	border: 2px solid var(--ink);
-	box-shadow: var(--lift);
+	border: var(--bw) solid var(--line);
+	box-shadow: var(--surface-shadow);
 }
 
 .tab {
+	border-radius: var(--radius-sm);
 	display: inline-flex;
 	align-items: center;
 	min-height: 40px;
-	padding: 0 18px 4px;
+	padding: 0 18px var(--depth);
 	font: 600 15px / 1 var(--sans);
 	color: var(--ink);
 	background: var(--light);
-	border: 2px solid var(--ink);
+	border: var(--bw) solid var(--line);
 	box-shadow:
-		inset 0 -4px 0 var(--light-lo),
-		inset 0 2px 0 var(--light-hi);
+		inset var(--edge-lo) 0 var(--light-lo),
+		inset var(--edge-hi) 0 var(--light-hi);
 }
 
 .invite-page {
@@ -1812,7 +2429,7 @@ input[type="range"]:disabled {
 	}
 
 	.btn.dim:not(.active) {
-		padding: 0 8px 4px;
+		padding: 0 8px var(--depth);
 	}
 
 	.account .btn {
@@ -1825,6 +2442,8 @@ input[type="range"]:disabled {
  * Measure card
  * ------------------------------------------------------------------------------------------- */
 .measure-card {
+	border-radius: var(--radius);
+	overflow: hidden;
 	position: absolute;
 	top: calc(var(--safe-top) + var(--toolbar-h, 48px) + 16px);
 	left: 8px;
@@ -1834,8 +2453,8 @@ input[type="range"]:disabled {
 	display: flex;
 	flex-direction: column;
 	background: var(--s1);
-	border: 2px solid var(--ink);
-	box-shadow: var(--lift);
+	border: var(--bw) solid var(--line);
+	box-shadow: var(--surface-shadow);
 }
 
 .measure-body {
@@ -1845,7 +2464,8 @@ input[type="range"]:disabled {
 
 .measure-total {
 	font-family: var(--display);
-	font-size: var(--fs-display);
+	font-size: var(--display-size);
+	font-weight: var(--display-weight);
 	line-height: 1.1;
 	color: var(--yellow);
 }
@@ -1954,7 +2574,7 @@ input[type="range"]:disabled {
 
 .danger-zone {
 	padding-top: 4px;
-	border-top: 2px solid var(--red-lo);
+	border-top: 2px solid var(--danger-lo);
 }
 
 /* Layer actions: the main action on its own row, the rest sharing the row below. */
@@ -1977,12 +2597,13 @@ input[type="range"]:disabled {
 }
 
 .points-list {
+	border-radius: var(--radius-sm);
 	list-style: none;
 	margin: 10px 0 0;
 	padding: 4px;
 	max-height: 200px;
 	overflow-y: auto;
-	background: var(--ink);
+	background: var(--well);
 }
 
 .points-list li {
@@ -1997,6 +2618,7 @@ input[type="range"]:disabled {
 }
 
 .point-no {
+	border-radius: var(--radius-sm);
 	flex: none;
 	min-width: 24px;
 	padding: 2px 4px;
@@ -2057,11 +2679,11 @@ input[type="range"]:disabled {
 .grip:hover .grip-dots,
 .grip:focus-visible .grip-dots {
 	background:
-		radial-gradient(circle, #fff 1.5px, transparent 2px) 0 0 / 4px 4.67px;
+		radial-gradient(circle, var(--text) 1.5px, transparent 2px) 0 0 / 4px 4.67px;
 }
 
 .grip:focus-visible {
-	outline: 2px solid #fff;
+	outline: 2px solid var(--focus);
 	outline-offset: -2px;
 }
 
@@ -2074,11 +2696,443 @@ input[type="range"]:disabled {
 	z-index: 2;
 	cursor: grabbing;
 	background: var(--s3);
-	box-shadow: var(--lift);
+	box-shadow: var(--surface-shadow);
 	transition: none;
 }
 
 /* A layer being dragged folds up, so it moves as one short row however much it holds. */
 .layer.dragging .layer-body {
 	display: none;
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * Style details that the tokens can't express. Each block is scoped to its data-style and stops
+ * at any nested data-style, so the previews on the settings page each show their own style.
+ * ------------------------------------------------------------------------------------------- */
+@scope ([data-style="win98"]) to ([data-style]) {
+	/* Windows: a raised frame with the title bar inset in it. */
+	.panel,
+	.modal,
+	.invite-card,
+	.popup,
+	.measure-card,
+	.preview-window {
+		padding: 3px;
+	}
+
+	.panel-head,
+	.modal-head,
+	.popup h3,
+	.preview-head {
+		min-height: 0;
+		padding: 4px 4px 4px 8px;
+		box-shadow: none;
+	}
+
+	.popup h3 {
+		min-height: 34px;
+		padding-right: 36px;
+	}
+
+	.page-head {
+		color: var(--head-fg);
+		background: var(--head-bg);
+	}
+
+	/* The square close button at the end of a title bar. */
+	.panel-head .btn.close,
+	.modal-head .btn.close,
+	.btn.popup-close {
+		width: 24px;
+		min-height: 22px;
+		font-size: 14px;
+		font-weight: 700;
+	}
+
+	.btn.popup-close {
+		top: 9px;
+		right: 9px;
+	}
+
+	/* Buttons are the surface colour, raised, and sink while pressed. */
+	.btn:not(.primary, .active, .danger) {
+		--bg: var(--s1);
+		--bg-hover: var(--s1);
+		color: var(--text);
+	}
+
+	.btn,
+	.tab {
+		box-shadow: var(--bevel-out);
+	}
+
+	.btn:active:not(:disabled) {
+		box-shadow: var(--bevel-in);
+	}
+
+	.btn:disabled {
+		background-color: var(--s1);
+		box-shadow: var(--bevel-out);
+		text-shadow: 1px 1px 0 var(--bevel-light);
+	}
+
+	.btn:focus-visible {
+		outline: 1px dotted currentColor;
+		outline-offset: -5px;
+	}
+
+	/* Cards are raised too; what sits inside them is sunk. */
+	.layer,
+	.revision,
+	.member-list li,
+	.dimension-list li,
+	.invite-list li,
+	.feature-history li,
+	.new-link,
+	.toggle,
+	.style-option {
+		box-shadow: var(--bevel-out);
+	}
+
+	input[type="text"],
+	textarea,
+	select,
+	code,
+	.segmented,
+	.layer-body,
+	.hotbar-slot,
+	.dye-picker,
+	.points-list,
+	.progress,
+	.bossbar-track {
+		box-shadow: var(--bevel-in);
+	}
+
+	input[type="checkbox"],
+	input[type="range"] {
+		box-shadow: var(--bevel-in);
+	}
+
+	input[type="checkbox"]::before {
+		top: 0;
+		left: 0;
+		background: var(--s1);
+		box-shadow: var(--bevel-out);
+	}
+
+	input[type="checkbox"]:checked::before {
+		left: calc(100% - 26px);
+	}
+
+	input[type="range"]::-webkit-slider-thumb {
+		background: var(--s1);
+		box-shadow: var(--bevel-out);
+	}
+
+	input[type="range"]::-moz-range-thumb {
+		background: var(--s1);
+		box-shadow: var(--bevel-out);
+	}
+
+	.tooltip,
+	.slot-tip {
+		--muted: #444;
+		color: #000;
+		background: #ffffe1;
+		border: 1px solid #000;
+		box-shadow: none;
+	}
+
+	.tip-key {
+		background: #ecebc9;
+	}
+
+	/* The desktop: teal in the overworld, and a mix of the palette's two colours elsewhere. */
+	.page-root,
+	.invite-page {
+		background: color-mix(in srgb, var(--accent), var(--chrome));
+	}
+}
+
+@scope ([data-style="xp"]) to ([data-style]) {
+	/* Windows: a frame in the chrome colour around a title bar, rounded at the top only. */
+	.panel,
+	.modal,
+	.invite-card,
+	.popup,
+	.measure-card,
+	.preview-window {
+		border: 3px solid var(--chrome);
+		border-radius: 8px 8px 0 0;
+	}
+
+	.panel-head,
+	.modal-head,
+	.popup h3,
+	.page-head,
+	.preview-head {
+		text-shadow: 1px 1px 0 color-mix(in srgb, var(--chrome), #000 55%);
+		border-bottom-color: transparent;
+	}
+
+	.page-head {
+		color: var(--head-fg);
+		background: var(--head-bg);
+		border-bottom: 0;
+	}
+
+	/* The red close button of a title bar. */
+	.panel-head .btn.close,
+	.modal-head .btn.close,
+	.popup-close {
+		--bg: #d9532c;
+		--bg-hover: #e8714d;
+		color: #fff;
+		text-shadow: none;
+		border-color: #fff;
+	}
+
+	/* Glossy buttons that light up orange under the pointer. */
+	.btn:hover:not(:disabled) {
+		box-shadow:
+			inset 0 0 0 1px #fde49a,
+			inset 0 -2px 0 #f0a524;
+	}
+
+	.btn:active:not(:disabled) {
+		background-image: linear-gradient(
+			rgba(0, 0, 0, 0.14),
+			rgba(255, 255, 255, 0.12)
+		);
+		box-shadow: none;
+	}
+
+	/* Docks over the map are taskbars. */
+	.dock {
+		--text: #ffffff;
+		color: #ffffff;
+		background: var(--head-bg);
+	}
+
+	.dock .tabbar .btn:not(.active):hover,
+	.dock .hotbar-slot:hover {
+		background: rgba(255, 255, 255, 0.2);
+	}
+
+	.tooltip,
+	.slot-tip {
+		--muted: #444;
+		color: #000;
+		background: #ffffe1;
+		border: 1px solid #000;
+		box-shadow: 2px 2px 3px rgba(0, 0, 0, 0.35);
+	}
+
+	.tip-key {
+		background: #ecebc9;
+	}
+
+	/* A sky over a rolling hill. */
+	.page-root,
+	.invite-page {
+		background:
+			radial-gradient(
+				140% 60% at 25% 105%,
+				var(--accent-hi),
+				var(--accent) 55%,
+				transparent 55.5%
+			),
+			linear-gradient(
+				var(--chrome),
+				color-mix(in srgb, var(--chrome), #fff 60%) 80%
+			);
+	}
+}
+
+@scope ([data-style="modern"]) to ([data-style]) {
+	.btn {
+		border-color: transparent;
+		transition:
+			background-color 0.12s,
+			transform 0.06s;
+	}
+
+	.btn:not(.primary, .active, .danger) {
+		--bg: var(--s3);
+		--bg-hover: color-mix(in srgb, var(--s3), var(--text) 10%);
+		color: var(--text);
+	}
+
+	.btn:active:not(:disabled) {
+		transform: translateY(1px);
+	}
+
+	/* Frosted glass over the map. */
+	.dock,
+	.panel,
+	.popup,
+	.measure-card,
+	.bossbar,
+	.toast,
+	.load-error {
+		background: color-mix(in srgb, var(--s1) 86%, transparent);
+		backdrop-filter: blur(16px) saturate(1.4);
+	}
+
+	.modal-backdrop {
+		backdrop-filter: blur(6px);
+	}
+
+	input[type="text"],
+	textarea,
+	select,
+	.hotbar-slot {
+		box-shadow: none;
+	}
+
+	input[type="text"]:focus,
+	textarea:focus,
+	select:focus {
+		border-color: var(--accent-hi);
+		box-shadow: 0 0 0 3px color-mix(in srgb, var(--accent) 35%, transparent);
+	}
+
+	.hotbar-slot.selected::after {
+		inset: -3px;
+		border-width: 2px;
+		border-radius: calc(var(--radius-sm) + 3px);
+		outline: none;
+	}
+
+	.page-root,
+	.invite-page {
+		background: var(--well);
+	}
+}
+
+/* Charts and the admin statistics */
+:root {
+	--chart-1: #4aa3df;
+	--chart-2: #52a535;
+	--chart-3: #e8a33d;
+	--chart-4: #c55ad6;
+	--chart-5: #e05d5d;
+	--chart-6: #8c8d90;
+}
+
+.chart-box {
+	position: relative;
+}
+
+.chart-svg {
+	display: block;
+	width: 100%;
+	height: auto;
+	touch-action: pan-y;
+}
+
+.chart-grid {
+	stroke: var(--s2);
+	stroke-width: 1;
+}
+
+.chart-cursor {
+	stroke: var(--muted);
+	stroke-width: 1;
+	stroke-dasharray: 3 3;
+}
+
+.chart-label {
+	font: 11px var(--sans);
+	fill: var(--muted);
+}
+
+.chart-tip {
+	position: absolute;
+	top: 8px;
+	z-index: 1;
+	width: max-content;
+	min-width: 160px;
+	max-width: calc(100% - 20px);
+	padding: 6px 10px;
+	font-size: 13px;
+	background: var(--s1);
+	border: var(--bw) solid var(--line);
+	box-shadow: var(--surface-shadow);
+	pointer-events: none;
+}
+
+.chart-tip-row {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+}
+
+.chart-tip-value {
+	margin-left: auto;
+	padding-left: 12px;
+	font-variant-numeric: tabular-nums;
+}
+
+.chart-swatch {
+	display: inline-block;
+	flex: none;
+	width: 10px;
+	height: 10px;
+	margin-right: 4px;
+	border: 1px solid var(--line);
+}
+
+.chart-tip-row .chart-swatch {
+	margin-right: 0;
+}
+
+.chart-legend {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 6px 16px;
+	margin-top: 6px;
+	font-size: 13px;
+	color: var(--muted);
+}
+
+.admin-stats h2 {
+	margin-top: 22px;
+}
+
+.admin-toolbar {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin: 22px 0 8px;
+}
+
+.admin-toolbar h2 {
+	margin: 0;
+}
+
+.admin-block {
+	margin: 12px 0;
+}
+
+.share-bar {
+	display: inline-block;
+	width: 80px;
+	height: 8px;
+	vertical-align: middle;
+	background: var(--well);
+	border: 1px solid var(--line);
+}
+
+.share-fill {
+	display: block;
+	height: 100%;
+	background: var(--chart-1);
+}
+
+.stats-table .muted-cell {
+	font-style: italic;
+	color: var(--muted);
 }

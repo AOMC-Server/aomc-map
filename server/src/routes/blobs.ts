@@ -22,6 +22,7 @@ export const blobRoutes = new Hono<AppEnv>().get(
 		return new Response(blob, {
 			headers: {
 				"Content-Type": "image/webp",
+				"Content-Length": String(blob.size),
 				"Cache-Control": "public, max-age=31536000, immutable",
 			},
 		});

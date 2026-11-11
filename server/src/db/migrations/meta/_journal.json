@@ -36,6 +36,20 @@
       "when": 1794369797955,
       "tag": "0004_feature_order",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1794373455812,
+      "tag": "0005_dimension_theme",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1794375901282,
+      "tag": "0006_storage_traffic",
+      "breakpoints": true
     }
   ]
 }

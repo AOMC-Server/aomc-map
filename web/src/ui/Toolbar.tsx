@@ -42,7 +42,7 @@ export function Toolbar() {
 								class={`btn dim ${active ? "active" : ""}`}
 								onClick={() => selectDimension(d.slug)}
 							>
-								<BlockIcon slug={d.slug} />
+								<BlockIcon theme={d.theme} />
 								<span class="dim-name">{d.name}</span>
 							</button>
 						);

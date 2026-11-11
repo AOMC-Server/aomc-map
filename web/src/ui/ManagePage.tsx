@@ -1,4 +1,9 @@
 import { MAX_NAME } from "@aomc/shared/features";
+import {
+	DIMENSION_THEMES,
+	type DimensionTheme,
+	guessDimensionTheme,
+} from "@aomc/shared/schemas";
 import type { ComponentChildren } from "preact";
 import { useEffect, useState } from "preact/hooks";
 import { loginUrl } from "../api";
@@ -12,17 +17,21 @@ import {
 } from "../sharing";
 import { slugify } from "../slug";
 import { currentMap, type Dimension, user } from "../state";
+import { DIMENSION_THEME_NAMES } from "../theme";
+import { AdminStats } from "./AdminStats";
 import { InviteLinks } from "./InviteLinks";
+import { BlockIcon } from "./icons";
 import { MembersSection } from "./MembersSection";
 import { Page } from "./Page";
 
-type Tab = "settings" | "dimensions" | "members" | "invites";
+type Tab = "settings" | "dimensions" | "members" | "invites" | "statistics";
 
 const TAB_LABELS: Record<Tab, string> = {
 	settings: "Settings",
 	dimensions: "Dimensions",
 	members: "Members",
 	invites: "Invites",
+	statistics: "Statistics",
 };
 
 function SettingsTab() {
@@ -56,6 +65,29 @@ function SettingsTab() {
 				Save
 			</button>
 		</form>
+	);
+}
+
+function ThemeSelect(props: {
+	value: DimensionTheme;
+	label: string;
+	disabled?: boolean;
+	onChange: (theme: DimensionTheme) => void;
+}) {
+	return (
+		<select
+			class="theme-select"
+			value={props.value}
+			aria-label={props.label}
+			disabled={props.disabled}
+			onChange={(e) => props.onChange(e.currentTarget.value as DimensionTheme)}
+		>
+			{DIMENSION_THEMES.map((t) => (
+				<option key={t} value={t}>
+					{DIMENSION_THEME_NAMES[t]}
+				</option>
+			))}
+		</select>
 	);
 }
 
@@ -124,6 +156,18 @@ function DimensionRow(props: {
 						}}
 					/>
 				</label>
+				<div class="dim-scale">
+					<span class="muted">Theme</span>
+					<BlockIcon theme={d.theme} />
+					<ThemeSelect
+						value={d.theme}
+						label={`Theme of ${d.slug}`}
+						disabled={props.busy}
+						onChange={(theme) =>
+							props.run(() => updateDimension(d.slug, { theme }))
+						}
+					/>
+				</div>
 			</div>
 			<div class="group">
 				<button
@@ -164,6 +208,7 @@ function DimensionsTab() {
 	const [newName, setNewName] = useState("");
 	const [newSlug, setNewSlug] = useState("");
 	const [newScale, setNewScale] = useState("");
+	const [newTheme, setNewTheme] = useState<DimensionTheme | null>(null);
 	const [slugTouched, setSlugTouched] = useState(false);
 	const [busy, setBusy] = useState(false);
 	if (!detail) return null;
@@ -184,11 +229,17 @@ function DimensionsTab() {
 		const scale = parseScale(newScale);
 		if (scale === undefined) return;
 		await run(async () => {
-			const ok = await addDimension(slug, newName.trim(), scale);
+			const ok = await addDimension(
+				slug,
+				newName.trim(),
+				scale,
+				newTheme ?? guessDimensionTheme(slug),
+			);
 			if (ok) {
 				setNewName("");
 				setNewSlug("");
 				setNewScale("");
+				setNewTheme(null);
 				setSlugTouched(false);
 			}
 			return ok;
@@ -207,6 +258,10 @@ function DimensionsTab() {
 				blocks). Switching between dimensions with a scale keeps showing the
 				same place. Leave it empty for a dimension like the End, whose
 				coordinates don't correspond to anything.
+			</p>
+			<p class="muted">
+				<b>Theme</b> picks the dimension's icon and the colours of the interface
+				while it is shown.
 			</p>
 			<ul class="dimension-list">
 				{dims.map((d, i) => (
@@ -252,6 +307,11 @@ function DimensionsTab() {
 					value={newScale}
 					onInput={(e) => setNewScale(e.currentTarget.value)}
 				/>
+				<ThemeSelect
+					value={newTheme ?? guessDimensionTheme(newSlug)}
+					label="Theme of the new dimension"
+					onChange={setNewTheme}
+				/>
 				<button
 					type="submit"
 					class="btn"
@@ -269,7 +329,7 @@ function DimensionsTab() {
 	);
 }
 
-/** /manage: map settings, dimensions, members and invite links, for moderators and owners. */
+/** /manage: map settings, dimensions, members, invite links and statistics, for moderators and owners. */
 export function ManagePage() {
 	const [loaded, setLoaded] = useState(false);
 
@@ -282,7 +342,7 @@ export function ManagePage() {
 	const tabs: Tab[] = [];
 	if (role === "owner") tabs.push("settings");
 	if (role === "owner" || role === "moderator") tabs.push("dimensions");
-	if (role === "owner") tabs.push("members", "invites");
+	if (role === "owner") tabs.push("members", "invites", "statistics");
 	const [tab, setTab] = useState<Tab>("settings");
 	const active = tabs.includes(tab) ? tab : tabs[0];
 
@@ -324,6 +384,7 @@ export function ManagePage() {
 					{active === "dimensions" && <DimensionsTab />}
 					{active === "members" && <MembersSection scope={mapScope} />}
 					{active === "invites" && <InviteLinks scope={mapScope} />}
+					{active === "statistics" && <AdminStats />}
 				</div>
 			</>
 		);

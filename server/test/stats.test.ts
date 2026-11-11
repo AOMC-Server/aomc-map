@@ -1,0 +1,204 @@
+import { afterAll, describe, expect, test } from "bun:test";
+import { eq } from "drizzle-orm";
+import { featureRevisions, layers, revisions } from "../src/db/schema";
+import type { Auth, TileApp } from "./helpers";
+import {
+	bootTiles,
+	call,
+	cleanupTempDirs,
+	erase,
+	RED,
+	solid,
+	T,
+	upload,
+} from "./helpers";
+
+afterAll(cleanupTempDirs);
+
+async function makeLayer(t: TileApp, user: Auth, body: object = {}) {
+	const res = await call(t, user, "POST", "/api/layers", {
+		dimension: "overworld",
+		name: "Bases",
+		color: "red",
+		...body,
+	});
+	expect(res.status).toBe(201);
+	return res.body.layer as { id: number };
+}
+
+async function addPin(t: TileApp, user: Auth, layerId: number) {
+	const res = await call(t, user, "POST", `/api/layers/${layerId}/features`, {
+		type: "pin",
+		name: "Base",
+		geometry: [1, 2],
+	});
+	expect(res.status).toBe(201);
+	return res.body.feature as { id: number };
+}
+
+const stats = (t: TileApp, user: Auth, range?: string) =>
+	call(t, user, "GET", `/api/stats${range ? `?range=${range}` : ""}`);
+
+const entry = (body: { leaderboard: { userId: string }[] }, id: string) =>
+	body.leaderboard.find((r) => r.userId === id);
+
+describe("stats", () => {
+	test("counts uploads, tiles, area, features, edits and layers", async () => {
+		const t = await bootTiles();
+		// Two tiles, then one of them again: 3 tiles uploaded, 2 distinct.
+		await upload(t, await solid(T * 2, T, RED), 0, 0);
+		await upload(t, await solid(T, T, RED), 0, 0);
+
+		const layer = await makeLayer(t, t.editor);
+		const feature = await addPin(t, t.editor, layer.id);
+		await addPin(t, t.mod, layer.id);
+		const edited = await call(
+			t,
+			t.mod,
+			"PATCH",
+			`/api/features/${feature.id}`,
+			{ name: "Renamed" },
+		);
+		expect(edited.status).toBe(200);
+
+		const res = await stats(t, t.editor);
+		expect(res.status).toBe(200);
+		expect(res.body.range).toBe("all");
+		expect(res.body.since).toBeNull();
+		expect(res.body.me).toMatchObject({
+			uploads: 2,
+			tiles: 3,
+			uploadedBlocks: 3 * T * T,
+			areaTiles: 2,
+			areaBlocks: 2 * T * T,
+			featuresCreated: 1,
+			featuresByType: { pin: 1, line: 0, polygon: 0 },
+			featureEdits: 0,
+			layersCreated: 1,
+		});
+		expect(entry(res.body, "editor")).toMatchObject({
+			username: "editor",
+			uploads: 2,
+		});
+		expect(entry(res.body, "mod")).toMatchObject({
+			uploads: 0,
+			featuresCreated: 1,
+			featureEdits: 1,
+			layersCreated: 0,
+		});
+		expect(res.body.totals).toMatchObject({
+			uploads: 2,
+			tiles: 3,
+			uploadedBlocks: 3 * T * T,
+			areaTiles: 2,
+			featuresCreated: 2,
+			featureEdits: 1,
+			layersCreated: 1,
+		});
+	});
+
+	test("the area history follows the export dates and starts from what was mapped before the range", async () => {
+		const t = await bootTiles();
+		const first = await upload(t, await solid(T, T, RED), 0, 0);
+		await upload(t, await solid(T, T, RED), 0, 0); // the same tile again
+		const modUpload = await upload(t, await solid(T, T, RED), T * 4, 0, t.mod);
+		// An export dated after its upload (a wrong file name) is dated by the upload.
+		await t.db
+			.update(revisions)
+			.set({ exportedAt: Date.now() + 5 * 24 * 3600_000 })
+			.where(eq(revisions.id, modUpload));
+		await t.db
+			.update(revisions)
+			.set({ exportedAt: Date.now() - 40 * 24 * 3600_000 })
+			.where(eq(revisions.id, first));
+
+		const all = await stats(t, t.editor);
+		const last = all.body.areaHistory.at(-1);
+		expect(last).toMatchObject({
+			totalBlocks: 2 * T * T,
+			myBlocks: T * T,
+		});
+		expect(last.totalBlocks).toBe(all.body.totals.areaBlocks);
+		expect(last.myBlocks).toBe(all.body.me.areaBlocks);
+		const values = all.body.areaHistory.map(
+			(p: { totalBlocks: number }) => p.totalBlocks,
+		);
+		expect(values).toEqual([...values].sort((a, b) => a - b));
+
+		const month = await stats(t, t.mod, "30d");
+		expect(month.body.areaHistory[0]).toMatchObject({
+			totalBlocks: T * T,
+			myBlocks: 0,
+		});
+		expect(month.body.areaHistory.at(-1)).toMatchObject({
+			totalBlocks: 2 * T * T,
+			myBlocks: T * T,
+		});
+
+		const anon = await stats(t, null);
+		expect(anon.body.areaHistory.at(-1).myBlocks).toBeNull();
+		expect((await stats(await bootTiles(), null)).body.areaHistory).toEqual([]);
+	});
+
+	test("deleted and failed uploads are not counted", async () => {
+		const t = await bootTiles();
+		const id = await upload(t, await solid(T, T, RED), 0, 0);
+		await upload(t, await solid(T, T, RED), T * 4, 0);
+		await erase(t, id);
+		await t.db.insert(revisions).values({
+			kind: "upload",
+			authorId: "editor",
+			status: "failed",
+			fileCount: 1,
+		});
+		const res = await stats(t, t.editor);
+		expect(res.body.me).toMatchObject({ uploads: 1, tiles: 1 });
+	});
+
+	test("private layers count for their owner only", async () => {
+		const t = await bootTiles();
+		const secret = await makeLayer(t, t.editor, { visibility: "private" });
+		await addPin(t, t.editor, secret.id);
+
+		const own = await stats(t, t.editor);
+		expect(own.body.me).toMatchObject({
+			featuresCreated: 1,
+			layersCreated: 1,
+		});
+		expect(entry(own.body, "editor")).toBeUndefined();
+		expect(own.body.totals).toMatchObject({
+			featuresCreated: 0,
+			layersCreated: 0,
+		});
+		const anon = await stats(t, null);
+		expect(anon.body.me).toBeNull();
+		expect(anon.body.leaderboard).toEqual([]);
+	});
+
+	test("the range leaves out older activity", async () => {
+		const t = await bootTiles();
+		const layer = await makeLayer(t, t.editor);
+		await addPin(t, t.editor, layer.id);
+		await upload(t, await solid(T, T, RED), 0, 0);
+		const old = Date.now() - 10 * 24 * 3600_000;
+		await t.db.update(featureRevisions).set({ createdAt: old });
+		await t.db
+			.update(layers)
+			.set({ createdAt: old })
+			.where(eq(layers.id, layer.id));
+
+		const week = await stats(t, t.editor, "7d");
+		expect(week.body.since).toBeGreaterThan(Date.now() - 8 * 24 * 3600_000);
+		expect(week.body.me).toMatchObject({
+			uploads: 1,
+			featuresCreated: 0,
+			layersCreated: 0,
+		});
+		const month = await stats(t, t.editor, "30d");
+		expect(month.body.me).toMatchObject({
+			featuresCreated: 1,
+			layersCreated: 1,
+		});
+		expect((await stats(t, null, "1y")).status).toBe(400);
+	});
+});

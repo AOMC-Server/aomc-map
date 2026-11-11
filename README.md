@@ -105,7 +105,7 @@ All settings are environment variables (see `.env.example`).
 **Managing the map** (_Manage_ in the hotbar):
 
 - _Settings_: the map name.
-- _Dimensions_: add, rename, reorder, archive. Archived dimensions keep their tiles and history.
+- _Dimensions_: add, rename, reorder, archive, and set the theme (Overworld, Nether or End), which picks the dimension's block icon and the interface colours while it is shown. Archived dimensions keep their tiles and history.
 - _Members_: make someone a moderator or owner by Discord user id (they must have logged in once), change roles, or remove people. The last owner can't be demoted or removed.
 - _Invites_: links that make the person a moderator, with an expiry and an optional use limit. The link is shown once and only a hash is stored. `/invite/<token>` shows who invited you, asks you to log in, and lands you on the map. Accepting never lowers anyone's role.
 

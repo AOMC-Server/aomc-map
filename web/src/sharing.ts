@@ -1,4 +1,5 @@
 import {
+	type DimensionTheme,
 	type LayerRole,
 	layerRoleSchema,
 	memberRoleSchema,
@@ -148,7 +149,11 @@ export const addDimension = (
 	slug: string,
 	name: string,
 	scale: number | null = null,
-) => mapChange(() => api.api.dimensions.$post({ json: { slug, name, scale } }));
+	theme?: DimensionTheme,
+) =>
+	mapChange(() =>
+		api.api.dimensions.$post({ json: { slug, name, scale, theme } }),
+	);
 
 export const updateDimension = (
 	dim: string,
@@ -157,6 +162,7 @@ export const updateDimension = (
 		sortOrder?: number;
 		archived?: boolean;
 		scale?: number | null;
+		theme?: DimensionTheme;
 	},
 ) =>
 	mapChange(() =>

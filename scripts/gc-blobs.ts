@@ -3,6 +3,8 @@ import { existsSync } from "node:fs";
 import { readdir, rm, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { parseArgs } from "node:util";
+import { createDb } from "../server/src/db/client";
+import { recordStorage } from "../server/src/storage";
 import { isBlobHash } from "../server/src/tiles/blobstore";
 
 export type GcResult = {
@@ -70,6 +72,7 @@ export async function gcBlobs(opts: {
 		deleted: 0,
 		bytes: 0,
 	};
+	const removed: string[] = [];
 	const blobsDir = join(opts.dataDir, "blobs");
 	if (!existsSync(blobsDir)) return result;
 
@@ -94,9 +97,30 @@ export async function gcBlobs(opts: {
 		if (opts.deleteFiles) {
 			await rm(file, { force: true });
 			result.deleted++;
+			if (isBlob) removed.push(name.slice(0, -5));
 		}
 	}
+	if (result.deleted > 0) forgetBlobs(dbFile, removed);
 	return result;
+}
+
+/** Drops the size records of deleted blobs and adds a storage history row. */
+function forgetBlobs(dbFile: string, hashes: string[]) {
+	const db = createDb(dbFile);
+	// A database the server has not migrated yet has no size records to update.
+	const tracked = db.$client
+		.query("SELECT 1 FROM sqlite_master WHERE name = 'blobs'")
+		.get();
+	if (!tracked) {
+		db.$client.close();
+		return;
+	}
+	const del = db.$client.prepare("DELETE FROM blobs WHERE hash = ?");
+	db.transaction(() => {
+		for (const hash of hashes) del.run(hash);
+	});
+	recordStorage(db, "gc");
+	db.$client.close();
 }
 
 if (import.meta.main) {

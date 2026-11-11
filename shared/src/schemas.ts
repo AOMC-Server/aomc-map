@@ -36,10 +36,24 @@ export const dimensionScaleSchema = z
 	.max(1_000_000)
 	.nullable();
 
+/** Picks the dimension's block icon and the interface colours while it is shown. */
+export const DIMENSION_THEMES = ["overworld", "nether", "end"] as const;
+export const dimensionThemeSchema = z.enum(DIMENSION_THEMES);
+export type DimensionTheme = z.infer<typeof dimensionThemeSchema>;
+
+/** The theme a dimension most likely wants, from its slug. */
+export function guessDimensionTheme(slug: string): DimensionTheme {
+	if (slug.includes("nether")) return "nether";
+	if (slug.includes("end")) return "end";
+	return "overworld";
+}
+
 export const createDimensionSchema = z.object({
 	slug: slugSchema,
 	name: z.string().trim().min(1).max(100),
 	scale: dimensionScaleSchema.optional(),
+	/** Defaults to a guess from the slug. */
+	theme: dimensionThemeSchema.optional(),
 });
 
 export const updateDimensionSchema = z
@@ -48,6 +62,7 @@ export const updateDimensionSchema = z
 		sortOrder: z.number().int().optional(),
 		archived: z.boolean().optional(),
 		scale: dimensionScaleSchema.optional(),
+		theme: dimensionThemeSchema.optional(),
 	})
 	.refine(nonEmpty, "nothing to update");
 
@@ -75,4 +90,26 @@ export const createTokenSchema = z.object({
 		.max(MAX_TOKEN_EXPIRY_DAYS)
 		.nullable()
 		.default(DEFAULT_TOKEN_EXPIRY_DAYS),
+});
+
+export const STATS_RANGES = ["all", "30d", "7d"] as const;
+export type StatsRange = (typeof STATS_RANGES)[number];
+
+export const statsQuerySchema = z.object({
+	range: z.enum(STATS_RANGES).default("all"),
+});
+
+export const ADMIN_STATS_RANGES = [
+	"1h",
+	"6h",
+	"24h",
+	"7d",
+	"30d",
+	"90d",
+	"all",
+] as const;
+export type AdminStatsRange = (typeof ADMIN_STATS_RANGES)[number];
+
+export const adminStatsQuerySchema = z.object({
+	range: z.enum(ADMIN_STATS_RANGES).default("7d"),
 });

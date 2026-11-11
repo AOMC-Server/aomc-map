@@ -1,3 +1,4 @@
+import { DIMENSION_THEMES } from "@aomc/shared";
 import {
 	index,
 	integer,
@@ -79,6 +80,10 @@ export const dimensions = sqliteTable("dimensions", {
 	 * with other dimensions (the End).
 	 */
 	scale: real("scale"),
+	/** Block icon and interface colours; see DIMENSION_THEMES. */
+	theme: text("theme", { enum: DIMENSION_THEMES })
+		.notNull()
+		.default("overworld"),
 	createdAt: createdAt(),
 });
 
@@ -235,3 +240,47 @@ export const jobs = sqliteTable("jobs", {
 	attempts: integer("attempts").notNull().default(0),
 	createdAt: createdAt(),
 });
+
+/** The size of every stored tile image, recorded when it is written, so storage is summed rather than measured. */
+export const blobFiles = sqliteTable("blobs", {
+	hash: text("hash").primaryKey(),
+	bytes: integer("bytes").notNull(),
+	createdAt: createdAt(),
+});
+
+/** Append-only: a row after each upload, upload deletion, blob cleanup and server start. */
+export const storageHistory = sqliteTable("storage_history", {
+	id: id(),
+	at: integer("at").notNull(),
+	reason: text("reason", {
+		enum: ["upload", "erase", "gc", "boot"],
+	}).notNull(),
+	blobCount: integer("blob_count").notNull(),
+	blobBytes: integer("blob_bytes").notNull(),
+	/** The part of the above that the map's history still uses; the rest awaits scripts/gc-blobs.ts. */
+	referencedBlobs: integer("referenced_blobs").notNull(),
+	referencedBytes: integer("referenced_bytes").notNull(),
+	dbBytes: integer("db_bytes").notNull(),
+});
+
+/**
+ * Counters of what the server sent. `hour` is the start of the period a row covers: a minute for
+ * the last day, an hour for the last 90 days, and a day before that.
+ */
+export const trafficHourly = sqliteTable(
+	"traffic_hourly",
+	{
+		hour: integer("hour").notNull(),
+		category: text("category", {
+			enum: ["tiles", "blobs", "preview", "api", "auth", "static"],
+		}).notNull(),
+		/** Only for tiles and blobs; "" otherwise. */
+		domain: text("domain").notNull().default(""),
+		requests: integer("requests").notNull().default(0),
+		bytes: integer("bytes").notNull().default(0),
+		s2xx: integer("s2xx").notNull().default(0),
+		s3xx: integer("s3xx").notNull().default(0),
+		s4xx: integer("s4xx").notNull().default(0),
+	},
+	(t) => [primaryKey({ columns: [t.hour, t.category, t.domain] })],
+);

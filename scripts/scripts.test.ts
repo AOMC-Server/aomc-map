@@ -8,7 +8,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { jobs } from "../server/src/db/schema";
+import { blobFiles, jobs, storageHistory } from "../server/src/db/schema";
 import {
 	bootTiles,
 	cleanupTempDirs,
@@ -185,6 +185,18 @@ describe("gc-blobs", () => {
 		// Everything still referenced survives, so the map still renders.
 		const check = await gcBlobs({ dataDir: dir, deleteFiles: false });
 		expect(check.referenced).toBe(report.referenced);
+	});
+
+	test("forgets the sizes of deleted blobs and records the new storage", async () => {
+		const t = await withData();
+		plant(t.env.DATA_DIR, hash("e"));
+		await t.db.insert(blobFiles).values({ hash: hash("e"), bytes: 4 });
+		const before = (await t.db.select().from(blobFiles)).length;
+		await gcBlobs({ dataDir: t.env.DATA_DIR, deleteFiles: true });
+		expect(await t.db.select().from(blobFiles)).toHaveLength(before - 1);
+		expect((await t.db.select().from(storageHistory)).at(-1)?.reason).toBe(
+			"gc",
+		);
 	});
 
 	test("never touches referenced blobs even when they are old", async () => {

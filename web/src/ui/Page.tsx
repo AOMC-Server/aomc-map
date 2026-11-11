@@ -1,7 +1,7 @@
 import type { ComponentChildren } from "preact";
 import { Toast } from "./Toast";
 
-/** Layout of the standalone pages (/settings, /manage): a title bar with a way back, and the content. */
+/** Layout of the standalone pages (/settings, /manage, /stats): a title bar with a way back, and the content. */
 export function Page(props: { title: string; children: ComponentChildren }) {
 	return (
 		<div class="page-root">

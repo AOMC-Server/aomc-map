@@ -1,4 +1,5 @@
 import type { Dye } from "@aomc/shared/colors";
+import type { DimensionTheme } from "@aomc/shared/schemas";
 
 /** 16×16 pixel art: one string per row, one character per pixel, "." is transparent. */
 type Art = string[];
@@ -224,21 +225,19 @@ export function PixelIcon(props: {
 	return <Pixels cells={cells} size={props.size} class={props.class} />;
 }
 
-type BlockKind = "grass" | "netherrack" | "endstone";
+const BLOCKS: Record<DimensionTheme, string> = {
+	overworld: "grass",
+	nether: "netherrack",
+	end: "endstone",
+};
 
-/** Guesses a block for a dimension from its slug; anything unknown is grass. */
-export function blockFor(slug: string): BlockKind {
-	if (slug.includes("nether")) return "netherrack";
-	if (slug.includes("end")) return "endstone";
-	return "grass";
-}
-
-export function BlockIcon(props: { slug: string; size?: number }) {
+/** The block standing for a dimension, from its theme. */
+export function BlockIcon(props: { theme: DimensionTheme; size?: number }) {
 	const size = props.size ?? 20;
 	return (
 		<img
 			class="block-icon"
-			src={`/static/blocks/${blockFor(props.slug)}.png`}
+			src={`/static/blocks/${BLOCKS[props.theme]}.png`}
 			alt=""
 			width={size}
 			height={size}

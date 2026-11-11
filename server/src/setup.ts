@@ -5,10 +5,10 @@ import type { Env } from "./env";
 
 /** scale: overworld blocks per block of that dimension; null = coordinates are unrelated. */
 const DEFAULT_DIMENSIONS = [
-	{ slug: "overworld", name: "Overworld", scale: 1 },
-	{ slug: "nether", name: "Nether", scale: 8 },
-	{ slug: "the_end", name: "The End", scale: null },
-];
+	{ slug: "overworld", name: "Overworld", scale: 1, theme: "overworld" },
+	{ slug: "nether", name: "Nether", scale: 8, theme: "nether" },
+	{ slug: "the_end", name: "The End", scale: null, theme: "end" },
+] as const;
 
 /** Creates the map on first run. Safe to call on every boot. */
 export function runSetup(db: Db, env: Env) {

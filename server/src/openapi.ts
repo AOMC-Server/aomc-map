@@ -31,6 +31,8 @@ export const tags = [
 	{ name: "Features", description: "Individual pins, lines and areas" },
 	{ name: "Sharing", description: "Invites and layer members" },
 	{ name: "Images", description: "Blobs and link previews" },
+	{ name: "Stats", description: "Contribution statistics and leaderboard" },
+	{ name: "Admin", description: "Storage, traffic and server statistics" },
 ];
 
 const requiresLogin: Record<string, string[]>[] = [

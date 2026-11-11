@@ -1,4 +1,8 @@
-import { createDimensionSchema, updateDimensionSchema } from "@aomc/shared";
+import {
+	createDimensionSchema,
+	guessDimensionTheme,
+	updateDimensionSchema,
+} from "@aomc/shared";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { validator } from "hono-openapi";
@@ -40,6 +44,7 @@ export const dimensionRoutes = new Hono<AppEnv>()
 						slug: body.slug,
 						name: body.name,
 						scale: body.scale ?? null,
+						theme: body.theme ?? guessDimensionTheme(body.slug),
 						sortOrder: Math.max(-1, ...existing.map((d) => d.sortOrder)) + 1,
 					})
 					.returning();

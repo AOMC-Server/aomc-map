@@ -1,5 +1,6 @@
 import type { Dye } from "@aomc/shared/colors";
 import type { FeatureType, Point } from "@aomc/shared/features";
+import type { DimensionTheme } from "@aomc/shared/schemas";
 import type { View } from "@aomc/shared/view";
 import { computed, signal } from "@preact/signals";
 import type { InferResponseType } from "hono/client";
@@ -132,6 +133,13 @@ export const currentScale = computed(
 	() =>
 		currentMap.value?.dimensions.find((d) => d.slug === dimSlug.value)?.scale ??
 		null,
+);
+
+/** Theme of the dimension being viewed, which colours the interface. */
+export const currentDimensionTheme = computed<DimensionTheme>(
+	() =>
+		currentMap.value?.dimensions.find((d) => d.slug === dimSlug.value)?.theme ??
+		"overworld",
 );
 
 export const visibleDimensions = computed(

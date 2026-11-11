@@ -5,6 +5,28 @@
 		<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
 		<title>AOMC Map</title>
 		<link rel="icon" href="/static/pin.png" />
+		<script>
+			// Apply the saved appearance before first paint; main.tsx takes over from here (see theme.ts).
+			// The map is not loaded yet, so the palette is the one last shown for the same dimension.
+			{
+				const root = document.documentElement.dataset;
+				root.mode = "dark";
+				root.palette = "overworld";
+				root.style = "bedrock";
+				try {
+					const s = JSON.parse(localStorage.getItem("aomc.settings") || "{}");
+					const light = matchMedia("(prefers-color-scheme: light)").matches;
+					if (s.mode === "light" || (s.mode === "system" && light)) root.mode = "light";
+					if (typeof s.style === "string") root.style = s.style;
+					const p = JSON.parse(localStorage.getItem("aomc.palette") || "null");
+					const dim = new URLSearchParams(location.search).get("dim");
+					const onMap = location.pathname.replace(/\/+$/, "") === "";
+					if (p && onMap && s.dimensionColours !== false && (!dim || dim === p.dim)) {
+						root.palette = p.palette;
+					}
+				} catch {}
+			}
+		</script>
 	</head>
 	<body>
 		<div id="app"></div>

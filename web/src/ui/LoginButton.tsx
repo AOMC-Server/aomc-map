@@ -6,6 +6,9 @@ export function LoginButton() {
 	if (!u) {
 		return (
 			<div class="account dock">
+				<a class="btn" href="/stats" title="Statistics and leaderboard">
+					Stats
+				</a>
 				<a class="btn primary" href={loginUrl()}>
 					Log in with Discord
 				</a>
@@ -22,6 +25,9 @@ export function LoginButton() {
 				)}
 				<span class="username">{u.username}</span>
 			</span>
+			<a class="btn" href="/stats" title="Your stats and the leaderboard">
+				Stats
+			</a>
 			<a class="btn" href="/settings" title="Your settings and API tokens">
 				Settings
 			</a>

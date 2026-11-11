@@ -12,7 +12,11 @@ export function isBlobHash(value: string): boolean {
 }
 
 /** Content-addressed WebP storage: blobs/ab/cd/<sha256>.webp */
-export function createBlobStore(root: string) {
+export function createBlobStore(
+	root: string,
+	/** Called with the size of every blob that is put, whether or not it was already stored. */
+	onPut?: (hash: string, bytes: number) => void,
+) {
 	function path(hash: string): string {
 		if (!isBlobHash(hash)) throw new Error("invalid blob hash");
 		return join(root, hash.slice(0, 2), hash.slice(2, 4), `${hash}.webp`);
@@ -27,12 +31,14 @@ export function createBlobStore(root: string) {
 				// Reused: refresh the age so scripts/gc-blobs.ts treats it as new.
 				const now = new Date();
 				await utimes(target, now, now);
+				onPut?.(hash, data.byteLength);
 				return hash;
 			}
 			await mkdir(dirname(target), { recursive: true });
 			const tmp = `${target}.${randomToken(6)}.tmp`;
 			await Bun.write(tmp, data);
 			await rename(tmp, target);
+			onPut?.(hash, data.byteLength);
 			return hash;
 		},
 		read(hash: string): Promise<Buffer> {

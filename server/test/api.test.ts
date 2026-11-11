@@ -483,6 +483,58 @@ describe("map", () => {
 		}
 		expect(await scaleOf("a")).toBeNull();
 	});
+
+	test("dimension theme is guessed from the slug, can be chosen, changed, and is validated", async () => {
+		const t = boot();
+		runSetup(t.db, t.env);
+		const mod = await makeUser(t.db, "3");
+		await addMember(t, "3", "moderator");
+		const themes = async () =>
+			Object.fromEntries(
+				(await call(t, null, "GET", "/api/map")).body.dimensions.map(
+					(d: { slug: string; theme: string }) => [d.slug, d.theme],
+				),
+			);
+
+		await call(t, mod, "POST", "/api/dimensions", {
+			slug: "mining",
+			name: "M",
+		});
+		await call(t, mod, "POST", "/api/dimensions", {
+			slug: "nether_2",
+			name: "N",
+		});
+		await call(t, mod, "POST", "/api/dimensions", {
+			slug: "void",
+			name: "V",
+			theme: "end",
+		});
+		expect(await themes()).toEqual({
+			overworld: "overworld",
+			nether: "nether",
+			the_end: "end",
+			mining: "overworld",
+			nether_2: "nether",
+			void: "end",
+		});
+
+		expect(
+			(
+				await call(t, mod, "PATCH", "/api/dimensions/mining", {
+					theme: "nether",
+				})
+			).status,
+		).toBe(200);
+		expect((await themes()).mining).toBe("nether");
+		expect(
+			(
+				await call(t, mod, "PATCH", "/api/dimensions/mining", {
+					theme: "aether",
+				})
+			).status,
+		).toBe(400);
+		expect((await themes()).mining).toBe("nether");
+	});
 });
 
 describe("members", () => {

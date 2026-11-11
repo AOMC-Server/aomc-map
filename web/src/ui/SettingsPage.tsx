@@ -3,14 +3,15 @@ import { loginUrl } from "../api";
 import { loadMapDetail, loadUser } from "../controller";
 import { type Settings, settings, updateSettings } from "../settings";
 import { user, visibleDimensions } from "../state";
+import { MODES, STYLES } from "../theme";
 import { ApiTokens } from "./ApiTokens";
 import { Page } from "./Page";
 
-function Toggle(props: {
-	field: Exclude<keyof Settings, "defaultDimension">;
-	label: string;
-	hint: string;
-}) {
+type BooleanSetting = {
+	[K in keyof Settings]: Settings[K] extends boolean ? K : never;
+}[keyof Settings];
+
+function Toggle(props: { field: BooleanSetting; label: string; hint: string }) {
 	return (
 		<label class="toggle">
 			<input
@@ -25,6 +26,79 @@ function Toggle(props: {
 				<span class="muted hint">{props.hint}</span>
 			</span>
 		</label>
+	);
+}
+
+function ModePicker() {
+	const current = settings.value.mode;
+	return (
+		<fieldset class="mode-picker">
+			<legend class="label">Colours</legend>
+			<div class="segmented">
+				{MODES.map((m) => (
+					<button
+						key={m.id}
+						type="button"
+						class={`btn ${m.id === current ? "active" : ""}`}
+						aria-pressed={m.id === current}
+						onClick={() => updateSettings({ mode: m.id })}
+					>
+						{m.name}
+					</button>
+				))}
+			</div>
+		</fieldset>
+	);
+}
+
+function StylePicker() {
+	const current = settings.value.style;
+	return (
+		<fieldset class="style-picker">
+			<legend class="label">Style</legend>
+			{STYLES.map((st) => (
+				<label
+					key={st.id}
+					class={`style-option ${st.id === current ? "selected" : ""}`}
+				>
+					<input
+						class="visually-hidden"
+						type="radio"
+						name="style"
+						value={st.id}
+						checked={st.id === current}
+						onChange={() => updateSettings({ style: st.id })}
+					/>
+					<span class="style-preview" data-style={st.id} aria-hidden="true">
+						<span class="preview-window">
+							<span class="preview-head">Layers</span>
+							<span class="preview-body">
+								<span class="btn small">Edit</span>
+								<span class="btn small primary">Save</span>
+							</span>
+						</span>
+					</span>
+					<span class="style-name">{st.name}</span>
+					<span class="muted hint">{st.hint}</span>
+				</label>
+			))}
+		</fieldset>
+	);
+}
+
+function Appearance() {
+	return (
+		<section class="page-section">
+			<h2>Appearance</h2>
+			<p class="muted">Saved in this browser only.</p>
+			<ModePicker />
+			<StylePicker />
+			<Toggle
+				field="dimensionColours"
+				label="Colour the map by dimension"
+				hint="Use the viewed dimension's colours, like the Nether's reds or the End's purples. Otherwise the overworld's are used everywhere."
+			/>
+		</section>
 	);
 }
 
@@ -114,6 +188,7 @@ export function SettingsPage() {
 				</section>
 			)}
 
+			<Appearance />
 			<Preferences />
 
 			{!loaded ? null : u ? (
