@@ -42,3 +42,34 @@ export function formatDuration(seconds: number): string {
 	if (h > 0) return `${h}h ${m}m`;
 	return `${m}m`;
 }
+
+/** When an upload was made: its export time (as written), or else when it was uploaded. */
+export function formatEventTime(r: {
+	exportedAt: number | null;
+	createdAt: number;
+}): string {
+	return r.exportedAt !== null
+		? formatExportTime(r.exportedAt)
+		: formatTime(r.createdAt);
+}
+
+/** The day an upload was made, as a heading for the upload log. */
+export function formatEventDay(r: {
+	exportedAt: number | null;
+	createdAt: number;
+}): string {
+	return r.exportedAt !== null
+		? formatExportDay(r.exportedAt)
+		: new Date(r.createdAt).toLocaleDateString(undefined, {
+				dateStyle: "medium",
+			});
+}
+
+/** "3h", "25m": how long until `ms` from now, roughly. */
+export function formatRemaining(ms: number): string {
+	const minutes = Math.max(Math.ceil(ms / 60_000), 1);
+	if (minutes < 60) return `${minutes}m`;
+	const hours = Math.floor(minutes / 60);
+	if (hours < 48) return `${hours}h`;
+	return `${Math.floor(hours / 24)}d`;
+}

@@ -1078,6 +1078,11 @@ input[type="range"]:disabled {
 	pointer-events: none;
 }
 
+/* Selected but for a reason other than its panel being open (looking at an old version). */
+.hotbar-slot.selected.warn::after {
+	border-color: var(--yellow);
+}
+
 /* Upload progress, drawn like an item's durability bar. */
 .durability {
 	position: absolute;
@@ -1243,10 +1248,12 @@ input[type="range"]:disabled {
 	right: 8px;
 	z-index: 8;
 	display: flex;
-	justify-content: center;
+	/* Fixed under the toolbar, so it does not move when the side panel opens or is resized. */
+	justify-content: flex-start;
 	pointer-events: none;
 }
 
+/* It only gives way when the panel needs the room: the bar narrows rather than moves. */
 .app.panel-open .bossbar-wrap {
 	right: calc(var(--panel-w) + 16px);
 }
@@ -1313,6 +1320,30 @@ input[type="range"]:disabled {
 	background: var(--s1);
 	border: var(--bw) solid var(--line);
 	box-shadow: var(--surface-shadow);
+}
+
+/* The left edge of the panel: drag to change its width. */
+.panel-resize {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 0;
+	z-index: 3;
+	width: 8px;
+	cursor: ew-resize;
+	touch-action: none;
+}
+
+/* While dragging, keep the resize cursor and do not select text or start map drags. */
+body.resizing {
+	cursor: ew-resize;
+	user-select: none;
+}
+
+.panel-resize:hover,
+.panel-resize:focus-visible {
+	background: color-mix(in srgb, var(--focus) 35%, transparent);
+	outline: none;
 }
 
 .panel-head,
@@ -1555,14 +1586,230 @@ input[type="range"]:disabled {
 	margin-top: 8px;
 }
 
-/* History */
-.time-slider {
-	margin-top: 12px;
+/* History: the filters and time line stay put while the log below scrolls. */
+.history-head {
+	padding: 8px 12px 10px;
+	border-bottom: var(--bw) solid var(--line);
+}
+
+.history-filters {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
+
+.history-scope {
+	flex: 1;
+	min-width: 0;
+	margin: 0;
+	padding: 0;
+	border: 0;
+}
+
+.history-scope .segmented {
+	flex-wrap: nowrap;
+}
+
+.history-filters > .btn {
+	flex: none;
 }
 
 .slider-info {
-	min-height: 2.9em;
+	min-height: 1.5em;
+	margin: 10px 0 8px;
 	font-size: 13px;
+}
+
+.timeline {
+	user-select: none;
+}
+
+.timeline-track {
+	border-radius: var(--radius-sm);
+	position: relative;
+	height: 56px;
+	background: var(--well);
+	border: var(--bw) solid var(--line);
+	cursor: pointer;
+	touch-action: none;
+}
+
+.timeline-track:focus-visible {
+	outline: 2px solid var(--focus);
+	outline-offset: 2px;
+}
+
+/* Everything after the time being looked at is dimmed. */
+.timeline-before {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	left: 0;
+	background: color-mix(in srgb, var(--yellow) 8%, transparent);
+	pointer-events: none;
+}
+
+.timeline-break {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	background: repeating-linear-gradient(
+		135deg,
+		transparent 0 4px,
+		color-mix(in srgb, var(--muted) 22%, transparent) 4px 6px
+	);
+}
+
+.timeline-marker {
+	position: absolute;
+	bottom: 6px;
+	width: 4px;
+	margin-left: -2px;
+	background: var(--muted);
+	pointer-events: none;
+}
+
+.timeline-marker.odd {
+	background: color-mix(in srgb, var(--yellow) 55%, var(--muted));
+}
+
+.timeline-marker.hovered {
+	background: var(--text);
+	box-shadow: 0 0 0 2px color-mix(in srgb, var(--text) 30%, transparent);
+}
+
+.timeline-marker.active {
+	background: var(--yellow);
+}
+
+.timeline-marker.pending {
+	background: transparent;
+	border: 1px dashed var(--muted);
+}
+
+.timeline-count {
+	position: absolute;
+	bottom: calc(100% + 1px);
+	left: 50%;
+	transform: translateX(-50%);
+	font-size: 10px;
+	font-weight: 700;
+	line-height: 1;
+	color: var(--muted);
+}
+
+.timeline-playhead {
+	position: absolute;
+	top: 0;
+	bottom: 0;
+	width: 2px;
+	margin-left: -1px;
+	background: var(--yellow);
+	pointer-events: none;
+}
+
+.timeline-playhead::before {
+	content: "";
+	position: absolute;
+	top: 0;
+	left: -4px;
+	border: 5px solid transparent;
+	border-top-color: var(--yellow);
+}
+
+.timeline-playhead.latest {
+	background: var(--ok);
+}
+
+.timeline-playhead.latest::before {
+	border-top-color: var(--ok);
+}
+
+.timeline-card {
+	border-radius: var(--radius-sm);
+	position: absolute;
+	bottom: calc(100% + 6px);
+	z-index: 2;
+	display: flex;
+	flex-direction: column;
+	gap: 2px;
+	width: 200px;
+	margin-left: -100px;
+	padding: 6px 8px;
+	font-size: 12px;
+	background: var(--s3);
+	border: var(--bw) solid var(--line);
+	box-shadow: var(--surface-shadow);
+	pointer-events: none;
+}
+
+.warn-text {
+	color: var(--yellow);
+}
+
+.timeline-axis {
+	position: relative;
+	height: 34px;
+	overflow: hidden;
+	font-size: 11px;
+	color: var(--muted);
+}
+
+/* Once zoomed in, the dates can be dragged sideways. */
+.timeline-axis.pannable {
+	cursor: ew-resize;
+	touch-action: none;
+}
+
+.timeline-tick {
+	position: absolute;
+	top: 0;
+	padding-top: 4px;
+	padding-left: 3px;
+	white-space: nowrap;
+	border-left: 1px solid var(--line);
+}
+
+.timeline-year {
+	position: absolute;
+	bottom: 0;
+	font-weight: 700;
+	color: var(--text);
+	white-space: nowrap;
+}
+
+.timeline-controls {
+	align-items: center;
+	margin-top: 4px;
+}
+
+.rev-day-title {
+	position: sticky;
+	top: -1px;
+	z-index: 1;
+	margin: 0 0 6px;
+	padding: 6px 0 4px;
+	font-size: 13px;
+	background: var(--s1);
+}
+
+.rev-day-title .muted {
+	font-weight: 400;
+}
+
+.delete-facts {
+	display: grid;
+	grid-template-columns: auto 1fr;
+	gap: 4px 14px;
+	margin: 0 0 12px;
+}
+
+.delete-facts dt {
+	color: var(--muted);
+}
+
+.delete-facts dd {
+	margin: 0;
 }
 
 .revisions,
@@ -1573,6 +1820,7 @@ input[type="range"]:disabled {
 }
 
 .revision {
+	position: relative;
 	display: flex;
 	flex-wrap: wrap;
 	align-items: center;
@@ -1583,6 +1831,15 @@ input[type="range"]:disabled {
 
 .revision.active {
 	border-color: var(--focus);
+}
+
+.revision.hovered:not(.active) {
+	border-color: var(--muted);
+}
+
+.rev-files {
+	font-weight: 400;
+	color: var(--muted);
 }
 
 .rev-what {
@@ -1605,6 +1862,29 @@ input[type="range"]:disabled {
 	gap: 2px 10px;
 	text-align: left;
 	padding: 2px;
+}
+
+/* The button's click area covers the whole card; what is clickable on its own sits above it. */
+.revision-main::after {
+	content: "";
+	position: absolute;
+	inset: 0;
+}
+
+.revision-main:focus-visible {
+	outline: none;
+}
+
+.revision-main:focus-visible::after {
+	outline: 2px solid var(--focus);
+	outline-offset: -2px;
+	border-radius: var(--radius);
+}
+
+.revision > .btn,
+.rev-badges {
+	position: relative;
+	z-index: 1;
 }
 
 .revision-main:disabled {
@@ -2387,6 +2667,10 @@ input[type="range"]:disabled {
 }
 
 @media (max-width: 640px) {
+	.panel-resize {
+		display: none;
+	}
+
 	.panel {
 		top: auto;
 		left: 8px;

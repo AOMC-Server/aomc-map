@@ -90,6 +90,7 @@ describe("setup", () => {
 		expect(body.limits).toEqual({
 			maxUploadBytes: 200 * 1024 * 1024,
 			maxFilesPerUpload: 2000,
+			selfDeleteWindowHours: 24,
 		});
 	});
 

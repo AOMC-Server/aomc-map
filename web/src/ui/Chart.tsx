@@ -41,6 +41,8 @@ export function Chart(props: {
 	series: ChartSeries[];
 	formatY: (value: number) => string;
 	formatX: (x: number) => string;
+	/** Fuller form of `formatX` for the tooltip (e.g. with the year); defaults to `formatX`. */
+	formatTip?: (x: number) => string;
 	/** Extra line in the tooltip for the point at this index. */
 	note?: (index: number) => string | null;
 }) {
@@ -190,7 +192,9 @@ export function Chart(props: {
 								: { left: `calc(${(x(hover) / W) * 100}% + 10px)` }
 						}
 					>
-						<div class="tip-title">{formatX(xs[hover] as number)}</div>
+						<div class="tip-title">
+							{(props.formatTip ?? formatX)(xs[hover] as number)}
+						</div>
 						{series.map((s) => (
 							<div key={s.key} class="chart-tip-row">
 								<span class="chart-swatch" style={{ background: s.color }} />

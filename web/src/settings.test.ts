@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { DEFAULT_SETTINGS, parsePosition, parseSettings } from "./settings";
+import {
+	clampPanelWidth,
+	DEFAULT_SETTINGS,
+	PANEL_MIN_WIDTH,
+	parsePosition,
+	parseSettings,
+	transitionFactor,
+} from "./settings";
 
 describe("parseSettings", () => {
 	test("nothing or garbage gives the defaults", () => {
@@ -65,5 +72,36 @@ describe("parsePosition", () => {
 				JSON.stringify({ dim: "x", view: { centerX: 1, centerZ: 2 } }),
 			),
 		).toBeNull();
+	});
+});
+
+describe("panel width", () => {
+	test("is kept between the minimum and most of the window", () => {
+		expect(clampPanelWidth(100, 1400)).toBe(PANEL_MIN_WIDTH);
+		expect(clampPanelWidth(500, 1400)).toBe(500);
+		expect(clampPanelWidth(5000, 1400)).toBe(900);
+		expect(clampPanelWidth(5000, 1000)).toBe(700);
+		// A narrow window still gets the minimum.
+		expect(clampPanelWidth(500, 340)).toBe(PANEL_MIN_WIDTH);
+	});
+});
+
+describe("transition speed", () => {
+	test("a known speed is kept, anything else falls back to normal", () => {
+		expect(
+			parseSettings(JSON.stringify({ transitionSpeed: "fast" }))
+				.transitionSpeed,
+		).toBe("fast");
+		for (const bad of ["warp", 3, null])
+			expect(
+				parseSettings(JSON.stringify({ transitionSpeed: bad })).transitionSpeed,
+			).toBe("normal");
+	});
+
+	test("the factors scale durations, and instant is zero", () => {
+		expect(transitionFactor("normal")).toBe(1);
+		expect(transitionFactor("slow")).toBeGreaterThan(1);
+		expect(transitionFactor("fast")).toBeLessThan(1);
+		expect(transitionFactor("instant")).toBe(0);
 	});
 });

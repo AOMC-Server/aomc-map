@@ -30,6 +30,8 @@ type Slot = {
 	label: string;
 	hint: string;
 	active: boolean;
+	/** Selected, but shown in yellow: something is off about the current view. */
+	warn?: boolean;
 	href?: string;
 	run?: () => void;
 	extra?: ComponentChildren;
@@ -69,6 +71,8 @@ export function Hotbar() {
 			label: "History",
 			hint: "Earlier versions of the map",
 			active: sidePanel.value === "history" || rev.value !== null,
+			// Looking at an old version with the history closed: remind that it is not the latest.
+			warn: sidePanel.value !== "history" && rev.value !== null,
 			run: () => toggle("history"),
 		},
 		{
@@ -131,7 +135,7 @@ export function Hotbar() {
 						</span>
 					</>
 				);
-				const cls = `hotbar-slot ${s.active ? "selected" : ""}`;
+				const cls = `hotbar-slot ${s.active ? "selected" : ""} ${s.warn ? "warn" : ""}`;
 				return s.href ? (
 					<a key={s.key} class={cls} href={s.href} aria-label={s.label}>
 						{content}

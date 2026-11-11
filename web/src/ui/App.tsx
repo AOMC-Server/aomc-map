@@ -2,6 +2,7 @@ import { useEffect, useRef } from "preact/hooks";
 import { boot } from "../controller";
 import { activeTool, editor, embed, loadError, sidePanel } from "../state";
 import { uploadOpen } from "../upload";
+import { DeleteUploadDialog, deleteUploadFor } from "./DeleteUploadDialog";
 import { FeatureEditor } from "./FeatureEditor";
 import { FeatureHistory, featureHistoryFor } from "./FeatureHistory";
 import { HistoryBanner } from "./HistoryBanner";
@@ -65,6 +66,7 @@ export function App() {
 					{uploadOpen.value && <UploadDialog />}
 					{featureHistoryFor.value && <FeatureHistory />}
 					{layerSharingFor.value && <LayerSharing />}
+					{deleteUploadFor.value && <DeleteUploadDialog />}
 				</>
 			)}
 			<Toast />

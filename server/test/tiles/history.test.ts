@@ -10,9 +10,11 @@ import {
 	BLACK,
 	BLUE,
 	bootTiles,
+	call,
 	cleanupTempDirs,
 	erase,
 	GREEN,
+	makeUser,
 	png,
 	px,
 	RED,
@@ -303,8 +305,9 @@ describe("deleting an upload", () => {
 			});
 		const a = ids[0] as number;
 
+		const other = await makeUser(t.db, "other");
 		expect((await del(a, null)).status).toBe(401);
-		expect((await del(a, t.editor)).status).toBe(403);
+		expect((await del(a, other)).status).toBe(403);
 		expect((await del(9999, t.mod)).status).toBe(404);
 
 		await t.db.insert(revisions).values({
@@ -323,6 +326,49 @@ describe("deleting an upload", () => {
 			.set({ status: "processing" })
 			.where(eq(revisions.id, a));
 		expect((await del(a, t.mod)).status).toBe(409);
+	});
+
+	test("the author may delete their own upload within the window", async () => {
+		const { t, ids } = await history();
+		const [a, b] = ids as [number, number];
+		const del = (id: number, user: { auth: Record<string, string> }) =>
+			t.app.request(`/api/revisions/${id}`, {
+				method: "DELETE",
+				headers: user.auth,
+			});
+		const list = await call(t, t.editor, "GET", "/api/revisions");
+		const own = list.body.revisions.find((r: { id: number }) => r.id === a);
+		expect(own.canDelete).toBe(true);
+		expect(own.deletableUntil).toBe(own.createdAt + 24 * 3_600_000);
+		const asMod = await call(t, t.mod, "GET", `/api/revisions/${a}`);
+		expect(asMod.body.revision).toMatchObject({
+			canDelete: true,
+			deletableUntil: null,
+		});
+		const anon = await call(t, null, "GET", `/api/revisions/${a}`);
+		expect(anon.body.revision.canDelete).toBe(false);
+
+		// Too late: only a moderator can delete it now.
+		await t.db
+			.update(revisions)
+			.set({ createdAt: Date.now() - 25 * 3_600_000 })
+			.where(eq(revisions.id, b));
+		expect((await del(b, t.editor)).status).toBe(403);
+		const late = await call(t, t.editor, "GET", `/api/revisions/${b}`);
+		expect(late.body.revision.canDelete).toBe(false);
+
+		await erase(t, a, t.editor);
+		expect((await t.app.request(`/api/revisions/${a}`)).status).toBe(404);
+	});
+
+	test("a window of 0 leaves deleting to moderators", async () => {
+		const t = await bootTiles({ SELF_DELETE_WINDOW_HOURS: "0" });
+		const id = await upload(t, await solid(T, T, RED), 0, 0);
+		const res = await t.app.request(`/api/revisions/${id}`, {
+			method: "DELETE",
+			headers: t.editor.auth,
+		});
+		expect(res.status).toBe(403);
 	});
 
 	test("a failed upload is simply removed", async () => {
@@ -438,5 +484,56 @@ describe("failures", () => {
 		});
 		expect(await jobStatus(t, jobId)).toBe("failed");
 		expect(await readTile(t, 0, 0, 0)).toBeNull();
+	});
+});
+
+describe("revision list", () => {
+	test("filters by dimension and pages with before", async () => {
+		const t = await bootTiles();
+		const a = await upload(t, await solid(T, T, RED), 0, 0);
+		const b = await upload(t, await solid(T, T, RED), 0, 0, t.editor, "nether");
+		const c = await upload(t, await solid(T, T, BLUE), 0, 0);
+		const ids = (body: { revisions: { id: number }[] }) =>
+			body.revisions.map((r) => r.id);
+
+		const over = await call(
+			t,
+			null,
+			"GET",
+			"/api/revisions?dimension=overworld",
+		);
+		expect(ids(over.body)).toEqual([c, a]);
+		expect(over.body.nextBefore).toBeNull();
+		const nether = await call(
+			t,
+			null,
+			"GET",
+			"/api/revisions?dimension=nether",
+		);
+		expect(ids(nether.body)).toEqual([b]);
+		expect(
+			(await call(t, null, "GET", "/api/revisions?dimension=nope")).status,
+		).toBe(404);
+
+		const first = await call(t, null, "GET", "/api/revisions?limit=2");
+		expect(ids(first.body)).toEqual([c, b]);
+		expect(first.body.nextBefore).toBe(b);
+		const second = await call(
+			t,
+			null,
+			"GET",
+			`/api/revisions?limit=2&before=${first.body.nextBefore}`,
+		);
+		expect(ids(second.body)).toEqual([a]);
+		expect(second.body.nextBefore).toBeNull();
+
+		// Revisions asked for by id come along whatever the page.
+		const withActive = await call(
+			t,
+			null,
+			"GET",
+			`/api/revisions?limit=1&active=${a}`,
+		);
+		expect(ids(withActive.body)).toEqual([c, a]);
 	});
 });

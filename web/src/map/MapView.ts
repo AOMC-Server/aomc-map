@@ -11,7 +11,7 @@ import { FeatureLayer, type Hit, type RenderLayer } from "./featureLayer";
 import type { Bounds } from "./geometry";
 import { type DragSession, Input } from "./input";
 import { Renderer } from "./renderer";
-import { easeZoom } from "./smoothZoom";
+import { easeZoom, tweenView } from "./smoothZoom";
 import { TileLayer, type TileSource } from "./tileLayer";
 
 type MapPointer = { x: number; z: number; sx: number; sy: number };
@@ -59,6 +59,8 @@ export class MapView {
 	private features: FeatureLayer;
 	private hoverKey: string | null = null;
 	private baseCursor = "grab";
+	/** How long animations take relative to the default; 0 skips them. */
+	private motion = 1;
 	/** Where an eased zoom (zoomBy) is heading, while one runs. */
 	private zoomGoal: {
 		zoom: number;
@@ -95,6 +97,11 @@ export class MapView {
 	}
 
 	// Public API
+
+	/** Scales the length of every camera animation (1 = default, 0 = none). */
+	setMotionScale(scale: number) {
+		this.motion = Math.max(scale, 0);
+	}
 
 	getView(): View {
 		return { ...this.view };
@@ -238,7 +245,7 @@ export class MapView {
 		this.zoomGoal = {
 			zoom: clampZoom(snapped, this.maxZoom),
 			anchor,
-			smoothing,
+			smoothing: smoothing * this.motion,
 		};
 		if (running) return;
 		let last: number | null = null;
@@ -262,6 +269,12 @@ export class MapView {
 		this.zoomGoal = null;
 		const from = this.view;
 		const to = { ...target, zoom: clampZoom(target.zoom, this.maxZoom) };
+		ms *= this.motion;
+		if (ms <= 0) {
+			this.renderer.stopAnimation();
+			this.setView(to);
+			return;
+		}
 		const began = performance.now();
 		this.renderer.animate((now) => {
 			const t = Math.min((Math.max(now, began) - began) / ms, 1);
@@ -277,11 +290,7 @@ export class MapView {
 					centerZ: zoomed.centerZ + (to.centerZ - endZoomed.centerZ) * e,
 				});
 			} else {
-				this.setView({
-					zoom,
-					centerX: from.centerX + (to.centerX - from.centerX) * e,
-					centerZ: from.centerZ + (to.centerZ - from.centerZ) * e,
-				});
+				this.setView(tweenView(from, to, e));
 			}
 			return t < 1;
 		});

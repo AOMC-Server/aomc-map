@@ -1,8 +1,13 @@
 import { signal } from "@preact/signals";
-import { api, run, showNotice } from "./api";
+import { api, attempt, run, showNotice } from "./api";
 import { refreshMap, setRev } from "./controller";
 import { loadLayers } from "./layers";
-import { isolatedUpload, type RevisionInfo, revisionsData } from "./state";
+import {
+	dimSlug,
+	isolatedUpload,
+	type RevisionInfo,
+	revisionsData,
+} from "./state";
 
 export type Progress = { message?: string; done?: number; total?: number };
 export type Outcome = { status: "done" | "failed"; error: string | null };
@@ -22,10 +27,64 @@ export async function fetchRevision(id: number): Promise<RevisionInfo | null> {
 	}
 }
 
-/** Loads the revision log (newest first). */
-export async function loadRevisions(): Promise<void> {
-	const out = await run(() => api.api.revisions.$get({ query: {} }));
-	if (out) revisionsData.value = out.revisions;
+/** The dimension `revisionsData` holds the whole history of. */
+let loadedDim: string | null = null;
+
+const inFlight = (r: RevisionInfo) =>
+	r.status === "pending" || r.status === "processing";
+
+/**
+ * Loads the upload log of the dimension being viewed (newest first): all of it the first time
+ * or with `full`, afterwards only what is new or still changing.
+ */
+export async function loadRevisions(full = false): Promise<void> {
+	const dim = dimSlug.value;
+	if (!dim) {
+		loadedDim = null;
+		revisionsData.value = [];
+		return;
+	}
+	if (full || loadedDim !== dim) await loadAll(dim);
+	else await refresh(dim);
+}
+
+async function loadAll(dim: string) {
+	const all: RevisionInfo[] = [];
+	let before: number | null = null;
+	for (;;) {
+		const query: Record<string, string> = { dimension: dim, limit: "1000" };
+		if (before !== null) query.before = String(before);
+		const out = await run(() => api.api.revisions.$get({ query }));
+		if (!out || dimSlug.value !== dim) return;
+		all.push(...out.revisions);
+		if (out.nextBefore === null) break;
+		before = out.nextBefore;
+	}
+	loadedDim = dim;
+	revisionsData.value = all;
+}
+
+/** Merges the newest page (and the revisions still being processed) into what is loaded. */
+async function refresh(dim: string) {
+	const active = revisionsData.value.filter(inFlight).map((r) => r.id);
+	const query: Record<string, string> = { dimension: dim, limit: "100" };
+	if (active.length) query.active = active.join(",");
+	const res = await attempt(() => api.api.revisions.$get({ query }));
+	if (!res.ok || dimSlug.value !== dim || loadedDim !== dim) return;
+	const { revisions, nextBefore } = res.body;
+	const fresh = new Map(revisions.map((r) => [r.id, r]));
+	// The page holds every revision from `nextBefore` up; one missing from it was deleted.
+	const covered = (id: number) =>
+		nextBefore === null || id > nextBefore || active.includes(id);
+	const kept = revisionsData.value
+		.filter((r) => fresh.has(r.id) || !covered(r.id))
+		.map((r) => fresh.get(r.id) ?? r);
+	const known = new Set(kept.map((r) => r.id));
+	const merged = [...kept, ...revisions.filter((r) => !known.has(r.id))].sort(
+		(a, b) => b.id - a.id,
+	);
+	if (JSON.stringify(merged) !== JSON.stringify(revisionsData.value))
+		revisionsData.value = merged;
 }
 
 /**
@@ -101,8 +160,20 @@ const setDeleting = (id: number, label: string | null) => {
 
 const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
 
+async function revisionGone(id: number): Promise<boolean> {
+	try {
+		const res = await api.api.revisions[":id"].$get({
+			param: { id: String(id) },
+		});
+		return res.status === 404;
+	} catch {
+		return false;
+	}
+}
+
 /**
- * Deletes an upload from the map and all of its history (moderators). The server erases it in
+ * Deletes an upload from the map and all of its history (moderators, or its author for a while
+ * after uploading it). The server erases it in
  * the background; this waits until it is gone (or the erase failed) and refreshes the map.
  */
 export async function deleteUpload(id: number): Promise<boolean> {
@@ -111,7 +182,12 @@ export async function deleteUpload(id: number): Promise<boolean> {
 	);
 	if (!out) return false;
 	setDeleting(id, "deleting…");
-	await loadRevisions(); // shows it as busy right away
+	// Shows it as busy right away, wherever it is in the log.
+	const busy = await fetchRevision(id);
+	if (busy)
+		revisionsData.value = revisionsData.value.map((r) =>
+			r.id === id ? busy : r,
+		);
 
 	// Progress only; whether it is finished is decided by the polling below.
 	const events = new EventSource(`/api/revisions/${id}/events`);
@@ -129,9 +205,8 @@ export async function deleteUpload(id: number): Promise<boolean> {
 	for (;;) {
 		const r = await fetchRevision(id);
 		if (r === null) {
-			// Gone; but a lost connection looks the same, so ask the log before believing it.
-			const gone = await run(() => api.api.revisions.$get({ query: {} }));
-			if (gone && !gone.revisions.some((x) => x.id === id)) break;
+			// Gone; but a lost connection looks the same, so make sure it is a 404.
+			if (await revisionGone(id)) break;
 			if (++failures >= MAX_POLL_FAILURES) {
 				error = "Lost contact with the server.";
 				break;
@@ -148,7 +223,7 @@ export async function deleteUpload(id: number): Promise<boolean> {
 	if (isolatedUpload.value?.id === id) isolatedUpload.value = null;
 	showNotice(error ?? "Upload deleted.", error ? "error" : "info");
 	await refreshMap();
-	await loadRevisions();
+	await loadRevisions(true);
 	return error === null;
 }
 

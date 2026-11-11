@@ -1,7 +1,12 @@
 import { useEffect, useState } from "preact/hooks";
 import { loginUrl } from "../api";
 import { loadMapDetail, loadUser } from "../controller";
-import { type Settings, settings, updateSettings } from "../settings";
+import {
+	type Settings,
+	settings,
+	TRANSITION_SPEEDS,
+	updateSettings,
+} from "../settings";
 import { user, visibleDimensions } from "../state";
 import { MODES, STYLES } from "../theme";
 import { ApiTokens } from "./ApiTokens";
@@ -102,6 +107,32 @@ function Appearance() {
 	);
 }
 
+function TransitionPicker() {
+	const current = settings.value.transitionSpeed;
+	return (
+		<fieldset class="mode-picker">
+			<legend class="label">Camera transitions</legend>
+			<div class="segmented">
+				{TRANSITION_SPEEDS.map((t) => (
+					<button
+						key={t.id}
+						type="button"
+						class={`btn ${t.id === current ? "active" : ""}`}
+						aria-pressed={t.id === current}
+						onClick={() => updateSettings({ transitionSpeed: t.id })}
+					>
+						{t.name}
+					</button>
+				))}
+			</div>
+			<span class="muted hint">
+				How quickly the map moves and zooms to a place, for example when you
+				open an upload. Instant skips the animation.
+			</span>
+		</fieldset>
+	);
+}
+
 function Preferences() {
 	const dims = visibleDimensions.value;
 	const current = settings.value.defaultDimension;
@@ -132,6 +163,8 @@ function Preferences() {
 					Used when the link doesn't name a dimension.
 				</span>
 			</label>
+
+			<TransitionPicker />
 
 			<Toggle
 				field="rememberPosition"

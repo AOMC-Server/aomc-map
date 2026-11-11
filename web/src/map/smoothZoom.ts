@@ -1,3 +1,5 @@
+import { scaleOf, type View } from "@aomc/shared/view";
+
 /** Closer than this to the goal, the zoom snaps onto it and the animation ends. */
 const SNAP = 0.002;
 
@@ -13,7 +15,29 @@ export function easeZoom(
 	smoothing: number,
 ): number {
 	const diff = goal - current;
-	if (Math.abs(diff) < SNAP) return goal;
+	// No smoothing means no easing: go straight there.
+	if (smoothing <= 0 || Math.abs(diff) < SNAP) return goal;
 	const next = current + diff * (1 - Math.exp(-Math.max(dtMs, 0) / smoothing));
 	return Math.abs(goal - next) < SNAP ? goal : next;
+}
+
+/**
+ * The view a fraction `e` (0 to 1, already eased) of the way from `from` to `to`, moving in a
+ * straight line on screen.
+ *
+ * The zoom changes exponentially (a level is a doubling), so moving the centre by the same
+ * fraction of the distance would make the pan lag behind the zoom when zooming in, and race
+ * ahead of it when zooming out. Instead the pan fraction is chosen so that a point is carried in
+ * a straight line at constant screen speed: the destination when zooming in (it glides to the
+ * middle), the starting point when zooming out (it glides away from the middle). Without a zoom
+ * change this is a plain linear pan.
+ */
+export function tweenView(from: View, to: View, e: number): View {
+	const ratio = scaleOf(to.zoom) / scaleOf(from.zoom);
+	const pan = ratio >= 1 ? 1 - (1 - e) * ratio ** -e : e * ratio ** (1 - e);
+	return {
+		zoom: from.zoom + (to.zoom - from.zoom) * e,
+		centerX: from.centerX + (to.centerX - from.centerX) * pan,
+		centerZ: from.centerZ + (to.centerZ - from.centerZ) * pan,
+	};
 }

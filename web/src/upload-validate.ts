@@ -16,7 +16,7 @@ const ext = (name: string) => name.slice(name.lastIndexOf(".")).toLowerCase();
 /** Cheap checks before sending: the server validates everything again (images, zip contents). */
 export function validateFiles(
 	files: FileInfo[],
-	limits: UploadLimits,
+	limits: Pick<UploadLimits, "maxUploadBytes" | "maxFilesPerUpload">,
 ): Validation {
 	const errors: string[] = [];
 	let pngCount = 0;

@@ -7,7 +7,7 @@ import {
 	rev,
 	revisionsData,
 } from "../state";
-import { formatTime } from "./format";
+import { formatEventTime, formatTime } from "./format";
 
 function BossBar(props: {
 	title: ComponentChildren;
@@ -63,11 +63,16 @@ export function HistoryBanner() {
 			color="yellow"
 			fill={head ? current / head : 0}
 			title={
-				<>
-					Revision <b>{current}</b> of {head}
-					{r ? ` · ${formatTime(r.completedAt ?? r.createdAt)}` : ""} · editing
-					is off
-				</>
+				r ? (
+					<>
+						As of <b>{formatEventTime(r)}</b> · #{current} by {r.authorName} ·
+						editing is off
+					</>
+				) : (
+					<>
+						Revision <b>{current}</b> of {head} · editing is off
+					</>
+				)
 			}
 			action="Back to latest"
 			onAction={() => setRev(null)}

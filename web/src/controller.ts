@@ -3,7 +3,12 @@ import { effect, signal } from "@preact/signals";
 import { api, showNotice } from "./api";
 import { loadLayers } from "./layers";
 import { MapView } from "./map/MapView";
-import { loadPosition, savePosition, settings } from "./settings";
+import {
+	loadPosition,
+	savePosition,
+	settings,
+	transitionFactor,
+} from "./settings";
 import {
 	currentMap,
 	dimSlug,
@@ -87,8 +92,8 @@ export function selectDimension(slug: string) {
 	dimSlug.value = slug;
 }
 
-/** Shows one upload's tiles on their own, zoomed to where it reached. */
-export function isolateUpload(r: RevisionInfo) {
+/** Shows one upload's tiles on their own, zoomed to where it reached unless `fit` is false. */
+export function isolateUpload(r: RevisionInfo, fit = true) {
 	const slug = currentMap.value?.dimensions.find(
 		(d) => d.id === r.dimensionId,
 	)?.slug;
@@ -99,7 +104,7 @@ export function isolateUpload(r: RevisionInfo) {
 	selectDimension(slug);
 	setRev(null);
 	isolatedUpload.value = r;
-	if (r.bbox)
+	if (fit && r.bbox)
 		mapView.value?.fitBounds(r.bbox, { padding: 120, closestZoom: 0 });
 }
 
@@ -171,6 +176,9 @@ export async function boot(container: HTMLElement) {
 	});
 	initTools(mv);
 	mapView.value = mv;
+	effect(() =>
+		mv.setMotionScale(transitionFactor(settings.value.transitionSpeed)),
+	);
 
 	let lastDim: string | null = null;
 	let lastOnly: number | null = null;

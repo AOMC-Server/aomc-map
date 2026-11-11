@@ -43,7 +43,11 @@ const DAY = 24 * HOUR;
 const number = (n: number) => n.toLocaleString();
 
 const formatDay = (t: number) =>
-	new Date(t).toLocaleDateString(undefined, { month: "short", day: "numeric" });
+	new Date(t).toLocaleDateString(undefined, {
+		year: "numeric",
+		month: "short",
+		day: "numeric",
+	});
 const formatTimeOfDay = (t: number) =>
 	new Date(t).toLocaleTimeString(undefined, {
 		hour: "numeric",
@@ -51,6 +55,15 @@ const formatTimeOfDay = (t: number) =>
 	});
 const formatDayTime = (t: number) =>
 	new Date(t).toLocaleString(undefined, {
+		month: "short",
+		day: "numeric",
+		hour: "numeric",
+		minute: "2-digit",
+	});
+/** For tooltips, where there is room for the year. */
+const formatFull = (t: number) =>
+	new Date(t).toLocaleString(undefined, {
+		year: "numeric",
 		month: "short",
 		day: "numeric",
 		hour: "numeric",
@@ -143,6 +156,7 @@ function Storage(props: { data: Body }) {
 					series={series}
 					formatY={formatBytes}
 					formatX={formatX}
+					formatTip={formatFull}
 					note={(i) =>
 						i === xs.length - 1
 							? "Now"
@@ -217,6 +231,7 @@ function Traffic(props: { data: Body }) {
 					xs={traffic.points.map((p) => p.t)}
 					series={series}
 					formatY={metric === "bytes" ? formatBytes : number}
+					formatTip={traffic.bucketMs < DAY ? formatFull : formatDay}
 					formatX={
 						traffic.bucketMs < HOUR
 							? formatTimeOfDay

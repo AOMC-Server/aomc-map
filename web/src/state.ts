@@ -65,10 +65,15 @@ export const mapEpoch = computed(() => currentMap.value?.map.epoch ?? 0);
 /** The upload being looked at on its own (tiles of that upload only), or null for the whole map. */
 export const isolatedUpload = signal<RevisionInfo | null>(null);
 
-/** Revisions of the current map, newest first. */
+/** Revisions of the dimension being viewed, newest first. */
 export const revisionsData = signal<RevisionInfo[]>([]);
 /** Area of a revision to outline on the map (hovered or selected in the upload log). */
 export const highlightBbox = signal<RevisionInfo["bbox"]>(null);
+/** The upload pointed at in the history panel, and where: the other side highlights it too. */
+export const hoveredRevision = signal<{
+	id: number;
+	from: "timeline" | "log";
+} | null>(null);
 
 export const isLayerHidden = (l: LayerData) =>
 	layerOverrides.value.get(l.id) ?? l.hiddenByDefault;

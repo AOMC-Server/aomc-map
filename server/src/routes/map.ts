@@ -31,6 +31,7 @@ export const mapRoutes = new Hono<AppEnv>()
 				limits: {
 					maxUploadBytes: env.MAX_UPLOAD_BYTES,
 					maxFilesPerUpload: env.MAX_FILES_PER_UPLOAD,
+					selfDeleteWindowHours: env.SELF_DELETE_WINDOW_HOURS,
 				},
 				dimensions: dims.map((d) => ({
 					id: d.id,

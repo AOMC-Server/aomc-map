@@ -37,6 +37,25 @@ export const canModerate = (role: Role) => atLeast(role, "moderator");
 /** Members, invites and map settings. */
 export const canManage = (role: Role) => atLeast(role, "owner");
 
+/**
+ * Delete an upload: moderators any, editors their own for `windowMs` after uploading it.
+ */
+export function canDeleteUpload(
+	actor: Actor,
+	role: Role,
+	upload: { authorId: string; createdAt: number },
+	windowMs: number,
+	now = Date.now(),
+): boolean {
+	if (canModerate(role)) return true;
+	return (
+		actor !== null &&
+		canEdit(role) &&
+		actor.id === upload.authorId &&
+		now - upload.createdAt < windowMs
+	);
+}
+
 export function canViewLayer(
 	role: Role,
 	layer: LayerInfo,

@@ -20,6 +20,8 @@ const envSchema = z.object({
 	MAX_IMAGE_DIM: z.coerce.number().int().default(4096),
 	MAX_FILES_PER_UPLOAD: z.coerce.number().int().default(2000),
 	UPLOAD_RATE_LIMIT: z.coerce.number().int().default(30), // requests per user per minute
+	// How long after uploading someone may delete their own upload; 0 = only moderators delete
+	SELF_DELETE_WINDOW_HOURS: z.coerce.number().min(0).default(24),
 	SETUP_MAP_NAME: z.string().default("AOMC"),
 	SETUP_OWNER_DISCORD_IDS: z
 		.string()

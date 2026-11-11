@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { easeZoom } from "./smoothZoom";
+import { scaleOf } from "@aomc/shared/view";
+import { easeZoom, tweenView } from "./smoothZoom";
 
 describe("easeZoom", () => {
 	test("moves toward the goal without overshooting, in both directions", () => {
@@ -34,5 +35,82 @@ describe("easeZoom", () => {
 	test("a frame of no time changes nothing", () => {
 		expect(easeZoom(0.5, 2, 0, 80)).toBe(0.5);
 		expect(easeZoom(0.5, 2, -5, 80)).toBe(0.5);
+	});
+});
+
+describe("easeZoom without smoothing", () => {
+	test("goes straight to the goal", () => {
+		expect(easeZoom(0, 3, 16, 0)).toBe(3);
+		expect(easeZoom(0, -3, 0, 0)).toBe(-3);
+	});
+});
+
+describe("tweenView", () => {
+	const at = (from: number, to: number) => ({
+		from: { centerX: 100, centerZ: -40, zoom: from },
+		to: { centerX: 900, centerZ: 360, zoom: to },
+	});
+	const steps = Array.from({ length: 21 }, (_, i) => i / 20);
+
+	test("starts and ends on the given views", () => {
+		const { from, to } = at(3, -2);
+		expect(tweenView(from, to, 0)).toEqual(from);
+		expect(tweenView(from, to, 1)).toEqual(to);
+	});
+
+	test("without a zoom change it is a linear pan", () => {
+		const { from, to } = at(1, 1);
+		for (const e of steps) {
+			const v = tweenView(from, to, e);
+			expect(v.centerX).toBeCloseTo(100 + 800 * e, 6);
+			expect(v.centerZ).toBeCloseTo(-40 + 400 * e, 6);
+		}
+	});
+
+	test("zooming in: the destination glides to the middle in a straight line", () => {
+		const { from, to } = at(2, -3);
+		for (const e of steps) {
+			const v = tweenView(from, to, e);
+			const s = scaleOf(v.zoom);
+			// Its distance from the middle of the screen shrinks linearly with progress.
+			expect((to.centerX - v.centerX) * s).toBeCloseTo(
+				(1 - e) * (to.centerX - from.centerX) * scaleOf(from.zoom),
+				6,
+			);
+			expect((to.centerZ - v.centerZ) * s).toBeCloseTo(
+				(1 - e) * (to.centerZ - from.centerZ) * scaleOf(from.zoom),
+				6,
+			);
+		}
+	});
+
+	test("zooming out: the starting point glides away in a straight line", () => {
+		const { from, to } = at(-3, 2);
+		for (const e of steps) {
+			const v = tweenView(from, to, e);
+			const s = scaleOf(v.zoom);
+			expect((from.centerX - v.centerX) * s).toBeCloseTo(
+				e * (from.centerX - to.centerX) * scaleOf(to.zoom),
+				6,
+			);
+		}
+	});
+
+	test("the centre only ever moves toward the destination", () => {
+		for (const [a, b] of [
+			[4, -4],
+			[-4, 4],
+			[0, 1],
+		] as const) {
+			const { from, to } = at(a, b);
+			let last = -1;
+			for (const e of steps) {
+				const x = (tweenView(from, to, e).centerX - from.centerX) / 800;
+				expect(x).toBeGreaterThanOrEqual(last - 1e-9);
+				expect(x).toBeGreaterThanOrEqual(-1e-9);
+				expect(x).toBeLessThanOrEqual(1 + 1e-9);
+				last = x;
+			}
+		}
 	});
 });

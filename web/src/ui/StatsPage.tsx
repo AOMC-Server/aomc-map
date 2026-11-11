@@ -197,7 +197,20 @@ function AreaChart(props: { data: StatsBody; signedIn: boolean }) {
 					undefined,
 					short
 						? { month: "short", day: "numeric", hour: "numeric" }
-						: { month: "short", day: "numeric" },
+						: { year: "numeric", month: "short", day: "numeric" },
+				)
+			}
+			formatTip={(t) =>
+				new Date(t).toLocaleString(
+					undefined,
+					short
+						? {
+								year: "numeric",
+								month: "short",
+								day: "numeric",
+								hour: "numeric",
+							}
+						: { year: "numeric", month: "short", day: "numeric" },
 				)
 			}
 		/>
