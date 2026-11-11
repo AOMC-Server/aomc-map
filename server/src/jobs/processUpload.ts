@@ -12,6 +12,7 @@ import {
 import {
 	type Bbox,
 	commitRevision,
+	stackOrder,
 	tileHashAt,
 	tilePatches,
 } from "../tiles/history";
@@ -21,11 +22,17 @@ import {
 	incomingDir,
 	type JobContext,
 	type ProcessUploadPayload,
+	UserError,
 } from "./types";
+
+/** Memory for the tile canvases held at once while the source files are pasted in. */
+const BATCH_BYTES = 64 * 1024 * 1024;
 
 export async function processUpload(
 	ctx: JobContext,
 	payload: ProcessUploadPayload,
+	jobId?: number,
+	batchBytes = BATCH_BYTES,
 ) {
 	const { db, env, blobs, progress } = ctx;
 	const { revisionId, files } = payload;
@@ -68,32 +75,48 @@ export async function processUpload(
 		}
 	});
 
-	// One patch per touched tile, files pasted in upload order. Done tile by tile to bound memory.
+	// One patch per touched tile, files pasted in upload order. Tiles are done in batches to
+	// bound memory; within a batch each file is decoded once and pasted into every tile it covers.
 	const patches: { x: number; y: number; hash: string }[] = [];
+	const tiles = [...byTile.values()];
+	const batchSize = Math.max(1, Math.floor(batchBytes / (T * T * 4)));
 	let n = 0;
-	for (const { tx, ty, files: indexes } of byTile.values()) {
-		const canvas = emptyTile(T);
-		for (const index of indexes) {
+	for (let start = 0; start < tiles.length; start += batchSize) {
+		const batch = tiles.slice(start, start + batchSize);
+		const canvases = batch.map(() => emptyTile(T));
+		const covered = new Map<number, number[]>();
+		for (const [b, tile] of batch.entries()) {
+			for (const index of tile.files) {
+				covered.set(index, [...(covered.get(index) ?? []), b]);
+			}
+		}
+		for (const index of [...covered.keys()].sort((a, b) => a - b)) {
 			const f = files[index] as (typeof files)[number];
 			const img = await decodeRaw(
 				`${incomingDir(env, revisionId)}/${index}.png`,
+				env.MAX_IMAGE_DIM,
 			);
 			blackToAlpha(img.data);
-			overRegion(
-				canvas,
-				T,
-				img.data,
-				img.width,
-				img.height,
-				f.x - tx * T,
-				f.z - ty * T,
-			);
+			for (const b of covered.get(index) as number[]) {
+				const { tx, ty } = batch[b] as (typeof batch)[number];
+				overRegion(
+					canvases[b] as Buffer,
+					T,
+					img.data,
+					img.width,
+					img.height,
+					f.x - tx * T,
+					f.z - ty * T,
+				);
+			}
 		}
-		const hash = await storeTile(blobs, canvas, T);
-		if (hash) patches.push({ x: tx, y: ty, hash });
-		say("building patches", ++n, byTile.size);
+		for (const [b, { tx, ty }] of batch.entries()) {
+			const hash = await storeTile(blobs, canvases[b] as Buffer, T);
+			if (hash) patches.push({ x: tx, y: ty, hash });
+			say("building patches", ++n, tiles.length);
+		}
 	}
-	if (patches.length === 0) throw new Error("upload contains no map data");
+	if (patches.length === 0) throw new UserError("upload contains no map data");
 
 	// Composite each patch into its tile. Normally that is over the tile as of the current head;
 	// but if an export made later than this one already covers the tile, this (older) export
@@ -108,9 +131,13 @@ export async function processUpload(
 			(q) => !q.reverted,
 		);
 		let canvas: Buffer;
-		if (live.some((q) => q.at > exportedAt)) {
+		if (
+			live.some(
+				(q) => q.at > exportedAt || (q.at === exportedAt && q.id > revisionId),
+			)
+		) {
 			const stack = [...live, { id: revisionId, at: exportedAt, hash: p.hash }];
-			stack.sort((a, b) => a.at - b.at || a.id - b.id);
+			stack.sort(stackOrder);
 			canvas = emptyTile(T);
 			for (const q of stack) {
 				overRegion(canvas, T, await loadTile(blobs, q.hash, T), T, T, 0, 0);
@@ -147,6 +174,7 @@ export async function processUpload(
 	say("publishing");
 	commitRevision(db, {
 		revisionId,
+		jobId,
 		rev: head + 1,
 		dimensionId: dim.id,
 		writes,

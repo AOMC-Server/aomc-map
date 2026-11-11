@@ -94,10 +94,28 @@ export function downscaleInto(
 	}
 }
 
+/** Halves up to four children (quadrant q = x half + 2 * z half) into one parent. Null when there are none. */
+export function composeParent(
+	tileSize: number,
+	children: (Uint8Array | null | undefined)[],
+): Buffer | null {
+	let canvas: Buffer | null = null;
+	for (const [q, child] of children.entries()) {
+		if (!child) continue;
+		canvas ??= emptyTile(tileSize);
+		downscaleInto(canvas, child, tileSize, q % 2, Math.floor(q / 2));
+	}
+	return canvas;
+}
+
+/** Decodes to raw RGBA. Images larger than `maxDim` x `maxDim` pixels are refused. */
 export async function decodeRaw(
 	input: Buffer | string,
+	maxDim: number,
 ): Promise<{ data: Buffer; width: number; height: number }> {
-	const { data, info } = await sharp(input)
+	const { data, info } = await sharp(input, {
+		limitInputPixels: maxDim * maxDim,
+	})
 		.ensureAlpha()
 		.raw()
 		.toBuffer({ resolveWithObject: true });
@@ -109,7 +127,10 @@ export async function loadTile(
 	hash: string,
 	tileSize: number,
 ): Promise<Buffer> {
-	const { data, width, height } = await decodeRaw(await blobs.read(hash));
+	const { data, width, height } = await decodeRaw(
+		await blobs.read(hash),
+		tileSize,
+	);
 	if (width !== tileSize || height !== tileSize) {
 		throw new Error(
 			`blob ${hash} is ${width}x${height}, expected ${tileSize}x${tileSize}`,

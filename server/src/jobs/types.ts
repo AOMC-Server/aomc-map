@@ -3,6 +3,9 @@ import type { Env } from "../env";
 import type { ProgressBus } from "../progress";
 import type { BlobStore } from "../tiles/blobstore";
 
+/** An error whose message is meant for the person who uploaded; any other error is only logged. */
+export class UserError extends Error {}
+
 export type JobContext = {
 	db: Db;
 	env: Env;

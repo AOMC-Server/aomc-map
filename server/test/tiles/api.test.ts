@@ -313,7 +313,7 @@ describe("tile and blob routes", () => {
 		);
 		expect(atOne[0]?.hash).toBe(head[0]?.hash as string);
 
-		const res = await t.app.request(`${base}/0/hashes?${area}&rev=1`);
+		const res = await t.app.request(`${base}/0/hashes?${area}&rev=1&v=0`);
 		expect(res.headers.get("cache-control")).toContain("immutable");
 		// A coarser level has its own tiles.
 		const coarse = await t.app.request(`${base}/1/hashes?${area}`);

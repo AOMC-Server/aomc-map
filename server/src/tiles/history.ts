@@ -1,6 +1,12 @@
 import { and, asc, between, desc, eq, lte, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { mapInfo, revisions, tileVersions, uploadPatches } from "../db/schema";
+import {
+	jobs,
+	mapInfo,
+	revisions,
+	tileVersions,
+	uploadPatches,
+} from "../db/schema";
 import type { TileWrite } from "./pyramid";
 
 export type Bbox = { minX: number; minZ: number; maxX: number; maxZ: number };
@@ -87,6 +93,12 @@ export type TilePatch = {
 	at: number;
 };
 
+/** The order overlapping patches are stacked in: oldest export first, upload order breaking ties. */
+export const stackOrder = (
+	a: { at: number; id: number },
+	b: { at: number; id: number },
+) => a.at - b.at || a.id - b.id;
+
 /**
  * Every patch of every finished upload that touched a tile, oldest first. Overlapping patches
  * are applied in this order, so the newest export is on top however late it was uploaded.
@@ -120,12 +132,15 @@ export function tilePatches(
 
 /**
  * Publishes a finished revision atomically: tile versions, patches, the revision row and the
- * map's head_rev all become visible together, or not at all.
+ * map's head_rev all become visible together, or not at all. The job that made it (`jobId`)
+ * is marked done in the same transaction, so a crash can never leave a published revision
+ * with a job that would run again.
  */
 export function commitRevision(
 	db: Db,
 	opts: {
 		revisionId: number;
+		jobId?: number;
 		rev: number;
 		dimensionId: number;
 		writes: TileWrite[];
@@ -181,6 +196,12 @@ export function commitRevision(
 			.where(eq(revisions.id, revisionId))
 			.run();
 		tx.update(mapInfo).set({ headRev: rev }).run();
+		if (opts.jobId !== undefined) {
+			tx.update(jobs)
+				.set({ status: "done" })
+				.where(eq(jobs.id, opts.jobId))
+				.run();
+		}
 	});
 }
 
@@ -197,4 +218,14 @@ export async function failRevision(
 			completedAt: Date.now(),
 		})
 		.where(eq(revisions.id, revisionId));
+}
+
+/** Whether a revision was already published: done, with its revision number. */
+export function isPublished(db: Db, revisionId: number): boolean {
+	const row = db
+		.select({ status: revisions.status, rev: revisions.rev })
+		.from(revisions)
+		.where(eq(revisions.id, revisionId))
+		.get();
+	return row?.status === "done" && row.rev !== null;
 }

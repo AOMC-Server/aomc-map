@@ -57,10 +57,30 @@ function deleteAccess(c: Context<AppEnv>): DeleteAccess {
 	};
 }
 
-function serialize(r: RevisionRow, access: DeleteAccess) {
+/** Ids of the uploads that have an erase queued or running. */
+function erasing(db: Db, ids?: number[]): Set<number> {
+	const target = sql<number>`json_extract(${jobs.payload}, '$.revisionId')`;
+	return new Set(
+		db
+			.select({ id: target })
+			.from(jobs)
+			.where(
+				and(
+					eq(jobs.type, "erase_upload"),
+					inArray(jobs.status, ["pending", "processing"]),
+					ids ? inArray(target, ids) : undefined,
+				),
+			)
+			.all()
+			.map((row) => row.id),
+	);
+}
+
+function serialize(r: RevisionRow, access: DeleteAccess, deleting: boolean) {
 	const { bboxMinX, bboxMinZ, bboxMaxX, bboxMaxZ, ...rest } = r;
 	const canDelete =
 		r.kind === "upload" &&
+		!deleting &&
 		canDeleteUpload(access.actor, access.role, r, access.windowMs, access.now);
 	const own = access.actor !== null && access.actor.id === r.authorId;
 	const deletableUntil =
@@ -74,7 +94,7 @@ function serialize(r: RevisionRow, access: DeleteAccess) {
 		bboxMaxZ === null
 			? null
 			: { minX: bboxMinX, minZ: bboxMinZ, maxX: bboxMaxX, maxZ: bboxMaxZ };
-	return { ...rest, bbox, canDelete, deletableUntil };
+	return { ...rest, bbox, canDelete, deletableUntil, deleting };
 }
 
 function loadRevision(db: Db, id: number) {
@@ -94,7 +114,7 @@ export const revisionRoutes = new Hono<AppEnv>()
 			tag: "Revisions",
 			summary: "List revisions, newest first",
 			description:
-				"`viaMod` is true for uploads sent by the in-game mod (recognised by its `User-Agent`, see `MOD_USER_AGENTS`). Page through older ones with `before`; `nextBefore` is the value for the next page, or null after the last one. `canDelete` says whether you may delete the upload, and `deletableUntil` when that ends for your own uploads (null = no limit or not yours).",
+				"`viaMod` is true for uploads sent by the in-game mod (recognised by its `User-Agent`, see `MOD_USER_AGENTS`). Page through older ones with `before`; `nextBefore` is the value for the next page, or null after the last one. `canDelete` says whether you may delete the upload, and `deletableUntil` when that ends for your own uploads (null = no limit or not yours). `deleting` is true while a delete of the upload is queued or running.",
 			query: {
 				limit: "At most this many (1 to 1000, default 200)",
 				before: "Only revisions with a smaller id (for paging)",
@@ -151,10 +171,15 @@ export const revisionRoutes = new Hono<AppEnv>()
 						.where(inArray(revisions.id, active))
 				: [];
 			const access = deleteAccess(c);
+			const all = [...rows, ...extra];
+			const pending = erasing(
+				db,
+				all.map((r) => r.id),
+			);
 			return c.json({
-				revisions: [...rows, ...extra]
+				revisions: all
 					.sort((a, b) => b.id - a.id)
-					.map((r) => serialize(r, access)),
+					.map((r) => serialize(r, access, pending.has(r.id))),
 				nextBefore: rows.length === limit ? (rows.at(-1)?.id ?? null) : null,
 			});
 		},
@@ -171,7 +196,8 @@ export const revisionRoutes = new Hono<AppEnv>()
 		(c) => {
 			const row = loadRevision(c.var.db, parseId(c.req.param("id")));
 			if (!row) return c.json({ error: "not found" }, 404);
-			return c.json({ revision: serialize(row, deleteAccess(c)) });
+			const deleting = erasing(c.var.db, [row.id]).has(row.id);
+			return c.json({ revision: serialize(row, deleteAccess(c), deleting) });
 		},
 	)
 	.get(
@@ -235,12 +261,21 @@ export const revisionRoutes = new Hono<AppEnv>()
 					finish();
 				});
 
-				const current = loadRevision(db, id) as RevisionRow;
-				send({
-					status: current.status,
-					rev: current.rev,
-					error: current.error,
-				});
+				const current = loadRevision(db, id);
+				if (!current) {
+					unsubscribe();
+					return;
+				}
+				// A delete waiting in the queue leaves the upload itself as it is until it starts.
+				send(
+					erasing(db, [id]).has(id)
+						? { status: "processing", message: "queued" }
+						: {
+								status: current.status,
+								rev: current.rev,
+								error: current.error,
+							},
+				);
 				const ping = setInterval(() => {
 					chain = chain.then(() => stream.write(": ping\n\n"));
 				}, 20_000);
@@ -299,9 +334,14 @@ export const revisionRoutes = new Hono<AppEnv>()
 				return c.json({ ok: true });
 			}
 
+			if (erasing(db, [id]).has(id)) {
+				return c.json({ error: "this upload is already being deleted" }, 409);
+			}
+			// The upload keeps its status until the erase job starts, so the jobs queued before it
+			// still see it as part of the map.
 			db.transaction((tx) => {
 				tx.update(revisions)
-					.set({ status: "processing", error: null })
+					.set({ error: null })
 					.where(eq(revisions.id, id))
 					.run();
 				tx.insert(jobs)

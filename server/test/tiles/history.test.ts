@@ -134,7 +134,7 @@ describe("history lookup", () => {
 		expect((await t.app.request(`${base}?rev=3`)).status).toBe(400);
 		expect((await t.app.request(`${base}?rev=abc`)).status).toBe(400);
 
-		const pinned = await t.app.request(`${base}?rev=1`);
+		const pinned = await t.app.request(`${base}?rev=1&v=0`);
 		expect(pinned.headers.get("cache-control")).toBe(
 			"public, max-age=31536000, immutable",
 		);

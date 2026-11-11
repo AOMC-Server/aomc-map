@@ -2,7 +2,7 @@ import { and, between, eq } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { uploadPatches } from "../db/schema";
 import type { BlobStore } from "./blobstore";
-import { downscaleInto, emptyTile, encodeTile, loadTile } from "./compose";
+import { composeParent, encodeTile, loadTile } from "./compose";
 
 type Patch = { x: number; y: number; hash: string };
 
@@ -36,29 +36,22 @@ async function render(
 ): Promise<Buffer | null> {
 	if (patches.length === 0) return null;
 	if (zoom === 0) return loadTile(blobs, (patches[0] as Patch).hash, tileSize);
-	const canvas = emptyTile(tileSize);
-	let any = false;
-	for (let j = 0; j < 2; j++) {
-		for (let i = 0; i < 2; i++) {
-			const cx = 2 * x + i;
-			const cy = 2 * y + j;
-			const span = 2 ** (zoom - 1);
-			const inside = patches.filter(
-				(p) =>
-					p.x >= cx * span &&
-					p.x < (cx + 1) * span &&
-					p.y >= cy * span &&
-					p.y < (cy + 1) * span,
-			);
-			// Patches are indexed by zoom 0 tile, so narrow them to this child's area.
-			const child = await render(blobs, tileSize, zoom - 1, cx, cy, inside);
-			if (child) {
-				downscaleInto(canvas, child, tileSize, i, j);
-				any = true;
-			}
-		}
+	const children: (Buffer | null)[] = [];
+	const span = 2 ** (zoom - 1);
+	for (let q = 0; q < 4; q++) {
+		const cx = 2 * x + (q % 2);
+		const cy = 2 * y + Math.floor(q / 2);
+		const inside = patches.filter(
+			(p) =>
+				p.x >= cx * span &&
+				p.x < (cx + 1) * span &&
+				p.y >= cy * span &&
+				p.y < (cy + 1) * span,
+		);
+		// Patches are indexed by zoom 0 tile, so narrow them to this child's area.
+		children.push(await render(blobs, tileSize, zoom - 1, cx, cy, inside));
 	}
-	return any ? canvas : null;
+	return composeParent(tileSize, children);
 }
 
 const CACHE_MAX = 400;

@@ -11,10 +11,17 @@ import {
 import { tileHashesIn, tileVersionAt } from "../tiles/history";
 import { isolatedTile, patchHash } from "../tiles/isolated";
 import type { AppEnv } from "../types";
+import { IMMUTABLE } from "./blobs";
 
-const IMMUTABLE = "public, max-age=31536000, immutable";
 /** Most tiles one hash lookup may cover. */
 export const MAX_HASH_AREA = 4096;
+
+/**
+ * A pinned revision is only immutable under the current map epoch (`v`): an erase rewrites
+ * history from its revision on, and revision numbers can be reused afterwards.
+ */
+const pinnedCache = (vParam: string | undefined, epoch: number) =>
+	vParam === String(epoch) ? IMMUTABLE : "public, max-age=60";
 
 export const tileRoutes = new Hono<AppEnv>()
 	.get(
@@ -93,13 +100,23 @@ export const tileRoutes = new Hono<AppEnv>()
 			// One upload on its own, as it was uploaded: no other upload, no later revert or edit.
 			if (onlyParam !== undefined) {
 				const [revision] = await db
-					.select({ dimensionId: revisions.dimensionId, kind: revisions.kind })
+					.select({
+						dimensionId: revisions.dimensionId,
+						kind: revisions.kind,
+						status: revisions.status,
+					})
 					.from(revisions)
 					.where(eq(revisions.id, Number(onlyParam)));
-				if (revision?.kind !== "upload" || revision.dimensionId !== dim.id) {
+				// Until it is done it has no patches yet, and an empty answer must not stick.
+				if (
+					revision?.kind !== "upload" ||
+					revision.dimensionId !== dim.id ||
+					revision.status !== "done"
+				) {
+					c.header("Cache-Control", "no-store");
 					return c.json({ error: "not found" }, 404);
 				}
-				c.header("Cache-Control", IMMUTABLE);
+				c.header("Cache-Control", pinnedCache(c.req.query("v"), map.epoch));
 				if (zoom === 0) {
 					const hash = await patchHash(db, Number(onlyParam), x, y);
 					return hash
@@ -124,7 +141,9 @@ export const tileRoutes = new Hono<AppEnv>()
 
 			c.header(
 				"Cache-Control",
-				revParam === undefined ? "public, max-age=10" : IMMUTABLE,
+				revParam === undefined
+					? "public, max-age=10"
+					: pinnedCache(c.req.query("v"), map.epoch),
 			);
 
 			const version = await tileVersionAt(db, dim.id, zoom, x, y, rev);
@@ -188,7 +207,9 @@ export const tileRoutes = new Hono<AppEnv>()
 
 			c.header(
 				"Cache-Control",
-				revParam === undefined ? "public, max-age=10" : IMMUTABLE,
+				revParam === undefined
+					? "public, max-age=10"
+					: pinnedCache(c.req.query("v"), map.epoch),
 			);
 			const tiles = await tileHashesIn(
 				db,

@@ -4,7 +4,8 @@ import { isBlobHash } from "../tiles/blobstore";
 import { formatOfSuffix, TILE_FORMATS } from "../tiles/formats";
 import type { AppEnv } from "../types";
 
-const IMMUTABLE = "public, max-age=31536000, immutable";
+/** For anything that can never change under its URL. */
+export const IMMUTABLE = "public, max-age=31536000, immutable";
 
 /** Unauthenticated: hashes are unguessable, but a shared hash of a private map's tile is readable. */
 export const blobRoutes = new Hono<AppEnv>().get(

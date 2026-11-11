@@ -1,3 +1,5 @@
+import { renameSync, rmSync } from "node:fs";
+import { rm } from "node:fs/promises";
 import { basename } from "node:path";
 import {
 	isValidTimeZone,
@@ -15,7 +17,6 @@ import { dimensions, jobs, revisions } from "../db/schema";
 import { incomingDir, type UploadFile } from "../jobs/types";
 import { doc } from "../openapi";
 import { canEdit } from "../permissions";
-import { failRevision } from "../tiles/history";
 import type { AppEnv } from "../types";
 import { isModClient } from "../uploadClient";
 
@@ -132,6 +133,8 @@ export const uploadRoutes = new Hono<AppEnv>().post(
 
 		const errors: FileError[] = [];
 		const entries: Entry[] = [];
+		// What all ZIPs of this request may still expand to, so many small ZIPs can't add up to a bomb.
+		const budget = { bytes: env.MAX_UPLOAD_BYTES * 2 };
 		for (const [i, file] of uploaded.entries()) {
 			const lower = file.name.toLowerCase();
 			const origin = paths?.[i] ?? file.name;
@@ -144,13 +147,16 @@ export const uploadRoutes = new Hono<AppEnv>().post(
 			} else if (lower.endsWith(".zip")) {
 				try {
 					entries.push(
-						...readZip(
-							new Uint8Array(await file.arrayBuffer()),
-							env.MAX_UPLOAD_BYTES * 2,
-							origin,
-						),
+						...readZip(new Uint8Array(await file.arrayBuffer()), origin, {
+							budget,
+							maxFiles: env.MAX_FILES_PER_UPLOAD - entries.length,
+							maxEntryBytes: maxPngBytes(env.MAX_IMAGE_DIM),
+						}),
 					);
 				} catch (err) {
+					if (err instanceof LimitError) {
+						return c.json({ error: err.message }, err.status);
+					}
 					errors.push({
 						file: file.name,
 						error: err instanceof Error ? err.message : "bad zip",
@@ -254,47 +260,57 @@ export const uploadRoutes = new Hono<AppEnv>().post(
 		);
 
 		const viaMod = isModClient(c.req.header("User-Agent"), env.MOD_USER_AGENTS);
+		// The files are written first, under a staging name, because revision ids don't exist yet.
+		// Revisions, jobs and the move to incoming/<id> then happen in one transaction (the move is
+		// synchronous, so the worker can't see a job before its files), and either all of it
+		// happens or none.
+		const staging = `${env.DATA_DIR}/incoming/.staging-${crypto.randomUUID()}`;
 		const revisionIds: number[] = [];
 		try {
-			for (const [exportedAt, group] of ordered) {
-				const [revision] = await db
-					.insert(revisions)
-					.values({
-						kind: "upload",
-						dimensionId: dim.id,
-						authorId: user.id,
-						fileCount: group.length,
-						exportedAt,
-						viaMod,
-					})
-					.returning({ id: revisions.id });
-				revisionIds.push((revision as { id: number }).id);
-			}
-
-			// The jobs are inserted last so the worker can never see one before its files exist.
 			await Promise.all(
-				ordered.flatMap(([, group], g) => {
-					const dir = incomingDir(env, revisionIds[g] as number);
-					return group.map((item, i) =>
-						Bun.write(`${dir}/${i}.png`, item.entry.data),
-					);
-				}),
+				ordered.flatMap(([, group], g) =>
+					group.map((item, i) =>
+						Bun.write(`${staging}/${g}/${i}.png`, item.entry.data),
+					),
+				),
 			);
-			for (const [g, [, group]] of ordered.entries()) {
-				await db.insert(jobs).values({
-					type: "process_upload",
-					payload: {
-						revisionId: revisionIds[g] as number,
-						files: group.map((item) => item.file),
-					},
-				});
-			}
+			db.transaction((tx) => {
+				for (const [g, [exportedAt, group]] of ordered.entries()) {
+					const revision = tx
+						.insert(revisions)
+						.values({
+							kind: "upload",
+							dimensionId: dim.id,
+							authorId: user.id,
+							fileCount: group.length,
+							exportedAt,
+							viaMod,
+						})
+						.returning({ id: revisions.id })
+						.get();
+					revisionIds.push(revision.id);
+					const dir = incomingDir(env, revision.id);
+					rmSync(dir, { recursive: true, force: true });
+					renameSync(`${staging}/${g}`, dir);
+					tx.insert(jobs)
+						.values({
+							type: "process_upload",
+							payload: {
+								revisionId: revision.id,
+								files: group.map((item) => item.file),
+							},
+						})
+						.run();
+				}
+			});
 		} catch (err) {
 			console.error(err);
 			for (const id of revisionIds) {
-				await failRevision(db, id, "could not store upload");
+				await rm(incomingDir(env, id), { recursive: true, force: true });
 			}
 			return c.json({ error: "could not store upload" }, 500);
+		} finally {
+			await rm(staging, { recursive: true, force: true });
 		}
 		svc.worker.kick();
 		return c.json(
@@ -304,13 +320,36 @@ export const uploadRoutes = new Hono<AppEnv>().post(
 	},
 );
 
-/** Expands PNGs from a zip. `origin` is the zip's own path; entries keep their folder path. */
+/** A request limit hit while reading a ZIP: the whole request is refused with `status`. */
+class LimitError extends Error {
+	constructor(
+		message: string,
+		readonly status: 400 | 413,
+	) {
+		super(message);
+	}
+}
+
+/** The most a PNG of `maxDim` x `maxDim` can plausibly take: 4 bytes a pixel, plus headers. */
+const maxPngBytes = (maxDim: number) => maxDim * maxDim * 4 + 65_536;
+
+/**
+ * Expands PNGs from a zip. `origin` is the zip's own path; entries keep their folder path.
+ * fflate allocates every entry's declared size, so the limits are checked in the filter,
+ * before anything is inflated.
+ */
 function readZip(
 	data: Uint8Array,
-	maxExpanded: number,
 	origin: string,
+	limits: {
+		/** Bytes that may still be expanded; shared by all ZIPs of the request. */
+		budget: { bytes: number };
+		maxFiles: number;
+		maxEntryBytes: number;
+	},
 ): Entry[] {
-	let total = 0;
+	const { budget, maxFiles, maxEntryBytes } = limits;
+	let count = 0;
 	const out: Entry[] = [];
 	const unzipped = unzipSync(data, {
 		filter(file) {
@@ -323,8 +362,16 @@ function readZip(
 				return false;
 			}
 			if (!name.toLowerCase().endsWith(".png")) return false;
-			total += file.originalSize;
-			if (total > maxExpanded) throw new Error("zip expands to too much data");
+			if (++count > maxFiles) {
+				throw new LimitError("too many files", 400);
+			}
+			if (file.originalSize > maxEntryBytes) {
+				throw new Error(`${name} is too large to be a valid image`);
+			}
+			budget.bytes -= file.originalSize;
+			if (budget.bytes < 0) {
+				throw new LimitError("zip expands to too much data", 413);
+			}
 			return true;
 		},
 	});

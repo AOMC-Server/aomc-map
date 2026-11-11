@@ -9,24 +9,26 @@ import {
 } from "../db/schema";
 import { loadMap } from "../permissions";
 import {
-	downscaleInto,
+	composeParent,
 	emptyTile,
 	loadTile,
 	overRegion,
 	storeTile,
 } from "../tiles/compose";
-import { tileHashAt, tilePatches } from "../tiles/history";
-import { tileKey } from "../tiles/pyramid";
-import type { EraseUploadPayload, JobContext } from "./types";
+import {
+	stackOrder,
+	type TilePatch,
+	tileHashAt,
+	tilePatches,
+} from "../tiles/history";
+import { parseKey, tileKey } from "../tiles/pyramid";
+import { type EraseUploadPayload, type JobContext, UserError } from "./types";
 
 type Row = { rev: number; hash: string | null };
 
 const sameRows = (a: Row[], b: Row[]) =>
 	a.length === b.length &&
 	a.every((r, i) => r.rev === b[i]?.rev && r.hash === b[i]?.hash);
-
-const parseKey = (key: string) =>
-	key.split(",").map(Number) as [number, number];
 
 /**
  * Deletes an upload as if it had never been made: it leaves the map, every past revision, the
@@ -60,7 +62,7 @@ export async function eraseUpload(
 		target.rev === null ||
 		target.dimensionId === null
 	) {
-		throw new Error("target revision is not a finished upload");
+		throw new UserError("target revision is not a finished upload");
 	}
 	const R = target.rev;
 	const dimId = target.dimensionId;
@@ -138,17 +140,24 @@ export async function eraseUpload(
 		);
 		const live = new Set<number>();
 		const hashes = new Map<string, string | null>();
+		// The composite of the stack `held`, so a patch landing on top costs one decode, not all of them.
+		let canvas = emptyTile(T);
+		let held: TilePatch[] = [];
 		const contentHash = async () => {
 			const stack = [...live]
 				.map((id) => patches.get(id))
 				.filter((p) => p !== undefined)
-				.sort((a, b) => a.at - b.at || a.id - b.id);
+				.sort(stackOrder);
 			const key = stack.map((p) => p.id).join(",");
 			if (!hashes.has(key)) {
-				const canvas = emptyTile(T);
-				for (const p of stack) {
+				if (!held.every((p, i) => p === stack[i])) {
+					canvas = emptyTile(T);
+					held = [];
+				}
+				for (const p of stack.slice(held.length)) {
 					overRegion(canvas, T, await loadTile(blobs, p.hash, T), T, T, 0, 0);
 				}
+				held = stack;
 				hashes.set(key, await storeTile(blobs, canvas, T));
 			}
 			return hashes.get(key) ?? null;
@@ -212,19 +221,13 @@ export async function eraseUpload(
 				});
 				const mixKey = hashes.join("|");
 				if (!mixes.has(mixKey)) {
-					const canvas = emptyTile(T);
-					for (const [q, hash] of hashes.entries()) {
-						if (hash) {
-							downscaleInto(
-								canvas,
-								await loadTile(blobs, hash, T),
-								T,
-								q % 2,
-								Math.floor(q / 2),
-							);
-						}
-					}
-					mixes.set(mixKey, await storeTile(blobs, canvas, T));
+					const canvas = composeParent(
+						T,
+						await Promise.all(
+							hashes.map((hash) => (hash ? loadTile(blobs, hash, T) : null)),
+						),
+					);
+					mixes.set(mixKey, canvas ? await storeTile(blobs, canvas, T) : null);
 				}
 				const hash = mixes.get(mixKey) ?? null;
 				if (hash !== prev) {

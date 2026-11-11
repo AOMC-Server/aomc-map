@@ -1,6 +1,6 @@
 import { floorDiv } from "@aomc/shared";
 import type { BlobStore } from "./blobstore";
-import { downscaleInto, emptyTile, loadTile, storeTile } from "./compose";
+import { composeParent, loadTile, storeTile } from "./compose";
 
 export type TileWrite = {
 	zoom: number;
@@ -10,7 +10,7 @@ export type TileWrite = {
 };
 
 export const tileKey = (x: number, y: number) => `${x},${y}`;
-const parseKey = (key: string) =>
+export const parseKey = (key: string) =>
 	key.split(",").map(Number) as [number, number];
 
 /**
@@ -41,26 +41,20 @@ export async function buildPyramid(opts: {
 		const next = new Map<string, string | null>();
 		for (const parentKey of parents) {
 			const [px, py] = parseKey(parentKey);
-			const canvas = emptyTile(tileSize);
-			for (let j = 0; j < 2; j++) {
-				for (let i = 0; i < 2; i++) {
-					const cx = 2 * px + i;
-					const cy = 2 * py + j;
-					const key = tileKey(cx, cy);
-					const hash = level.has(key)
-						? (level.get(key) as string | null)
-						: await current(zoom - 1, cx, cy);
-					if (hash)
-						downscaleInto(
-							canvas,
-							await loadTile(blobs, hash, tileSize),
-							tileSize,
-							i,
-							j,
-						);
-				}
+			const children: (Buffer | null)[] = [];
+			for (let q = 0; q < 4; q++) {
+				const cx = 2 * px + (q % 2);
+				const cy = 2 * py + Math.floor(q / 2);
+				const key = tileKey(cx, cy);
+				const childHash = level.has(key)
+					? (level.get(key) as string | null)
+					: await current(zoom - 1, cx, cy);
+				children.push(
+					childHash ? await loadTile(blobs, childHash, tileSize) : null,
+				);
 			}
-			const hash = await storeTile(blobs, canvas, tileSize);
+			const canvas = composeParent(tileSize, children);
+			const hash = canvas ? await storeTile(blobs, canvas, tileSize) : null;
 			if (hash !== (await current(zoom, px, py))) {
 				next.set(parentKey, hash);
 				writes.push({ zoom, x: px, y: py, hash });
