@@ -1,10 +1,15 @@
 import type { FeatureType, Point } from "@aomc/shared/features";
 import { signal } from "@preact/signals";
-import { type DragSession, isTyping } from "../map/input";
+import {
+	type DragSession,
+	isInteractiveTarget,
+	isUiKeyTarget,
+} from "../map/input";
 import type { MapView } from "../map/MapView";
 import { blockAt, blockCenter, nearestHandle, shiftHeld } from "./handles";
 import {
 	midpoint,
+	samePoint,
 	segmentIndices,
 	snapToLine,
 	type Point as XZ,
@@ -81,9 +86,13 @@ export function resumeDraw() {
 	else if (d) drawing.value = { ...d, points: [], mode: "draw" };
 }
 
+/** Number of different blocks among the points. */
+const distinctCount = (points: Point[]) =>
+	new Set(points.map(([x, z]) => `${x},${z}`)).size;
+
 export function finishDraw(): boolean {
 	const d = drawing.value;
-	if (!d || d.points.length < minPoints(d.type)) return false;
+	if (!d || distinctCount(d.points) < minPoints(d.type)) return false;
 	drawing.value = { ...d, mode: "placed" };
 	return true;
 }
@@ -133,26 +142,33 @@ const snapped = (from: Point | undefined, p: Point): Point =>
 
 export function initDrawTool(map: MapView) {
 	map.on("move", (e) => {
-		hover = e ? toBlock(map, e.sx, e.sy) : null;
+		const block = e ? toBlock(map, e.sx, e.sy) : null;
+		if (samePoint(block && xz(block), hover && xz(hover))) return;
+		hover = block;
 		if (drawing.value?.mode === "draw") map.invalidate();
 	});
 	map.on("click", (e) => {
 		const d = drawing.value;
 		if (d?.mode !== "draw") return;
 		const p = toBlock(map, e.sx, e.sy);
-		if (d.type === "pin") drawing.value = { ...d, points: [p], mode: "placed" };
-		else
-			drawing.value = {
-				...d,
-				points: [...d.points, snapped(d.points.at(-1), p)],
-			};
+		if (d.type === "pin") {
+			drawing.value = { ...d, points: [p], mode: "placed" };
+			return;
+		}
+		const next = snapped(d.points.at(-1), p);
+		const last = d.points.at(-1);
+		// Another click in the block of the last vertex adds nothing.
+		if (last && samePoint(xz(last), xz(next))) return;
+		drawing.value = { ...d, points: [...d.points, next] };
 	});
 
 	window.addEventListener("keydown", (e) => {
 		const d = drawing.value;
-		if (!d || isTyping(e.target)) return;
+		if (!d || isUiKeyTarget(e.target)) return;
 		if (e.key === "Enter") {
-			if (finishDraw()) e.preventDefault();
+			// A focused button or link uses Enter itself.
+			if (d.mode === "draw" && !isInteractiveTarget(e.target) && finishDraw())
+				e.preventDefault();
 		} else if (e.key === "Escape") {
 			cancelDraw();
 			e.preventDefault();
@@ -200,6 +216,7 @@ function vertexSession(
 			)
 				finishDraw();
 		},
+		cancel() {},
 	};
 }
 
@@ -224,7 +241,8 @@ export function grabDrawPoint(
 	if (vertex >= 0) return vertexSession(map, vertex, sx, sy, false);
 	if (d.type === "pin") return null;
 
-	for (const [a, b] of segmentIndices(d.points.length, d.type === "polygon")) {
+	const closed = d.type === "polygon" && d.mode === "placed";
+	for (const [a, b] of segmentIndices(d.points.length, closed)) {
 		const pa = d.points[a] as Point;
 		const pb = d.points[b] as Point;
 		const mid = midHandle(map, pa, pb);
@@ -271,10 +289,7 @@ export function drawGeometry(ctx: CanvasRenderingContext2D, map: MapView) {
 			outlinedPath(ctx, band, { color: LINE, width: 2, dashed: true });
 		}
 
-		for (const [a, b] of segmentIndices(
-			d.points.length,
-			d.type === "polygon",
-		)) {
+		for (const [a, b] of segmentIndices(d.points.length, closed)) {
 			const mid = midHandle(map, d.points[a] as Point, d.points[b] as Point);
 			if (mid) plusHandle(ctx, mid.x, mid.y);
 		}

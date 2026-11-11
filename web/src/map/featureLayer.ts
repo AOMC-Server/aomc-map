@@ -16,6 +16,7 @@ import {
 	type Pt,
 	pointInPolygon,
 } from "./geometry";
+import { viewportBlocks } from "./viewport";
 
 type RenderFeature = {
 	id: number;
@@ -134,15 +135,7 @@ export class FeatureLayer {
 		this.drawnClusters = [];
 		if (this.prepared.length === 0) return;
 
-		const tl = screenToBlock(view, size, 0, 0);
-		const br = screenToBlock(view, size, size.width, size.height);
-		const margin = 40 / scaleOf(view.zoom);
-		const viewport: Bounds = {
-			minX: tl.x - margin,
-			minZ: tl.z - margin,
-			maxX: br.x + margin,
-			maxZ: br.z + margin,
-		};
+		const viewport = viewportBlocks(view, size, 40 / scaleOf(view.zoom));
 		const project = (x: number, z: number) =>
 			blockToScreen(view, size, x + BLOCK_CENTER, z + BLOCK_CENTER);
 
@@ -241,12 +234,20 @@ export class FeatureLayer {
 	) {
 		const inFine = new Set(fine);
 		const inCoarse = new Set(coarse);
-		const draw = (nodes: PinNode[], other: Set<PinNode>, weight: number) => {
-			// Hit-testing follows whichever level is stronger right now.
-			const active = weight >= 0.5;
+		const draw = (
+			nodes: PinNode[],
+			other: Set<PinNode>,
+			weight: number,
+			skipShared: boolean,
+		) => {
 			for (const node of nodes) {
-				const alpha = other.has(node) ? 1 : weight;
+				const shared = other.has(node);
+				// A node in both levels is drawn once, by the first pass.
+				if (shared && skipShared) continue;
+				const alpha = shared ? 1 : weight;
 				if (alpha <= 0.01) continue;
+				// Hit-testing follows whichever level is stronger right now; shared nodes are solid.
+				const active = shared || weight >= 0.5;
 				const s = project(node.x, node.z);
 				ctx.globalAlpha = alpha;
 				if (node.item) {
@@ -271,8 +272,8 @@ export class FeatureLayer {
 
 		this.selectedShown = false;
 		// Coarse first so that the fine nodes that stay are drawn on top of it.
-		draw(coarse, inFine, t);
-		draw(fine, inCoarse, 1 - t);
+		draw(coarse, inFine, t, false);
+		draw(fine, inCoarse, 1 - t, true);
 
 		// The pin whose popup or editor is open must not vanish into a cluster.
 		if (this.selectedId === null || this.selectedShown) return;
@@ -336,7 +337,7 @@ export class FeatureLayer {
 		ctx.fillText(count > 999 ? "999+" : String(count), x, y + 0.5);
 	}
 
-	/** Topmost thing under the pointer: pins and clusters first, then lines, then polygons. */
+	/** Topmost thing under the pointer: pins and clusters first, then lines, then polygon edges, then polygons. */
 	hitTest(view: View, size: Size, sx: number, sy: number): Hit | null {
 		for (let i = this.drawnPins.length - 1; i >= 0; i--) {
 			const p = this.drawnPins[i] as DrawnPin;
@@ -363,28 +364,37 @@ export class FeatureLayer {
 		const px = at.x - BLOCK_CENTER;
 		const pz = at.z - BLOCK_CENTER;
 		const tolerance = LINE_TOLERANCE_PX / scaleOf(view.zoom);
-		let polygon: Prepared | null = null;
-		for (let i = this.prepared.length - 1; i >= 0; i--) {
-			const p = this.prepared[i] as Prepared;
-			const { type } = p.feature;
-			if (type === "pin") continue;
+		const near = (p: Prepared) => {
 			const b = p.bounds;
-			if (
+			return !(
 				px < b.minX - tolerance ||
 				px > b.maxX + tolerance ||
 				pz < b.minZ - tolerance ||
 				pz > b.maxZ + tolerance
-			) {
-				continue;
-			}
-			if (distToPolyline(px, pz, p.points, type === "polygon") <= tolerance) {
-				return { kind: "feature", feature: p.feature, layer: p.layer };
-			}
-			if (type === "polygon" && !polygon && pointInPolygon(px, pz, p.points))
-				polygon = p;
+			);
+		};
+		const hit = (p: Prepared): Hit => ({
+			kind: "feature",
+			feature: p.feature,
+			layer: p.layer,
+		});
+		// Lines are drawn over polygons: lines, then polygon edges, then polygon insides.
+		for (let i = this.prepared.length - 1; i >= 0; i--) {
+			const p = this.prepared[i] as Prepared;
+			if (
+				p.feature.type === "line" &&
+				near(p) &&
+				distToPolyline(px, pz, p.points, false) <= tolerance
+			)
+				return hit(p);
 		}
-		return polygon
-			? { kind: "feature", feature: polygon.feature, layer: polygon.layer }
-			: null;
+		let inside: Prepared | null = null;
+		for (let i = this.prepared.length - 1; i >= 0; i--) {
+			const p = this.prepared[i] as Prepared;
+			if (p.feature.type !== "polygon" || !near(p)) continue;
+			if (distToPolyline(px, pz, p.points, true) <= tolerance) return hit(p);
+			if (!inside && pointInPolygon(px, pz, p.points)) inside = p;
+		}
+		return inside ? hit(inside) : null;
 	}
 }

@@ -5,7 +5,7 @@ import { blockAt, blockCenter, nearestHandle, shiftHeld } from "./handles";
 import {
 	facing,
 	type Point,
-	pathLength,
+	samePoint,
 	segmentLengths,
 	snapToLine,
 } from "./measureMath";
@@ -56,10 +56,11 @@ export const measureStats = computed<MeasureStats | null>(() => {
 	const end = points.at(-1) as Point;
 	const dx = end.x - first.x;
 	const dz = end.z - first.z;
+	const segments = segmentLengths(points);
 	return {
 		points,
-		segments: segmentLengths(points),
-		total: pathLength(points),
+		segments,
+		total: segments.reduce((sum, length) => sum + length, 0),
 		straight: Math.hypot(dx, dz),
 		dx,
 		dz,
@@ -81,7 +82,7 @@ export function clearMeasure() {
 }
 
 export function hoverMeasure(p: Point | null) {
-	measureHover.value = p;
+	if (!samePoint(p, measureHover.value)) measureHover.value = p;
 }
 
 /** Lets a placed point be dragged to a new block (Shift snaps it to a line from its neighbour). */
@@ -98,11 +99,14 @@ export function grabMeasurePoint(
 			const points = [...measurePoints.value];
 			const raw = blockAt(map, mx, my);
 			const neighbour = points[index - 1] ?? points[index + 1];
-			points[index] =
+			const next =
 				shiftHeld.value && neighbour ? snapToLine(neighbour, raw) : raw;
+			if (samePoint(next, points[index] ?? null)) return;
+			points[index] = next;
 			measurePoints.value = points;
 		},
 		end() {},
+		cancel() {},
 	};
 }
 

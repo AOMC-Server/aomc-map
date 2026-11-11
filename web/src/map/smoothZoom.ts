@@ -3,6 +3,32 @@ import { scaleOf, type View } from "@aomc/shared/view";
 /** Closer than this to the goal, the zoom snaps onto it and the animation ends. */
 const SNAP = 0.002;
 
+const GRID_EPS = 1e-9;
+
+/**
+ * Where a zoom of `delta` levels from `base` ends up on a grid of multiples of `snap`: the grid
+ * line nearest `ahead` (the unsnapped goal), but never back at or behind `base`, so a small
+ * notch of the wheel still moves one whole step in its direction instead of rounding to nothing.
+ * Steps that would leave `[lo, hi]` stay at `base`.
+ */
+export function snapZoomGoal(
+	base: number,
+	ahead: number,
+	delta: number,
+	snap: number,
+	lo: number,
+	hi: number,
+): number {
+	let goal = Math.round(ahead / snap) * snap;
+	if (delta !== 0 && (goal - base) * Math.sign(delta) <= GRID_EPS) {
+		const k = base / snap;
+		goal =
+			(delta > 0 ? Math.floor(k + GRID_EPS) + 1 : Math.ceil(k - GRID_EPS) - 1) *
+			snap;
+	}
+	return goal < lo || goal > hi ? Math.min(Math.max(base, lo), hi) : goal;
+}
+
 /**
  * One frame of easing the zoom toward its goal. The remaining distance shrinks exponentially
  * with time constant `smoothing` (ms), so the result does not depend on the frame rate, it slows

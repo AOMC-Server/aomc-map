@@ -1,5 +1,5 @@
 import { effect } from "@preact/signals";
-import { isTyping } from "../map/input";
+import { isUiKeyTarget } from "../map/input";
 import type { MapView } from "../map/MapView";
 import { activeTool, cursor, highlightedUpload } from "../state";
 import { areasLoaded, type Edge, type Rect, uploadArea } from "../uploadArea";
@@ -11,7 +11,7 @@ import {
 	initDrawTool,
 } from "./draw";
 import { initFeatureInteraction } from "./features";
-import { shiftHeld } from "./handles";
+import { floorBlock, shiftHeld } from "./handles";
 import {
 	clearMeasure,
 	clickMeasure,
@@ -22,6 +22,7 @@ import {
 	measurePoints,
 	undoMeasure,
 } from "./measure";
+import { samePoint } from "./measureMath";
 
 /**
  * Outlines the area of the upload that is hovered or selected in the upload log: the tiles it
@@ -99,13 +100,14 @@ export function initTools(map: MapView) {
 	});
 
 	map.on("move", (e) => {
-		cursor.value = e ? { x: Math.floor(e.x), z: Math.floor(e.z) } : null;
+		const block = e ? floorBlock(e) : null;
+		// A new object would repaint the map on every pointer move, even within one block.
+		if (!samePoint(block, cursor.value)) cursor.value = block;
 		if (activeTool.value === "measure") hoverMeasure(cursor.value);
 	});
 	map.on("click", (e) => {
 		if (drawing.value) return;
-		const p = { x: Math.floor(e.x), z: Math.floor(e.z) };
-		if (activeTool.value === "measure") clickMeasure(p);
+		if (activeTool.value === "measure") clickMeasure(floorBlock(e));
 	});
 
 	// Double-click zoom would fight with two quick tool clicks.
@@ -129,7 +131,7 @@ export function initTools(map: MapView) {
 	});
 	window.addEventListener("keydown", (e) => {
 		shift(e);
-		if (isTyping(e.target) || drawing.value) return;
+		if (isUiKeyTarget(e.target) || drawing.value) return;
 		if (e.key === "Escape") {
 			if (measurePoints.value.length > 0) clearMeasure();
 			else activeTool.value = "none";

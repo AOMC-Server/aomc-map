@@ -1,6 +1,6 @@
 import { effect } from "@preact/signals";
 import { pointsOf } from "../featureInfo";
-import { MIN_CLUSTER_LEVEL } from "../map/featureLayer";
+import { BLOCK_CENTER, MIN_CLUSTER_LEVEL } from "../map/featureLayer";
 import type { MapView } from "../map/MapView";
 import { activeTool, editor, hoverInfo, popup } from "../state";
 import { drawing } from "./draw";
@@ -43,7 +43,7 @@ export function initFeatureInteraction(map: MapView) {
 		const [first] = pointsOf(f);
 		const anchor =
 			f.type === "pin" && first
-				? { x: first[0] + 0.5, z: first[1] + 0.5 }
+				? { x: first[0] + BLOCK_CENTER, z: first[1] + BLOCK_CENTER }
 				: { x: e.x, z: e.z };
 		popup.value = { featureId: f.id, layerId: f.layerId, ...anchor };
 	});

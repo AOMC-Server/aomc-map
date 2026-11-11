@@ -1,5 +1,10 @@
 export type Point = { x: number; z: number };
 
+/** True when both are the same block (or both absent). */
+export function samePoint(a: Point | null, b: Point | null): boolean {
+	return a === b || (!!a && !!b && a.x === b.x && a.z === b.z);
+}
+
 /** Lengths of the straight segments between consecutive points, in blocks. */
 export function segmentLengths(points: Point[]): number[] {
 	const out: number[] = [];

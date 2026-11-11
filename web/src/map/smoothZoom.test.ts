@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { scaleOf } from "@aomc/shared/view";
-import { easeZoom, tweenView } from "./smoothZoom";
+import { easeZoom, snapZoomGoal, tweenView } from "./smoothZoom";
 
 describe("easeZoom", () => {
 	test("moves toward the goal without overshooting, in both directions", () => {
@@ -112,5 +112,47 @@ describe("tweenView", () => {
 				last = x;
 			}
 		}
+	});
+});
+
+describe("snapZoomGoal", () => {
+	const snap = (base: number, delta: number, lo = -10, hi = 10) =>
+		snapZoomGoal(base, base + delta, delta, 0.5, lo, hi);
+
+	test("rounds to the nearest grid line when that moves in the right direction", () => {
+		expect(snap(0, 0.4)).toBe(0.5);
+		expect(snap(0, -0.4)).toBe(-0.5);
+		expect(snap(0.3, 0.2)).toBe(0.5);
+	});
+
+	test("a notch too small to reach the next line still moves one whole step", () => {
+		// Firefox: 3 lines of 16 px at 0.005 per px = 0.24 levels.
+		expect(snap(0, 0.24)).toBe(0.5);
+		expect(snap(0, -0.24)).toBe(-0.5);
+		expect(snap(1.5, 0.24)).toBe(2);
+		expect(snap(1.5, -0.24)).toBe(1);
+	});
+
+	test("never moves against the direction of the notch", () => {
+		// Off the grid, plain rounding of 0.7 + 0.04 would go back to 0.5.
+		expect(snap(0.7, 0.04)).toBe(1);
+		expect(snap(0.3, -0.04)).toBe(0);
+	});
+
+	test("repeated notches walk along the grid", () => {
+		let goal = 0;
+		for (let i = 0; i < 4; i++) goal = snap(goal, 0.24);
+		expect(goal).toBe(2);
+		for (let i = 0; i < 4; i++) goal = snap(goal, -0.24);
+		expect(goal).toBe(0);
+	});
+
+	test("stops at the edge of the allowed range instead of running away", () => {
+		expect(snap(2, 0.24, -2, 2)).toBe(2);
+		expect(snap(-2, -0.24, -2, 2)).toBe(-2);
+	});
+
+	test("a zero delta just rounds", () => {
+		expect(snapZoomGoal(0.3, 0.3, 0, 0.5, -10, 10)).toBe(0.5);
 	});
 });

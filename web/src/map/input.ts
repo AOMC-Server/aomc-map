@@ -1,13 +1,37 @@
 import { panBy, zoomAt } from "@aomc/shared/view";
 import type { MapView } from "./MapView";
 
-export type DragSession = { move(sx: number, sy: number): void; end(): void };
+/**
+ * A drag started by a tool. `end` is the pointer lifting (a press that never moved is a click);
+ * `cancel` is the gesture being taken away (a second finger lands, the browser cancels the
+ * pointer), which must not count as a click.
+ */
+export type DragSession = {
+	move(sx: number, sy: number): void;
+	end(): void;
+	cancel(): void;
+};
 
 /** True for key events aimed at a text field, which the map must leave alone. */
 export function isTyping(target: EventTarget | null): boolean {
 	const t = target as HTMLElement | null;
 	return (
 		!!t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))
+	);
+}
+
+/** True for key events the UI owns: aimed at a text field, or inside a panel, dialog or popup. */
+export function isUiKeyTarget(target: EventTarget | null): boolean {
+	return (
+		isTyping(target) ||
+		!!(target as Element | null)?.closest?.(".panel, .modal, .popup")
+	);
+}
+
+/** True for focused controls, which use Enter (and Space) themselves. */
+export function isInteractiveTarget(target: EventTarget | null): boolean {
+	return !!(target as Element | null)?.closest?.(
+		"button, a, input, textarea, select, [contenteditable]",
 	);
 }
 
@@ -78,7 +102,7 @@ export class Input {
 			this.moved = false;
 			this.dragSamples = [{ ...p, t: e.timeStamp }];
 		} else if (this.pointers.size === 2) {
-			this.endSession();
+			this.cancelSession();
 			this.moved = true;
 			this.lastPinch = this.pinchState();
 			this.pinchSamples = [];
@@ -217,19 +241,41 @@ export class Input {
 		this.session = null;
 	}
 
+	private cancelSession() {
+		this.session?.cancel();
+		this.session = null;
+	}
+
+	/**
+	 * A finger lifted while others stay down. With two or more left the pinch carries on from
+	 * where they are now; with one left it continues as a drag from there.
+	 */
+	private rebase(t: number, release: boolean) {
+		this.pinchSamples = [];
+		const rest = this.pointers.values().next().value;
+		if (this.pointers.size >= 2) {
+			this.lastPinch = this.pinchState();
+			return;
+		}
+		if (this.lastPinch && release) this.releasePinch();
+		this.lastPinch = null;
+		if (!rest) return;
+		this.start = { ...rest, t: performance.now() };
+		this.moved = true;
+		this.dragSamples = [{ ...rest, t }];
+	}
+
 	private up = (e: PointerEvent) => {
 		const p = this.local(e);
 		const wasSingle = this.pointers.size === 1;
-		this.pointers.delete(e.pointerId);
+		if (!this.pointers.delete(e.pointerId)) return;
 		if (this.session) {
 			this.endSession();
 			return;
 		}
-		if (this.pointers.size === 1) {
-			// Pinch ended with one finger left: continue as a drag from there.
-			if (this.lastPinch) this.releasePinch();
-			this.lastPinch = null;
-			this.start = null;
+		if (this.pointers.size > 0) {
+			this.rebase(e.timeStamp, true);
+			return;
 		}
 		if (!wasSingle || !this.start) return;
 		this.start = null;
@@ -243,8 +289,12 @@ export class Input {
 	};
 
 	private cancel = (e: PointerEvent) => {
-		this.endSession();
-		this.pointers.delete(e.pointerId);
+		if (!this.pointers.delete(e.pointerId)) return;
+		this.cancelSession();
+		if (this.pointers.size > 0) {
+			this.rebase(e.timeStamp, false);
+			return;
+		}
 		this.start = null;
 		this.lastPinch = null;
 		this.pinchSamples = [];
@@ -255,6 +305,7 @@ export class Input {
 		e.preventDefault();
 		const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
 		const delta = e.deltaY * unit;
+		if (delta === 0) return; // a sideways tilt of the wheel
 		const factor = e.ctrlKey ? 0.02 : 0.005; // ctrl+wheel is a trackpad pinch
 		// A mouse wheel moves in big notches, which are eased out. Trackpads already send a smooth
 		// stream of small steps, so they only get a little easing to stay direct under the fingers.
@@ -275,11 +326,7 @@ export class Input {
 
 	private key = (e: KeyboardEvent) => {
 		if (e.ctrlKey || e.metaKey || e.altKey) return;
-		if (
-			isTyping(e.target) ||
-			(e.target as Element | null)?.closest?.(".panel, .modal, .popup")
-		)
-			return;
+		if (isUiKeyTarget(e.target)) return;
 		const view = this.map.getView();
 		const size = this.map.getSize();
 		const step = e.shiftKey ? 400 : 120;

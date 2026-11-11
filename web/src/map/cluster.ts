@@ -27,8 +27,9 @@ type Options = {
  * it. So panning changes nothing, zooming out only ever merges clusters, zooming in only ever
  * splits them, and a cluster is always in the same place at a given level.
  *
- * Level L suits views with zoom in [L, L + 1): its radius is `radiusPx * 2^L` blocks, which is
- * between half and all of `radiusPx` on screen.
+ * Level L suits views with zoom in [L + 0.25, L + 1.25) (the layer switches levels a quarter of
+ * a level past each integer): its radius is `radiusPx * 2^L` blocks, which is between about 0.4
+ * and 0.8 of `radiusPx` on screen.
  */
 export class ClusterIndex<T> {
 	private leaves: ClusterNode<T>[];

@@ -38,7 +38,7 @@ type Entry = {
 	version: number;
 	url?: string | null;
 	loading?: { version: number; abort: AbortController };
-	failed?: { version: number; at: number };
+	failed?: { version: number; at: number; attempts: number };
 	/** A load that finished while paused, swapped in on resume. */
 	held?: { bitmap: ImageBitmap | null; url: string; version: number };
 };
@@ -55,16 +55,52 @@ export type PreloadProgress = { done: number; failed: number; total: number };
 
 /** Most tiles kept loaded around the origin, well within the cache. */
 export const MAX_PRELOAD_TILES = 256;
+/** The share of the cache budget the preloaded tiles may take; they are never evicted. */
+const PRELOAD_CACHE_SHARE = 0.4;
+
+const MIB = 1024 * 1024;
+
+/**
+ * Decoded bytes of tile images to keep, which is what costs memory (a 512 px tile is 1 MiB once
+ * decoded, whatever its file size). Less on phones and low-memory devices, where the browser
+ * kills the tab instead of evicting.
+ */
+export function cacheBudget(
+	deviceMemoryGb: number | undefined,
+	shortestScreenSide: number | undefined,
+): number {
+	const lowMemory = deviceMemoryGb !== undefined && deviceMemoryGb <= 4;
+	const small = shortestScreenSide !== undefined && shortestScreenSide <= 600;
+	return (lowMemory || small ? 80 : 160) * MIB;
+}
+
+function defaultCacheBudget(): number {
+	const memory =
+		typeof navigator === "undefined"
+			? undefined
+			: (navigator as { deviceMemory?: number }).deviceMemory;
+	const side =
+		typeof screen === "undefined"
+			? undefined
+			: Math.min(screen.width, screen.height);
+	return cacheBudget(memory, side);
+}
+
+const bitmapBytes = (b: ImageBitmap | null | undefined) =>
+	b ? b.width * b.height * 4 : 0;
+const entryBytes = (e: Entry) =>
+	bitmapBytes(e.bitmap) + bitmapBytes(e.held?.bitmap);
 
 /**
  * The tiles of each ring's level within its radius of the origin, in loading order: coarsest ring
  * first (each of its tiles covers the most ground), nearest the origin first. Stops at
- * MAX_PRELOAD_TILES; levels the map does not have are skipped.
+ * `limit` (at most MAX_PRELOAD_TILES); levels the map does not have are skipped.
  */
 export function preloadTiles(
 	rings: PreloadRing[],
 	tileSize: number,
 	maxZoom: number,
+	limit = MAX_PRELOAD_TILES,
 ): Wanted[] {
 	const tiles: Wanted[] = [];
 	const seen = new Set<string>();
@@ -87,14 +123,14 @@ export function preloadTiles(
 					y,
 					priority: 2e6 + rank * 1e4 + Math.hypot(x + 0.5, y + 0.5),
 				});
-				if (ring.length > MAX_PRELOAD_TILES) break;
+				if (ring.length > limit) break;
 			}
-			if (ring.length > MAX_PRELOAD_TILES) break;
+			if (ring.length > limit) break;
 		}
 		ring.sort((a, b) => a.priority - b.priority);
 		tiles.push(...ring);
 	});
-	return tiles.slice(0, MAX_PRELOAD_TILES);
+	return tiles.slice(0, limit);
 }
 type Dest = { x0: number; y0: number; x1: number; y1: number };
 
@@ -114,7 +150,7 @@ export type TileDrawState =
 /**
  * Where a preloaded tile is: shown (ready), shown but of an older source (stale), known to be
  * empty, being fetched (loading), waiting for its lookup, waiting for a free request (queued),
- * or failed (retried after RETRY_MS).
+ * or failed (retried after a delay that grows with each failure).
  */
 export type PreloadTileState =
 	| "ready"
@@ -161,14 +197,32 @@ export type TileDebugInfo = {
 };
 
 const RETRY_MS = 5000;
+const MAX_RETRY_MS = 60_000;
 const MAX_TILES_PER_FRAME = 600;
-const MAX_CACHE = 512;
+/** Cache entries, however small; known-empty tiles cost almost nothing but are not free. */
+const MAX_CACHE_ENTRIES = 4096;
 const MAX_CONCURRENT = 8;
 /** Most tiles in one lookup request (the server allows more). */
 const MAX_LOOKUP_AREA = 1024;
+const LOOKUP_TIMEOUT_MS = 15_000;
 const MAX_URLS = 8192;
 
+/** How long to wait before retrying a tile that has failed `attempts` times in a row. */
+export const retryDelay = (attempts: number) =>
+	Math.min(RETRY_MS * 2 ** Math.max(attempts - 1, 0), MAX_RETRY_MS);
+
 const key = (zoom: number, x: number, y: number) => `${zoom}/${x}/${y}`;
+
+/** A tile's screen rectangle (css px) in device pixels, rounded to whole pixels. */
+const deviceRect = (
+	r: { x: number; y: number; w: number; h: number },
+	dpr: number,
+): Dest => ({
+	x0: Math.round(r.x * dpr),
+	y0: Math.round(r.y * dpr),
+	x1: Math.round((r.x + r.w) * dpr),
+	y1: Math.round((r.y + r.h) * dpr),
+});
 
 /**
  * Draws tiles from a URL template, with an LRU bitmap cache. While a tile loads, a coarser
@@ -191,6 +245,8 @@ export class TileLayer {
 	/** Tiles whose lookup is under way. */
 	private lookingUp = new Set<string>();
 	private lookupAbort = new AbortController();
+	/** Lookups under way per zoom level (and preload or not); only one group at a time. */
+	private lookupBusy = new Map<string, number>();
 	/** Record what each tile drew, for the debug view (`debugInfo`). */
 	collectDebug = false;
 	debugInfo: TileDebugInfo | null = null;
@@ -207,6 +263,9 @@ export class TileLayer {
 	/** Furthest radius per preloaded level, for the debug view. */
 	private preloadRadius = new Map<number, number>();
 	private lastProgress: PreloadProgress | null = null;
+	private maxBytes: number;
+	/** Decoded bytes the last frame's visible tiles need; the cache never shrinks below twice that. */
+	private visibleBytes = 0;
 
 	constructor(
 		private opts: {
@@ -216,18 +275,25 @@ export class TileLayer {
 			preload?: PreloadRing[];
 			/** Called when the share of preloaded tiles that are available changes. */
 			onPreloadProgress?: (progress: PreloadProgress) => void;
+			/** Decoded bytes of images to keep cached; defaults to what the device suits. */
+			maxCacheBytes?: number;
 		},
 	) {
+		this.maxBytes = opts.maxCacheBytes ?? defaultCacheBudget();
 		this.setPreload(opts.preload ?? []);
 	}
 
 	/** Replaces the tiles kept loaded around the origin. Tiles already loaded are kept. */
 	setPreload(rings: PreloadRing[]) {
+		const tileBytes = this.opts.tileSize ** 2 * 4;
+		const limit = Math.min(
+			MAX_PRELOAD_TILES,
+			Math.floor((this.maxBytes * PRELOAD_CACHE_SHARE) / tileBytes),
+		);
 		this.preload = new Map(
-			preloadTiles(rings, this.opts.tileSize, this.opts.maxZoom).map((t) => [
-				key(t.zoom, t.x, t.y),
-				{ ...t, preload: true },
-			]),
+			preloadTiles(rings, this.opts.tileSize, this.opts.maxZoom, limit).map(
+				(t) => [key(t.zoom, t.x, t.y), { ...t, preload: true }],
+			),
 		);
 		this.preloadRadius.clear();
 		for (const { level, radius } of rings) {
@@ -279,12 +345,7 @@ export class TileLayer {
 			level.counts[state]++;
 			level.total++;
 			const r = tileRect(view, size, t.zoom, T, t.x, t.y);
-			const dest = {
-				x0: Math.round(r.x * dpr),
-				y0: Math.round(r.y * dpr),
-				x1: Math.round((r.x + r.w) * dpr),
-				y1: Math.round((r.y + r.h) * dpr),
-			};
+			const dest = deviceRect(r, dpr);
 			// Only what is on screen needs drawing.
 			if (
 				dest.x1 <= 0 ||
@@ -346,6 +407,7 @@ export class TileLayer {
 		this.lookupAbort = new AbortController();
 		this.urls.clear();
 		this.lookingUp.clear();
+		this.lookupBusy.clear();
 		if (!keepPrevious) this.clear();
 		this.opts.onChange();
 	}
@@ -365,6 +427,7 @@ export class TileLayer {
 				entry.version = held.version;
 				entry.failed = undefined;
 			}
+			this.evict();
 		}
 		// Redraw, which also requests whatever is now missing.
 		this.opts.onChange();
@@ -433,12 +496,7 @@ export class TileLayer {
 					priority,
 				});
 				const rect = tileRect(view, size, level, T, tx, ty);
-				const dest = {
-					x0: Math.round(rect.x * dpr),
-					y0: Math.round(rect.y * dpr),
-					x1: Math.round((rect.x + rect.w) * dpr),
-					y1: Math.round((rect.y + rect.h) * dpr),
-				};
+				const dest = deviceRect(rect, dpr);
 				const state = this.drawTile(ctx, level, tx, ty, dest);
 				if (debug) {
 					const k = key(level, tx, ty);
@@ -473,6 +531,7 @@ export class TileLayer {
 			if (!wanted.has(k)) wanted.set(k, tile);
 		}
 		this.wanted = wanted;
+		this.visibleBytes = Math.min(drawn, MAX_TILES_PER_FRAME) * T * T * 4;
 		if (!this.paused) this.pump();
 		this.reportPreload();
 		if (debug) {
@@ -586,7 +645,7 @@ export class TileLayer {
 			if (
 				failed &&
 				failed.version === this.sourceId &&
-				now - failed.at < RETRY_MS
+				now - failed.at < retryDelay(failed.attempts)
 			) {
 				continue;
 			}
@@ -650,13 +709,16 @@ export class TileLayer {
 	private resolve(tiles: [string, Wanted][]) {
 		const groups = new Map<string, Wanted[]>();
 		for (const [k, tile] of tiles) {
-			this.lookingUp.add(k);
 			const group = `${tile.zoom}:${tile.preload === true}`;
+			// The next lookup of a level waits for the one under way, so a pan or zoom does not
+			// pile up requests for areas that are already out of view.
+			if (this.lookupBusy.has(group)) continue;
+			this.lookingUp.add(k);
 			const list = groups.get(group);
 			if (list) list.push(tile);
 			else groups.set(group, [tile]);
 		}
-		for (const list of groups.values()) {
+		for (const [group, list] of groups) {
 			const zoom = (list[0] as Wanted).zoom;
 			const minX = Math.min(...list.map((t) => t.x));
 			const maxX = Math.max(...list.map((t) => t.x));
@@ -664,7 +726,7 @@ export class TileLayer {
 			const maxY = Math.max(...list.map((t) => t.y));
 			const rows = Math.max(1, Math.floor(MAX_LOOKUP_AREA / (maxX - minX + 1)));
 			for (let y = minY; y <= maxY; y += rows) {
-				this.lookupRect(zoom, {
+				this.lookupRect(group, zoom, {
 					minX,
 					maxX,
 					minY: y,
@@ -674,15 +736,21 @@ export class TileLayer {
 		}
 	}
 
-	private lookupRect(zoom: number, rect: TileRect) {
+	private lookupRect(group: string, zoom: number, rect: TileRect) {
 		const lookup = this.lookup;
 		const source = this.source;
 		if (!lookup || !source) return;
 		const version = this.sourceId;
-		const signal = this.lookupAbort.signal;
+		const parent = this.lookupAbort.signal;
+		const stale = () => parent.aborted || version !== this.sourceId;
 		const finish = (urlOf: (x: number, y: number) => string | null) => {
-			if (signal.aborted || version !== this.sourceId) return;
-			if (this.urls.size > MAX_URLS) this.urls.clear();
+			if (stale()) return;
+			if (this.urls.size > MAX_URLS) {
+				// Keep what the tiles being waited for resolved to.
+				for (const k of this.urls.keys()) {
+					if (!this.wanted.has(k)) this.urls.delete(k);
+				}
+			}
 			for (let y = rect.minY; y <= rect.maxY; y++) {
 				for (let x = rect.minX; x <= rect.maxX; x++) {
 					const k = key(zoom, x, y);
@@ -690,15 +758,36 @@ export class TileLayer {
 					this.lookingUp.delete(k);
 				}
 			}
-			this.opts.onChange();
 		};
-		lookup(zoom, rect, signal)
+
+		this.lookupBusy.set(group, (this.lookupBusy.get(group) ?? 0) + 1);
+		const own = new AbortController();
+		const abort = () => own.abort();
+		parent.addEventListener("abort", abort, { once: true });
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const timeout = new Promise<never>((_, reject) => {
+			timer = setTimeout(() => {
+				own.abort();
+				reject(new Error("tile lookup timed out"));
+			}, LOOKUP_TIMEOUT_MS);
+		});
+		Promise.race([lookup(zoom, rect, own.signal), timeout])
 			.then((found) => finish((x, y) => found.get(`${x}/${y}`) ?? null))
 			.catch((err) => {
-				if (signal.aborted) return;
+				if (stale()) return;
 				console.warn("tile lookup failed", zoom, rect, err);
 				// Fall back to loading these tiles one by one.
 				finish((x, y) => source(zoom, x, y));
+			})
+			.finally(() => {
+				clearTimeout(timer);
+				parent.removeEventListener("abort", abort);
+				if (version !== this.sourceId) return;
+				const left = (this.lookupBusy.get(group) ?? 1) - 1;
+				if (left > 0) this.lookupBusy.set(group, left);
+				else this.lookupBusy.delete(group);
+				// Tiles that waited for this lookup can go next.
+				this.opts.onChange();
 			});
 	}
 
@@ -740,6 +829,7 @@ export class TileLayer {
 				target.url = url;
 				target.version = version;
 				target.failed = undefined;
+				this.evict();
 				this.opts.onChange();
 			})
 			.catch((err) => {
@@ -747,15 +837,24 @@ export class TileLayer {
 				console.warn("tile load failed", url, err);
 				target.loading = undefined;
 				this.inFlight--;
-				target.failed = { version, at: Date.now() };
-				setTimeout(() => this.opts.onChange(), RETRY_MS + 50);
+				const attempts =
+					target.failed?.version === version ? target.failed.attempts + 1 : 1;
+				target.failed = { version, at: Date.now(), attempts };
+				// The freed slot can go to another tile now; this one comes back after its delay.
+				this.opts.onChange();
+				setTimeout(() => this.opts.onChange(), retryDelay(attempts) + 50);
 			});
 	}
 
+	/** Drops the least recently used images until the cache is within its budget. */
 	private evict() {
+		const budget = Math.max(this.maxBytes, this.visibleBytes * 2);
+		let bytes = 0;
+		for (const entry of this.cache.values()) bytes += entryBytes(entry);
 		for (const [k, entry] of this.cache) {
-			if (this.cache.size <= MAX_CACHE) break;
+			if (bytes <= budget && this.cache.size <= MAX_CACHE_ENTRIES) break;
 			if (entry.loading || this.preload.has(k)) continue;
+			bytes -= entryBytes(entry);
 			entry.bitmap?.close();
 			entry.held?.bitmap?.close();
 			this.cache.delete(k);

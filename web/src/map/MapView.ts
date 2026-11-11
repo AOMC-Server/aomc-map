@@ -23,7 +23,7 @@ import { FeatureLayer, type Hit, type RenderLayer } from "./featureLayer";
 import type { Bounds } from "./geometry";
 import { type DragSession, Input } from "./input";
 import { Renderer } from "./renderer";
-import { easeZoom, tweenView } from "./smoothZoom";
+import { easeZoom, snapZoomGoal, tweenView } from "./smoothZoom";
 import {
 	type PreloadProgress,
 	TileLayer,
@@ -55,6 +55,10 @@ const MAX_ZOOM_LEAD = 2;
 const PAN_FRICTION = 0.005;
 /** Below this speed (px per ms) a glide is too slow to see and stops. */
 const PAN_STOP_SPEED = 0.01;
+/** How quickly a released pinch's zoom slows down, per ms. */
+const ZOOM_FRICTION = 0.006;
+/** Below this zoom speed (levels per ms) a pinch glide has stopped zooming. */
+const ZOOM_STOP_SPEED = 0.00005;
 
 /**
  * Framework-free canvas map. The UI only talks to the map through this class.
@@ -127,6 +131,7 @@ export class MapView {
 		new Input(this.canvas, this);
 		new ResizeObserver(() => this.resize()).observe(container);
 		this.resize();
+		this.watchPixelRatio();
 	}
 
 	// Public API
@@ -157,6 +162,12 @@ export class MapView {
 
 	setView(next: Partial<View>) {
 		const merged = { ...this.view, ...stripUndefined(next) };
+		if (
+			!Number.isFinite(merged.centerX) ||
+			!Number.isFinite(merged.centerZ) ||
+			!Number.isFinite(merged.zoom)
+		)
+			return;
 		merged.zoom = clampZoom(merged.zoom, this.maxZoom);
 		if (
 			merged.centerX === this.view.centerX &&
@@ -239,6 +250,13 @@ export class MapView {
 		bounds: Bounds,
 		opts: { padding?: number; closestZoom?: number } = {},
 	) {
+		if (
+			!Number.isFinite(bounds.minX) ||
+			!Number.isFinite(bounds.minZ) ||
+			!Number.isFinite(bounds.maxX) ||
+			!Number.isFinite(bounds.maxZ)
+		)
+			return;
 		const pad = opts.padding ?? 80;
 		const w = Math.max(bounds.maxX - bounds.minX + 1, 1);
 		const h = Math.max(bounds.maxZ - bounds.minZ + 1, 1);
@@ -293,11 +311,12 @@ export class MapView {
 		const base = this.zoomGoal?.zoom ?? this.view.zoom;
 		const running = this.zoomGoal !== null;
 		// Never more than a couple of levels ahead, so it stops soon after the input does.
-		const ahead = Math.min(
-			Math.max(base + delta, this.view.zoom - MAX_ZOOM_LEAD),
-			this.view.zoom + MAX_ZOOM_LEAD,
-		);
-		const snapped = snap ? Math.round(ahead / snap) * snap : ahead;
+		const lo = this.view.zoom - MAX_ZOOM_LEAD;
+		const hi = this.view.zoom + MAX_ZOOM_LEAD;
+		const ahead = Math.min(Math.max(base + delta, lo), hi);
+		const snapped = snap
+			? snapZoomGoal(base, ahead, delta, snap, lo, hi)
+			: ahead;
 		this.zoomGoal = {
 			zoom: clampZoom(snapped, this.maxZoom),
 			anchor,
@@ -381,7 +400,7 @@ export class MapView {
 		if (this.motion <= 0) return;
 		let last = performance.now();
 		this.renderer.animate((now) => {
-			const dt = Math.min(now - last, 50);
+			const dt = Math.min(Math.max(now - last, 0), 50);
 			last = now;
 			const zoom = clampZoom(this.view.zoom + vz * dt, this.maxZoom);
 			// Hitting the zoom limit stops the zoom, but not the pan.
@@ -389,12 +408,14 @@ export class MapView {
 			let view = zoomAt(this.view, this.size, anchor.x, anchor.y, zoom);
 			view = panBy(view, vx * dt, vy * dt);
 			this.setView(view);
-			const zoomDecay = Math.exp(-0.006 * dt);
+			const zoomDecay = Math.exp(-ZOOM_FRICTION * dt);
 			const panDecay = Math.exp(-PAN_FRICTION * dt);
 			vz *= zoomDecay;
 			vx *= panDecay;
 			vy *= panDecay;
-			return Math.abs(vz) > 0.00005 || Math.hypot(vx, vy) > PAN_STOP_SPEED;
+			return (
+				Math.abs(vz) > ZOOM_STOP_SPEED || Math.hypot(vx, vy) > PAN_STOP_SPEED
+			);
 		});
 	}
 
@@ -416,6 +437,20 @@ export class MapView {
 		this.canvas.style.cursor = hit ? "pointer" : this.baseCursor;
 		this.renderer.invalidate();
 		this.emit("hover", { hit, sx, sy });
+	}
+
+	/** Zooming the page or moving to another screen changes the pixel ratio without resizing. */
+	private watchPixelRatio() {
+		if (typeof matchMedia !== "function") return;
+		const query = matchMedia(`(resolution: ${window.devicePixelRatio}dppx)`);
+		query.addEventListener(
+			"change",
+			() => {
+				this.resize();
+				this.watchPixelRatio();
+			},
+			{ once: true },
+		);
 	}
 
 	private resize() {

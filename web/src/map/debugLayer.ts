@@ -4,12 +4,14 @@ import {
 	scaleOf,
 	type View,
 } from "@aomc/shared/view";
+import { BLOCK_CENTER } from "./featureLayer";
 import type {
 	PreloadDebugInfo,
 	PreloadTileState,
 	TileDebugInfo,
 	TileDrawState,
 } from "./tileLayer";
+import { viewportBlocks } from "./viewport";
 
 export type DebugOptions = {
 	/** Tile states, labels and a panel of renderer statistics. */
@@ -51,9 +53,7 @@ export function gridLines(
 	size: Size,
 	span: number,
 ): { xs: number[]; zs: number[] } {
-	const s = scaleOf(view.zoom);
-	const halfW = size.width / 2 / s;
-	const halfH = size.height / 2 / s;
+	const b = viewportBlocks(view, size);
 	const range = (lo: number, hi: number) => {
 		const out: number[] = [];
 		// + 0 turns -0 into 0.
@@ -62,8 +62,8 @@ export function gridLines(
 		return out;
 	};
 	return {
-		xs: range(view.centerX - halfW, view.centerX + halfW),
-		zs: range(view.centerZ - halfH, view.centerZ + halfH),
+		xs: range(b.minX, b.maxX),
+		zs: range(b.minZ, b.maxZ),
 	};
 }
 
@@ -141,7 +141,7 @@ export function drawChunkGrid(
 		const { xs, zs } = cells(view, size, 1);
 		for (const z of zs) {
 			for (const x of xs) {
-				const p = blockToScreen(view, size, x + 0.5, z + 0.5);
+				const p = blockToScreen(view, size, x + BLOCK_CENTER, z + BLOCK_CENTER);
 				const lx = `x ${x}`;
 				const lz = `z ${z}`;
 				const w = Math.max(

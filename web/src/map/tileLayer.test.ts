@@ -3,10 +3,12 @@ import type { PreloadRing } from "@aomc/shared/schemas";
 import type { View } from "@aomc/shared/view";
 import { preloadHudLines } from "./debugLayer";
 import {
+	cacheBudget,
 	MAX_PRELOAD_TILES,
 	type PreloadDebugInfo,
 	type PreloadProgress,
 	preloadTiles,
+	retryDelay,
 	TileLayer,
 } from "./tileLayer";
 
@@ -14,7 +16,13 @@ const T = 16;
 const size = { width: 31, height: 15 }; // covers exactly level-0 tiles 0 and 1 (z = 0)
 const view: View = { centerX: 16, centerZ: 8, zoom: 0 };
 
-type FakeBitmap = { label: string; closed: boolean; close(): void };
+type FakeBitmap = {
+	label: string;
+	closed: boolean;
+	width: number;
+	height: number;
+	close(): void;
+};
 type Pending = {
 	url: string;
 	signal: AbortSignal;
@@ -53,6 +61,8 @@ beforeEach(() => {
 		const b: FakeBitmap = {
 			label,
 			closed: false,
+			width: T,
+			height: T,
 			close() {
 				this.closed = true;
 			},
@@ -67,7 +77,10 @@ afterEach(() => {
 	globalThis.createImageBitmap = realBitmap;
 });
 
-function makeLayer(preload?: PreloadRing[]) {
+function makeLayer(
+	preload?: PreloadRing[],
+	extra: { maxCacheBytes?: number } = {},
+) {
 	let changes = 0;
 	const progress: PreloadProgress[] = [];
 	const layer = new TileLayer({
@@ -76,6 +89,7 @@ function makeLayer(preload?: PreloadRing[]) {
 		onChange: () => changes++,
 		preload,
 		onPreloadProgress: (p) => progress.push(p),
+		...extra,
 	});
 	const draws: string[] = [];
 	const ctx = {
@@ -554,5 +568,158 @@ describe("TileLayer pause", () => {
 		expect(level0(frame())).toEqual([]);
 		layer.setPaused(false);
 		expect(level0(frame())).toEqual(["r1:0/0/0", "r1:0/1/0"]);
+	});
+});
+
+describe("TileLayer memory", () => {
+	const TILE_BYTES = T * T * 4;
+	const at = (centerX: number): View => ({ centerX, centerZ: 8, zoom: 0 });
+
+	test("keeps decoded images within a byte budget, dropping the least recently used", async () => {
+		// Three tiles are visible at once, so the cache keeps room for twice that.
+		const { layer, frame } = makeLayer(undefined, {
+			maxCacheBytes: 4 * TILE_BYTES,
+		});
+		layer.setSource(rev(1));
+		for (const centerX of [16, 1016, 2016]) {
+			frame(at(centerX));
+			await answerAll(labelOf);
+		}
+		frame(at(2016));
+		const open = bitmaps.filter((b) => !b.closed);
+		expect(open.length).toBeGreaterThan(0);
+		expect(open.length * TILE_BYTES).toBeLessThanOrEqual(6 * TILE_BYTES);
+		// The first view's tiles were dropped, the current ones survived.
+		expect(bitmaps.find((b) => b.label === "r1:0/0/0")?.closed).toBe(true);
+		expect(frame(at(2016)).length).toBeGreaterThan(0);
+	});
+
+	test("preloaded tiles are limited to a share of the budget", () => {
+		const rings: PreloadRing[] = [{ level: 0, radius: 160 }]; // 20x20 tiles of 16 blocks
+		const { layer, frame } = makeLayer(rings, {
+			maxCacheBytes: 50 * TILE_BYTES,
+		});
+		layer.setSource(rev(1));
+		frame(at(1016));
+		const spawn = pending.filter((p) => {
+			const x = Number(/tiles\/0\/(-?\d+)\//.exec(p.url)?.[1]);
+			return x < 20;
+		});
+		// 40% of 50 tiles; everything else asked for is the view.
+		expect(spawn.length).toBeLessThanOrEqual(20);
+		expect(spawn.length).toBeGreaterThan(0);
+	});
+
+	test("the budget is smaller on small or low-memory devices", () => {
+		const MIB = 1024 * 1024;
+		expect(cacheBudget(8, 1080)).toBe(160 * MIB);
+		expect(cacheBudget(undefined, undefined)).toBe(160 * MIB);
+		expect(cacheBudget(4, 1080)).toBe(80 * MIB);
+		expect(cacheBudget(8, 390)).toBe(80 * MIB);
+	});
+});
+
+describe("TileLayer failures", () => {
+	const realNow = Date.now;
+	let now: number;
+	let warn: typeof console.warn;
+	beforeEach(() => {
+		now = realNow();
+		Date.now = () => now;
+		warn = console.warn;
+		console.warn = () => {};
+	});
+	afterEach(() => {
+		Date.now = realNow;
+		console.warn = warn;
+	});
+
+	const failDecoding = () => {
+		globalThis.createImageBitmap = (async () => {
+			throw new Error("decode failed");
+		}) as unknown as typeof createImageBitmap;
+	};
+
+	test("a failure asks for a redraw at once, so the freed slot goes to the next tile", async () => {
+		const { layer, frame, changes } = makeLayer();
+		layer.setSource(rev(1));
+		frame();
+		const before = changes();
+		failDecoding();
+		await (pending.shift() as Pending).respond("x");
+		expect(changes()).toBeGreaterThan(before);
+	});
+
+	test("retries back off the more often a tile fails", () => {
+		expect(retryDelay(1)).toBe(5000);
+		expect(retryDelay(2)).toBe(10000);
+		expect(retryDelay(3)).toBe(20000);
+		expect(retryDelay(20)).toBe(60000);
+	});
+
+	test("a tile that keeps failing is retried at growing intervals", async () => {
+		const { layer, frame } = makeLayer();
+		layer.setSource(rev(1));
+		frame();
+		failDecoding();
+		await answerAll(labelOf);
+		now += 5001;
+		frame();
+		expect(pending.length).toBeGreaterThan(0); // first retry after 5 s
+		await answerAll(labelOf);
+		now += 5001;
+		frame();
+		expect(pending).toHaveLength(0); // the second wait is 10 s
+		now += 5001;
+		frame();
+		expect(pending.length).toBeGreaterThan(0);
+	});
+});
+
+describe("TileLayer lookups", () => {
+	test("only one lookup per zoom level is under way at a time", async () => {
+		const asked: { resolve: (m: Map<string, string>) => void }[] = [];
+		const { layer, frame } = makeLayer();
+		layer.setSource(rev(1), false, (zoom) => {
+			if (zoom !== 0) return new Promise(() => {});
+			return new Promise((resolve) => asked.push({ resolve }));
+		});
+		frame();
+		expect(asked).toHaveLength(1);
+		frame({ ...view, centerX: 16 + 64 });
+		expect(asked).toHaveLength(1); // waits for the first
+		(asked[0] as (typeof asked)[0]).resolve(new Map());
+		await Bun.sleep(0);
+		await Bun.sleep(0);
+		frame({ ...view, centerX: 16 + 64 });
+		expect(asked).toHaveLength(2);
+	});
+
+	test("a lookup that never answers times out and falls back to loading tiles one by one", async () => {
+		const realSetTimeout = globalThis.setTimeout;
+		const timers: (() => void)[] = [];
+		globalThis.setTimeout = ((fn: () => void, ms?: number) => {
+			if (ms === 15_000) {
+				timers.push(fn);
+				return 0;
+			}
+			return realSetTimeout(fn, ms);
+		}) as unknown as typeof setTimeout;
+		const warn = console.warn;
+		console.warn = () => {};
+		try {
+			const { layer, frame } = makeLayer();
+			layer.setSource(rev(1), false, () => new Promise(() => {}));
+			frame();
+			expect(pending).toHaveLength(0);
+			for (const fire of timers) fire();
+			await Bun.sleep(0);
+			await Bun.sleep(0);
+			frame();
+			expect(pending.length).toBeGreaterThan(0);
+		} finally {
+			globalThis.setTimeout = realSetTimeout;
+			console.warn = warn;
+		}
 	});
 });

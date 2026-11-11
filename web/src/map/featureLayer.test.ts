@@ -74,3 +74,108 @@ describe("FeatureLayer.hitTest", () => {
 		expect(name(l.hitTest(far, size, x, y + 5))).toBe("Road");
 	});
 });
+
+describe("FeatureLayer hit order", () => {
+	const feature = (
+		id: number,
+		type: "line" | "polygon",
+		geometry: [number, number][],
+	) => ({
+		id,
+		layerId: 1,
+		type,
+		name: `f${id}`,
+		popup: "",
+		color: null,
+		geometry,
+	});
+
+	test("a line wins over a polygon edge it shares a pixel with, whatever their order", () => {
+		const l = new FeatureLayer(() => {});
+		l.setFeatures([
+			{
+				id: 1,
+				color: "red",
+				features: [
+					feature(1, "line", [
+						[-50, 0],
+						[50, 0],
+					]),
+					// Added after the line, but drawn below it.
+					feature(2, "polygon", [
+						[-50, 0],
+						[50, 0],
+						[50, 100],
+						[-50, 100],
+					]),
+				],
+			},
+		]);
+		const v: View = { centerX: 0, centerZ: 0, zoom: 0 };
+		expect(name(l.hitTest(v, size, 500.5, 350.5 + 2))).toBe("f1");
+	});
+
+	test("the smaller polygon on top is hit inside, the bigger one on its edge", () => {
+		const l = new FeatureLayer(() => {});
+		const square = (id: number, min: number, max: number) =>
+			feature(id, "polygon", [
+				[min, min],
+				[max, min],
+				[max, max],
+				[min, max],
+			]);
+		l.setFeatures([
+			{
+				id: 1,
+				color: "red",
+				features: [square(1, -100, 100), square(2, -20, 20)],
+			},
+		]);
+		const v: View = { centerX: 0, centerZ: 0, zoom: 0 };
+		expect(name(l.hitTest(v, size, 500.5, 350.5))).toBe("f2");
+		expect(name(l.hitTest(v, size, 500.5 - 100, 350.5))).toBe("f1");
+	});
+});
+
+describe("FeatureLayer.draw", () => {
+	test("a cluster present in both crossfaded levels is drawn and hit-tested once", () => {
+		const l = new FeatureLayer(() => {});
+		l.setFeatures([
+			{
+				id: 1,
+				color: "red",
+				features: [
+					{ x: 0, z: 0 },
+					{ x: 1, z: 0 },
+				].map(({ x, z }, i) => ({
+					id: i + 1,
+					layerId: 1,
+					type: "pin" as const,
+					name: `p${i}`,
+					popup: "",
+					color: null,
+					geometry: [x, z],
+				})),
+			},
+		]);
+		let labels = 0;
+		const ctx = new Proxy(
+			{},
+			{
+				get: (_t, prop) =>
+					prop === "fillText"
+						? () => labels++
+						: prop === "measureText"
+							? () => ({ width: 0 })
+							: () => {},
+				set: () => true,
+			},
+		) as unknown as CanvasRenderingContext2D;
+		// Zoom 0.25 sits in the middle of a crossfade between two cluster levels.
+		const v: View = { centerX: 0, centerZ: 0, zoom: 0.25 };
+		l.draw(ctx, v, size);
+		expect(labels).toBe(1);
+		const hit = l.hitTest(v, size, 500.5, 350.5);
+		expect(hit?.kind).toBe("cluster");
+	});
+});

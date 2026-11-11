@@ -9,11 +9,15 @@ export const shiftHeld = signal(false);
 /** How close (css px) a press has to be to grab a point. */
 export const GRAB_RADIUS = 12;
 
+/** The block a fractional block position is in. */
+export const floorBlock = (b: Point): Point => ({
+	x: Math.floor(b.x),
+	z: Math.floor(b.z),
+});
+
 /** The block under a screen position. */
-export function blockAt(map: MapView, sx: number, sy: number): Point {
-	const b = map.screenToBlock(sx, sy);
-	return { x: Math.floor(b.x), z: Math.floor(b.z) };
-}
+export const blockAt = (map: MapView, sx: number, sy: number): Point =>
+	floorBlock(map.screenToBlock(sx, sy));
 
 /** Where the middle of a block is on screen. */
 export const blockCenter = (map: MapView, p: Point) =>
