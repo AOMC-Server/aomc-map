@@ -48,6 +48,13 @@ export type Overlay = (ctx: CanvasRenderingContext2D, map: MapView) => void;
 const DEFAULT_VIEW: View = { centerX: 0, centerZ: 0, zoom: 2 };
 /** How many zoom levels an eased zoom may be heading beyond the current view. */
 const MAX_ZOOM_LEAD = 2;
+/**
+ * How quickly a released drag slows down, per ms. A glide covers its starting speed divided by
+ * this: a flick at 2 px/ms coasts about 400 px.
+ */
+const PAN_FRICTION = 0.005;
+/** Below this speed (px per ms) a glide is too slow to see and stops. */
+const PAN_STOP_SPEED = 0.01;
 
 /**
  * Framework-free canvas map. The UI only talks to the map through this class.
@@ -345,17 +352,49 @@ export class MapView {
 		});
 	}
 
+	/** Lets a released drag glide on at `vx`, `vy` px per ms, slowing down with friction. */
 	inertia(vx: number, vy: number) {
 		this.zoomGoal = null;
+		if (this.motion <= 0) return;
+		let last = performance.now();
+		this.renderer.animate((now) => {
+			const dt = Math.min(Math.max(now - last, 0), 50);
+			last = now;
+			// Move by the distance covered during this frame under exponential decay, so the glide
+			// is the same length whatever the frame rate.
+			const decay = Math.exp(-PAN_FRICTION * dt);
+			const travel = (1 - decay) / PAN_FRICTION;
+			this.setView(panBy(this.view, vx * travel, vy * travel));
+			vx *= decay;
+			vy *= decay;
+			return Math.hypot(vx, vy) > PAN_STOP_SPEED;
+		});
+	}
+
+	/**
+	 * Lets a pinch glide on after the fingers lift: the zoom keeps changing at `vz` levels per ms
+	 * about `anchor` (screen px) and the view keeps panning at `vx`, `vy` px per ms, both slowing
+	 * down with friction.
+	 */
+	zoomInertia(vz: number, anchor: ScreenPoint, vx: number, vy: number) {
+		this.zoomGoal = null;
+		if (this.motion <= 0) return;
 		let last = performance.now();
 		this.renderer.animate((now) => {
 			const dt = Math.min(now - last, 50);
 			last = now;
-			this.setView(panBy(this.view, vx * dt, vy * dt));
-			const decay = 0.0042 * dt; // exponential friction, frame-rate independent
-			vx *= Math.exp(-decay);
-			vy *= Math.exp(-decay);
-			return Math.hypot(vx, vy) > 0.02;
+			const zoom = clampZoom(this.view.zoom + vz * dt, this.maxZoom);
+			// Hitting the zoom limit stops the zoom, but not the pan.
+			if (zoom === this.view.zoom) vz = 0;
+			let view = zoomAt(this.view, this.size, anchor.x, anchor.y, zoom);
+			view = panBy(view, vx * dt, vy * dt);
+			this.setView(view);
+			const zoomDecay = Math.exp(-0.006 * dt);
+			const panDecay = Math.exp(-PAN_FRICTION * dt);
+			vz *= zoomDecay;
+			vx *= panDecay;
+			vy *= panDecay;
+			return Math.abs(vz) > 0.00005 || Math.hypot(vx, vy) > PAN_STOP_SPEED;
 		});
 	}
 

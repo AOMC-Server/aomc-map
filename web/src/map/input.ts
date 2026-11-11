@@ -15,17 +15,32 @@ export function isTyping(target: EventTarget | null): boolean {
 const ZOOM_GRID = 0.5;
 const DRAG_THRESHOLD = 5;
 const INERTIA_MIN_SPEED = 0.15; // px per ms
+/** Fastest a released drag keeps gliding, so a hard flick doesn't fling the map away. */
+const INERTIA_MAX_SPEED = 4; // px per ms
+/** How far back the drag speed is measured when the pointer lifts, in ms. */
+const DRAG_WINDOW = 80;
+/** A pointer held still for this long before lifting stops the map instead of flinging it. */
+const RELEASE_HOLD = 50;
+/** Pinch speed below which lifting the fingers just stops the zoom, in levels per ms. */
+const ZOOM_INERTIA_MIN_SPEED = 0.0008;
+/** Fastest a released pinch keeps zooming, in levels per ms (about a level of glide). */
+const ZOOM_INERTIA_MAX_SPEED = 0.006;
+/** How far back the pinch speed is measured when the fingers lift, in ms. */
+const PINCH_WINDOW = 100;
 
 type Pt = { x: number; y: number };
+type PinchSample = { t: number; zoom: number; mid: Pt };
 
 /** Pointer, wheel and keyboard handling for the map element. */
 export class Input {
 	private pointers = new Map<number, Pt>();
 	private start: (Pt & { t: number }) | null = null;
 	private moved = false;
-	private velocity: Pt = { x: 0, y: 0 };
-	private lastMove = 0;
+	/** Recent drag positions with their event times, to measure its speed when the pointer lifts. */
+	private dragSamples: (Pt & { t: number })[] = [];
 	private lastPinch: { dist: number; mid: Pt } | null = null;
+	/** Recent pinch positions, to measure its speed when the fingers lift. */
+	private pinchSamples: PinchSample[] = [];
 	private session: DragSession | null = null;
 
 	constructor(
@@ -61,12 +76,12 @@ export class Input {
 			if (this.session) return;
 			this.start = { ...p, t: performance.now() };
 			this.moved = false;
-			this.velocity = { x: 0, y: 0 };
-			this.lastMove = performance.now();
+			this.dragSamples = [{ ...p, t: e.timeStamp }];
 		} else if (this.pointers.size === 2) {
 			this.endSession();
 			this.moved = true;
 			this.lastPinch = this.pinchState();
+			this.pinchSamples = [];
 		}
 	};
 
@@ -105,6 +120,7 @@ export class Input {
 			);
 			this.map.setView(view);
 			this.lastPinch = next;
+			this.recordPinch(next.mid);
 			return;
 		}
 
@@ -115,21 +131,86 @@ export class Input {
 			) {
 				this.moved = true;
 			}
+			this.recordDrag(e);
 			if (!this.moved) return;
-			const now = performance.now();
-			const dt = Math.max(now - this.lastMove, 1);
-			const dx = p.x - prev.x;
-			const dy = p.y - prev.y;
-			// Smoothed velocity in px/ms.
-			this.velocity = {
-				x: 0.7 * (dx / dt) + 0.3 * this.velocity.x,
-				y: 0.7 * (dy / dt) + 0.3 * this.velocity.y,
-			};
-			this.lastMove = now;
-			this.map.setView(panBy(this.map.getView(), dx, dy));
+			this.map.setView(panBy(this.map.getView(), p.x - prev.x, p.y - prev.y));
 			if (e.pointerType === "mouse") this.map.pointer(p.x, p.y, "move");
 		}
 	};
+
+	/**
+	 * Remembers where the drag was and when. Touch screens report several positions per event
+	 * (one per hardware sample); using them all gives a steadier speed than one per frame.
+	 */
+	private recordDrag(e: PointerEvent) {
+		const events = e.getCoalescedEvents?.() ?? [];
+		for (const c of events.length > 0 ? events : [e])
+			this.dragSamples.push({ ...this.local(c), t: c.timeStamp });
+		const t = e.timeStamp;
+		while (
+			this.dragSamples.length > 2 &&
+			(this.dragSamples[0] as Pt & { t: number }).t < t - DRAG_WINDOW
+		)
+			this.dragSamples.shift();
+	}
+
+	/** The drag's speed in px per ms just before it was released at `t`, or null if it had stopped. */
+	private releaseVelocity(t: number): Pt | null {
+		const samples = this.dragSamples;
+		this.dragSamples = [];
+		const last = samples.at(-1);
+		if (!last || t - last.t > RELEASE_HOLD) return null;
+		// Measure from the oldest sample still inside the window, so a single jittery event
+		// between two frames can't decide the direction or speed of the glide.
+		const first = samples.find((s) => s.t >= last.t - DRAG_WINDOW);
+		if (!first || first === last) return null;
+		const dt = last.t - first.t;
+		if (dt < 8) return null;
+		let vx = (last.x - first.x) / dt;
+		let vy = (last.y - first.y) / dt;
+		const speed = Math.hypot(vx, vy);
+		if (speed < INERTIA_MIN_SPEED) return null;
+		if (speed > INERTIA_MAX_SPEED) {
+			vx *= INERTIA_MAX_SPEED / speed;
+			vy *= INERTIA_MAX_SPEED / speed;
+		}
+		return { x: vx, y: vy };
+	}
+
+	private recordPinch(mid: Pt) {
+		const t = performance.now();
+		this.pinchSamples.push({ t, zoom: this.map.getView().zoom, mid });
+		while (
+			this.pinchSamples.length > 2 &&
+			(this.pinchSamples[0] as PinchSample).t < t - PINCH_WINDOW
+		)
+			this.pinchSamples.shift();
+	}
+
+	/** Keeps a pinch zooming for a moment after the fingers lift, if it was moving fast enough. */
+	private releasePinch() {
+		const samples = this.pinchSamples;
+		this.pinchSamples = [];
+		const now = performance.now();
+		const first = samples.find((s) => s.t >= now - PINCH_WINDOW);
+		const last = samples.at(-1);
+		if (!first || !last || first === last || now - last.t > RELEASE_HOLD)
+			return;
+		const dt = Math.max(last.t - first.t, 1);
+		const raw = (last.zoom - first.zoom) / dt;
+		const vz =
+			Math.abs(raw) < ZOOM_INERTIA_MIN_SPEED
+				? 0
+				: Math.sign(raw) * Math.min(Math.abs(raw), ZOOM_INERTIA_MAX_SPEED);
+		let vx = (last.mid.x - first.mid.x) / dt;
+		let vy = (last.mid.y - first.mid.y) / dt;
+		if (Math.hypot(vx, vy) < INERTIA_MIN_SPEED) {
+			vx = 0;
+			vy = 0;
+		}
+		if (vz === 0 && vx === 0 && vy === 0) return;
+		this.map.zoomInertia(vz, last.mid, vx, vy);
+	}
 
 	private endSession() {
 		this.session?.end();
@@ -146,26 +227,19 @@ export class Input {
 		}
 		if (this.pointers.size === 1) {
 			// Pinch ended with one finger left: continue as a drag from there.
+			if (this.lastPinch) this.releasePinch();
 			this.lastPinch = null;
 			this.start = null;
 		}
 		if (!wasSingle || !this.start) return;
-		const start = this.start;
 		this.start = null;
 
 		if (!this.moved) {
 			this.map.pointer(p.x, p.y, "click");
 			return;
 		}
-		const idle = performance.now() - this.lastMove;
-		const speed = Math.hypot(this.velocity.x, this.velocity.y);
-		if (
-			idle < 80 &&
-			speed > INERTIA_MIN_SPEED &&
-			performance.now() - start.t > 30
-		) {
-			this.map.inertia(this.velocity.x, this.velocity.y);
-		}
+		const v = this.releaseVelocity(e.timeStamp);
+		if (v) this.map.inertia(v.x, v.y);
 	};
 
 	private cancel = (e: PointerEvent) => {
@@ -173,6 +247,8 @@ export class Input {
 		this.pointers.delete(e.pointerId);
 		this.start = null;
 		this.lastPinch = null;
+		this.pinchSamples = [];
+		this.dragSamples = [];
 	};
 
 	private wheel = (e: WheelEvent) => {
