@@ -1,12 +1,21 @@
-import { zValidator } from "@hono/zod-validator";
 import { Hono } from "hono";
+import { validator } from "hono-openapi";
+import { doc } from "../openapi";
 import { resolvePreviewTarget, viewQuerySchema } from "../previewTarget";
 import type { AppEnv } from "../types";
 
 /** GET /api/preview.png?dim&x&z&zoom&rev: a 1200x630 picture of the map around a point. */
 export const previewRoutes = new Hono<AppEnv>().get(
 	"/",
-	zValidator("query", viewQuerySchema),
+	doc({
+		tag: "Images",
+		summary: "Render a link-preview image",
+		description:
+			"A 1200×630 PNG of the tiles around a point with a marker in the middle. Tiles only, no layers.",
+		ok: { 200: "PNG image" },
+		fails: [404],
+	}),
+	validator("query", viewQuerySchema),
 	async (c) => {
 		const { db, env, svc, map } = c.var;
 		const q = c.req.valid("query");

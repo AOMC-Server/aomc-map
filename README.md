@@ -113,6 +113,13 @@ All settings are environment variables (see `.env.example`).
 
 ## API
 
+The full reference is rendered by [Scalar](https://scalar.com) at `/scalar`, with a selector for two documents:
+
+- **HTTP API**, an OpenAPI 3.1 document generated from the routes and their zod schemas: `GET /api/openapi.json`.
+- **Events**, an AsyncAPI 3 document for the server-sent progress events of `GET /api/revisions/:id/events`: `GET /api/asyncapi.json`.
+
+Scalar's browser bundle is served from `node_modules` (`/scalar/standalone.js`), so the page makes no requests to third parties. Both documents can also be imported into Postman, a client generator and the like. The sections below are an overview.
+
 Authentication is a session cookie (browser) or `Authorization: Bearer aomc_…` (scripts). Generate one on the **Settings** page (`/settings`), or with `POST /api/tokens {"name": "…", "expiresInDays": 180}` while logged in with a session (a token cannot create or revoke tokens). It is shown once, expires after 180 days unless you pick another period (`null` = never) and each user can hold 25. Writes made with a cookie must come from `PUBLIC_URL` (CSRF), Bearer requests need no such check. Errors are JSON `{"error": "…"}`; resources you may not see answer 404.
 
 ```bash
@@ -214,7 +221,8 @@ The container has a health check (`/api/me`). Jobs interrupted by a crash or res
 ## Conventions
 
 - Authorization goes through `permissions.ts`; private resources answer 404 to people who can't see them.
-- Input is validated with zod at the route boundary, and the types are shared with the client (`shared/` and the Hono client types).
+- Input is validated with zod at the route boundary (`validator` from `hono-openapi`), and the types are shared with the client (`shared/` and the Hono client types).
+- Every route carries a `doc({...})` (`server/src/openapi.ts`) giving its tag, summary and status codes; the request shapes come from the validators. A test fails if a route is missing from the spec. The event channel is described by hand in `server/src/asyncapi.ts`, typed against `ProgressEvent`.
 - No raw SQL string building: Drizzle, or `sql` template tags.
 - Images always go through the blob store; client file names are never used as paths.
 - Keep dependencies few: ask whether it's under ~50 lines of our own code first.

@@ -7,9 +7,9 @@ import {
 	reorderSchema,
 	updateLayerSchema,
 } from "@aomc/shared";
-import { zValidator } from "@hono/zod-validator";
 import { and, eq, gt, inArray, isNull, lte, or } from "drizzle-orm";
 import { Hono } from "hono";
+import { validator } from "hono-openapi";
 import { z } from "zod";
 import { requireUser, userOf } from "../auth/session";
 import type { Db } from "../db/client";
@@ -27,6 +27,7 @@ import {
 	nextFeatureOrder,
 	toView,
 } from "../features";
+import { doc } from "../openapi";
 import { assignOrder, sameSet } from "../order";
 import {
 	canEdit,
@@ -76,128 +77,158 @@ const layersQuerySchema = z.object({
 });
 
 export const layerRoutes = new Hono<AppEnv>()
-	.get("/", zValidator("query", layersQuerySchema), async (c) => {
-		const { db, user, map, role } = c.var;
-		const query = c.req.valid("query");
-		const at = await timeOfRev(
-			db,
-			map.headRev,
-			query.at === undefined ? null : Number(query.at),
-		);
+	.get(
+		"/",
+		doc({
+			tag: "Layers",
+			summary: "List layers with their features",
+			description:
+				"Only layers you may see. `at` reads the layers as of a revision.",
+		}),
+		validator("query", layersQuerySchema),
+		async (c) => {
+			const { db, user, map, role } = c.var;
+			const query = c.req.valid("query");
+			const at = await timeOfRev(
+				db,
+				map.headRev,
+				query.at === undefined ? null : Number(query.at),
+			);
 
-		let dimensionId: number | undefined;
-		if (query.dim) {
+			let dimensionId: number | undefined;
+			if (query.dim) {
+				const [dim] = await db
+					.select({ id: dimensions.id })
+					.from(dimensions)
+					.where(eq(dimensions.slug, query.dim));
+				if (!dim) return c.json({ error: "dimension not found" }, 404);
+				dimensionId = dim.id;
+			}
+
+			const liveAt =
+				at === null
+					? isNull(layers.deletedAt)
+					: and(
+							lte(layers.createdAt, at),
+							or(isNull(layers.deletedAt), gt(layers.deletedAt, at)),
+						);
+			const rows = await db
+				.select()
+				.from(layers)
+				.where(
+					and(
+						dimensionId === undefined
+							? undefined
+							: eq(layers.dimensionId, dimensionId),
+						liveAt,
+					),
+				)
+				.orderBy(layers.sortOrder, layers.id);
+
+			const memberships = user
+				? await db
+						.select({ layerId: layerMembers.layerId, role: layerMembers.role })
+						.from(layerMembers)
+						.where(
+							and(
+								eq(layerMembers.userId, user.id),
+								inArray(
+									layerMembers.layerId,
+									rows.map((r) => r.id),
+								),
+							),
+						)
+				: [];
+			const layerRoles = new Map(memberships.map((m) => [m.layerId, m.role]));
+
+			const visible = rows.filter((l) =>
+				canViewLayer(role, l, layerRoles.get(l.id) ?? null),
+			);
+			const byLayer = await featuresOfLayers(
+				db,
+				visible.map((l) => l.id),
+				at,
+			);
+			return c.json({
+				layers: visible.map((l) => ({
+					...serializeLayer(
+						l,
+						canEditLayer(role, l, layerRoles.get(l.id) ?? null),
+						canManageLayer(user, role, l),
+					),
+					features: byLayer.get(l.id) ?? [],
+				})),
+			});
+		},
+	)
+	.post(
+		"/",
+		doc({
+			tag: "Layers",
+			summary: "Create a layer",
+			ok: { 201: "Layer created" },
+			fails: [403, 404],
+			login: true,
+		}),
+		requireUser,
+		validator("json", createLayerSchema),
+		async (c) => {
+			const { db } = c.var;
+			const user = userOf(c);
+			if (!canEdit(c.var.role)) return c.json({ error: "forbidden" }, 403);
+
+			const body = c.req.valid("json");
 			const [dim] = await db
 				.select({ id: dimensions.id })
 				.from(dimensions)
-				.where(eq(dimensions.slug, query.dim));
+				.where(eq(dimensions.slug, body.dimension));
 			if (!dim) return c.json({ error: "dimension not found" }, 404);
-			dimensionId = dim.id;
-		}
 
-		const liveAt =
-			at === null
-				? isNull(layers.deletedAt)
-				: and(
-						lte(layers.createdAt, at),
-						or(isNull(layers.deletedAt), gt(layers.deletedAt, at)),
-					);
-		const rows = await db
-			.select()
-			.from(layers)
-			.where(
-				and(
-					dimensionId === undefined
-						? undefined
-						: eq(layers.dimensionId, dimensionId),
-					liveAt,
-				),
-			)
-			.orderBy(layers.sortOrder, layers.id);
-
-		const memberships = user
-			? await db
-					.select({ layerId: layerMembers.layerId, role: layerMembers.role })
-					.from(layerMembers)
-					.where(
-						and(
-							eq(layerMembers.userId, user.id),
-							inArray(
-								layerMembers.layerId,
-								rows.map((r) => r.id),
-							),
-						),
-					)
-			: [];
-		const layerRoles = new Map(memberships.map((m) => [m.layerId, m.role]));
-
-		const visible = rows.filter((l) =>
-			canViewLayer(role, l, layerRoles.get(l.id) ?? null),
-		);
-		const byLayer = await featuresOfLayers(
-			db,
-			visible.map((l) => l.id),
-			at,
-		);
-		return c.json({
-			layers: visible.map((l) => ({
-				...serializeLayer(
-					l,
-					canEditLayer(role, l, layerRoles.get(l.id) ?? null),
-					canManageLayer(user, role, l),
-				),
-				features: byLayer.get(l.id) ?? [],
-			})),
-		});
-	})
-	.post("/", requireUser, zValidator("json", createLayerSchema), async (c) => {
-		const { db } = c.var;
-		const user = userOf(c);
-		if (!canEdit(c.var.role)) return c.json({ error: "forbidden" }, 403);
-
-		const body = c.req.valid("json");
-		const [dim] = await db
-			.select({ id: dimensions.id })
-			.from(dimensions)
-			.where(eq(dimensions.slug, body.dimension));
-		if (!dim) return c.json({ error: "dimension not found" }, 404);
-
-		const layer = db.transaction((tx) => {
-			const existing = tx
-				.select({ sortOrder: layers.sortOrder })
-				.from(layers)
-				.where(isNull(layers.deletedAt))
-				.all();
-			const row = tx
-				.insert(layers)
-				.values({
-					dimensionId: dim.id,
-					name: body.name,
-					color: body.color,
-					hiddenByDefault: body.hiddenByDefault,
-					visibility: body.visibility,
-					sortOrder: Math.max(-1, ...existing.map((l) => l.sortOrder)) + 1,
-					createdBy: user.id,
-				})
-				.returning()
-				.get();
-			// The creator of a private layer keeps access to it even if they are not a moderator.
-			if (row.visibility === "private") {
-				tx.insert(layerMembers)
-					.values({ layerId: row.id, userId: user.id, role: "editor" })
-					.run();
-			}
-			return row;
-		});
-		return c.json(
-			{ layer: { ...serializeLayer(layer, true, true), features: [] } },
-			201,
-		);
-	})
+			const layer = db.transaction((tx) => {
+				const existing = tx
+					.select({ sortOrder: layers.sortOrder })
+					.from(layers)
+					.where(isNull(layers.deletedAt))
+					.all();
+				const row = tx
+					.insert(layers)
+					.values({
+						dimensionId: dim.id,
+						name: body.name,
+						color: body.color,
+						hiddenByDefault: body.hiddenByDefault,
+						visibility: body.visibility,
+						sortOrder: Math.max(-1, ...existing.map((l) => l.sortOrder)) + 1,
+						createdBy: user.id,
+					})
+					.returning()
+					.get();
+				// The creator of a private layer keeps access to it even if they are not a moderator.
+				if (row.visibility === "private") {
+					tx.insert(layerMembers)
+						.values({ layerId: row.id, userId: user.id, role: "editor" })
+						.run();
+				}
+				return row;
+			});
+			return c.json(
+				{ layer: { ...serializeLayer(layer, true, true), features: [] } },
+				201,
+			);
+		},
+	)
 	.post(
 		"/reorder",
+		doc({
+			tag: "Layers",
+			summary: "Reorder the layers of a dimension",
+			description:
+				"`ids` must be exactly the layers you can see in that dimension.",
+			fails: [403, 404, 409],
+			login: true,
+		}),
 		requireUser,
-		zValidator("json", reorderLayersSchema),
+		validator("json", reorderLayersSchema),
 		async (c) => {
 			const { db, role } = c.var;
 			const user = userOf(c);
@@ -237,8 +268,14 @@ export const layerRoutes = new Hono<AppEnv>()
 	)
 	.patch(
 		"/:id",
+		doc({
+			tag: "Layers",
+			summary: "Update a layer",
+			fails: [403, 404],
+			login: true,
+		}),
 		requireUser,
-		zValidator("json", updateLayerSchema),
+		validator("json", updateLayerSchema),
 		async (c) => {
 			const { db } = c.var;
 			const user = userOf(c);
@@ -280,23 +317,41 @@ export const layerRoutes = new Hono<AppEnv>()
 			});
 		},
 	)
-	.delete("/:id", requireUser, async (c) => {
-		const { db } = c.var;
-		const user = userOf(c);
-		const found = await layerFor(c, c.req.param("id"));
-		if (!found) return c.json({ error: "not found" }, 404);
-		if (!canManageLayer(user, c.var.role, found.layer))
-			return c.json({ error: "forbidden" }, 403);
-		await db
-			.update(layers)
-			.set({ deletedAt: Date.now() })
-			.where(eq(layers.id, found.layer.id));
-		return c.json({ ok: true });
-	})
+	.delete(
+		"/:id",
+		doc({
+			tag: "Layers",
+			summary: "Delete a layer",
+			description: "The creator or a moderator.",
+			fails: [403, 404],
+			login: true,
+		}),
+		requireUser,
+		async (c) => {
+			const { db } = c.var;
+			const user = userOf(c);
+			const found = await layerFor(c, c.req.param("id"));
+			if (!found) return c.json({ error: "not found" }, 404);
+			if (!canManageLayer(user, c.var.role, found.layer))
+				return c.json({ error: "forbidden" }, 403);
+			await db
+				.update(layers)
+				.set({ deletedAt: Date.now() })
+				.where(eq(layers.id, found.layer.id));
+			return c.json({ ok: true });
+		},
+	)
 	.post(
 		"/:id/features",
+		doc({
+			tag: "Layers",
+			summary: "Add a feature to a layer",
+			ok: { 201: "Feature created" },
+			fails: [403, 404, 409],
+			login: true,
+		}),
 		requireUser,
-		zValidator("json", featureInputSchema),
+		validator("json", featureInputSchema),
 		async (c) => {
 			const { db } = c.var;
 			const user = userOf(c);
@@ -329,8 +384,14 @@ export const layerRoutes = new Hono<AppEnv>()
 	)
 	.post(
 		"/:id/features/reorder",
+		doc({
+			tag: "Layers",
+			summary: "Reorder the features of a layer",
+			fails: [403, 404, 409],
+			login: true,
+		}),
 		requireUser,
-		zValidator("json", reorderSchema),
+		validator("json", reorderSchema),
 		async (c) => {
 			const { db } = c.var;
 			const found = await layerFor(c, c.req.param("id"));
@@ -361,22 +422,40 @@ export const layerRoutes = new Hono<AppEnv>()
 			return c.json({ ok: true });
 		},
 	)
-	.get("/:id/export", async (c) => {
-		const { db } = c.var;
-		const found = await layerFor(c, c.req.param("id"));
-		if (!found) return c.json({ error: "not found" }, 404);
-		const list = await layerFeatures(db, found.layer.id);
-		c.header(
-			"Content-Disposition",
-			`attachment; filename="layer-${found.layer.id}.json"`,
-		);
-		return c.json(list.map(contentOf));
-	})
+	.get(
+		"/:id/export",
+		doc({
+			tag: "Layers",
+			summary: "Export a layer as JSON",
+			description: "An array of `{type, name, popup, color, geometry}`.",
+			fails: [404],
+		}),
+		async (c) => {
+			const { db } = c.var;
+			const found = await layerFor(c, c.req.param("id"));
+			if (!found) return c.json({ error: "not found" }, 404);
+			const list = await layerFeatures(db, found.layer.id);
+			c.header(
+				"Content-Disposition",
+				`attachment; filename="layer-${found.layer.id}.json"`,
+			);
+			return c.json(list.map(contentOf));
+		},
+	)
 	.post(
 		"/:id/import",
+		doc({
+			tag: "Layers",
+			summary: "Import features into a layer",
+			description:
+				"Adds to the layer, or replaces its features with `replace=1`.",
+			ok: { 201: "Imported" },
+			fails: [403, 404, 409],
+			login: true,
+		}),
 		requireUser,
-		zValidator("query", z.object({ replace: z.enum(["0", "1"]).optional() })),
-		zValidator("json", featureImportSchema),
+		validator("query", z.object({ replace: z.enum(["0", "1"]).optional() })),
+		validator("json", featureImportSchema),
 		async (c) => {
 			const { db } = c.var;
 			const user = userOf(c);

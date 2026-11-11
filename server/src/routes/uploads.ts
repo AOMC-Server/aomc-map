@@ -12,6 +12,7 @@ import sharp from "sharp";
 import { requireUser, userOf } from "../auth/session";
 import { dimensions, jobs, revisions } from "../db/schema";
 import { incomingDir, type UploadFile } from "../jobs/types";
+import { doc } from "../openapi";
 import { canEdit } from "../permissions";
 import { failRevision } from "../tiles/history";
 import type { AppEnv } from "../types";
@@ -22,6 +23,45 @@ type FileError = { file: string; error: string };
 
 export const uploadRoutes = new Hono<AppEnv>().post(
 	"/",
+	doc({
+		tag: "Uploads",
+		summary: "Upload Xaero exports",
+		description:
+			"Send PNG files or ZIPs as multipart/form-data. Coordinates come from `_x<X>_z<Z>` in file names unless `coords` is given. Processing runs in the background: poll `GET /api/revisions/{id}` or stream its events. An upload with several export dates creates one revision per date.",
+		ok: {
+			202: "Accepted. `revisionId` is the last revision, `revisionIds` all of them, oldest first",
+		},
+		fails: [400, 403, 404, 413, 429],
+		login: true,
+		requestBody: {
+			required: true,
+			content: {
+				"multipart/form-data": {
+					schema: {
+						type: "object",
+						required: ["files[]"],
+						properties: {
+							"files[]": {
+								type: "array",
+								items: { type: "string", format: "binary" },
+								description: "PNG images or ZIPs of them",
+							},
+							coords: {
+								type: "string",
+								description:
+									"JSON array of {x, z}, aligned with the files (after ZIP expansion); overrides the file names",
+							},
+							paths: {
+								type: "string",
+								description:
+									"JSON array of strings, aligned with the uploaded files (before ZIP expansion), naming where each came from; carries the export date",
+							},
+						},
+					},
+				},
+			},
+		},
+	}),
 	requireUser,
 	async (c) => {
 		const { db, env, svc } = c.var;

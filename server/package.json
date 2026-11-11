@@ -7,10 +7,12 @@
 	},
 	"dependencies": {
 		"@aomc/shared": "workspace:*",
-		"@hono/zod-validator": "^0.7.0",
+		"@scalar/api-reference": "^1.78.0",
+		"@scalar/hono-api-reference": "^0.12.19",
 		"drizzle-orm": "^0.44.0",
 		"fflate": "^0.8.3",
 		"hono": "^4.6.0",
+		"hono-openapi": "^1.5.0",
 		"sharp": "^0.35.5",
 		"zod": "^4.0.0"
 	},
