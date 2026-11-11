@@ -2,13 +2,18 @@ import { effect } from "@preact/signals";
 import { isTyping } from "../map/input";
 import type { MapView } from "../map/MapView";
 import { activeTool, cursor, highlightBbox } from "../state";
-import { drawGeometry, drawing, initDrawTool } from "./draw";
+import { drawGeometry, drawing, grabDrawPoint, initDrawTool } from "./draw";
 import { initFeatureInteraction } from "./features";
 import {
 	clearMeasure,
 	clickMeasure,
 	drawMeasure,
+	grabMeasurePoint,
+	hoverMeasure,
+	measureHover,
 	measurePoints,
+	setMeasureSnapping,
+	undoMeasure,
 } from "./measure";
 
 /** Outlines the area of the upload that is hovered or selected in the upload log. */
@@ -32,17 +37,22 @@ export function initTools(map: MapView) {
 	map.overlays.push(drawHighlight, drawMeasure, drawGeometry);
 	initDrawTool(map);
 	initFeatureInteraction(map);
+	map.dragHandler = (sx, sy) =>
+		grabDrawPoint(map, sx, sy) ??
+		(activeTool.value === "measure" ? grabMeasurePoint(map, sx, sy) : null);
 
 	// Everything the overlays draw from; any change repaints the map.
 	effect(() => {
 		highlightBbox.value;
 		measurePoints.value;
+		measureHover.value;
 		drawing.value;
 		map.invalidate();
 	});
 
 	map.on("move", (e) => {
 		cursor.value = e ? { x: Math.floor(e.x), z: Math.floor(e.z) } : null;
+		if (activeTool.value === "measure") hoverMeasure(cursor.value);
 	});
 	map.on("click", (e) => {
 		if (drawing.value) return;
@@ -56,12 +66,28 @@ export function initTools(map: MapView) {
 		const idle = tool === "none" && drawing.value === null;
 		map.doubleClickZoom = idle;
 		map.setCursor(idle ? "grab" : "crosshair");
-		if (tool !== "measure") clearMeasure();
+		if (tool !== "measure") {
+			clearMeasure();
+			hoverMeasure(null);
+		}
 	});
 
+	const shift = (e: KeyboardEvent) => setMeasureSnapping(e.shiftKey);
+	window.addEventListener("keyup", shift);
+	window.addEventListener("blur", () => setMeasureSnapping(false));
 	window.addEventListener("keydown", (e) => {
-		if (isTyping(e.target) || e.key !== "Escape" || drawing.value) return;
-		if (measurePoints.value.length > 0) clearMeasure();
-		else activeTool.value = "none";
+		shift(e);
+		if (isTyping(e.target) || drawing.value) return;
+		if (e.key === "Escape") {
+			if (measurePoints.value.length > 0) clearMeasure();
+			else activeTool.value = "none";
+		} else if (
+			(e.key === "Backspace" || e.key === "Delete") &&
+			activeTool.value === "measure" &&
+			measurePoints.value.length > 0
+		) {
+			undoMeasure();
+			e.preventDefault();
+		}
 	});
 }

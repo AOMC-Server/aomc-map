@@ -11,6 +11,8 @@ export function isTyping(target: EventTarget | null): boolean {
 	);
 }
 
+/** Zoom steps from the wheel, keys and double-click end on multiples of this. */
+const ZOOM_GRID = 0.5;
 const DRAG_THRESHOLD = 5;
 const INERTIA_MIN_SPEED = 0.15; // px per ms
 
@@ -175,21 +177,24 @@ export class Input {
 
 	private wheel = (e: WheelEvent) => {
 		e.preventDefault();
-		this.map.cancelAnimation();
 		const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
+		const delta = e.deltaY * unit;
 		const factor = e.ctrlKey ? 0.02 : 0.005; // ctrl+wheel is a trackpad pinch
-		const p = this.local(e);
-		const view = this.map.getView();
-		const zoom = this.map.clampZoom(view.zoom + e.deltaY * unit * factor);
-		this.map.setView(zoomAt(view, this.map.getSize(), p.x, p.y, zoom));
+		// A mouse wheel moves in big notches, which are eased out. Trackpads already send a smooth
+		// stream of small steps, so they only get a little easing to stay direct under the fingers.
+		const notched = !e.ctrlKey && (e.deltaMode !== 0 || Math.abs(delta) >= 40);
+		// Notches snap to half levels; the pin clusters are laid out around that grid.
+		this.map.zoomBy(
+			delta * factor,
+			this.local(e),
+			notched ? 80 : 30,
+			notched ? ZOOM_GRID : undefined,
+		);
 	};
 
 	private dblclick = (e: MouseEvent) => {
 		if (!this.map.doubleClickZoom) return;
-		const p = this.local(e);
-		const view = this.map.getView();
-		const zoom = this.map.clampZoom(view.zoom - 1);
-		this.map.tweenTo({ ...view, zoom }, 220, p);
+		this.map.zoomBy(-1, this.local(e), 70, ZOOM_GRID);
 	};
 
 	private key = (e: KeyboardEvent) => {
@@ -206,13 +211,13 @@ export class Input {
 			const target = panBy(view, dx, dy);
 			this.map.tweenTo(target, 140);
 		};
-		const zoomBy = (delta: number) => {
-			const zoom = this.map.clampZoom(view.zoom + delta);
-			this.map.tweenTo({ ...view, zoom }, 180, {
-				x: size.width / 2,
-				y: size.height / 2,
-			});
-		};
+		const zoomBy = (delta: number) =>
+			this.map.zoomBy(
+				delta,
+				{ x: size.width / 2, y: size.height / 2 },
+				70,
+				ZOOM_GRID,
+			);
 		switch (e.key) {
 			case "ArrowLeft":
 				pan(step, 0);

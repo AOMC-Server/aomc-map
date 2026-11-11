@@ -6,10 +6,10 @@ import { ManagePage } from "./ui/ManagePage";
 import { SettingsPage } from "./ui/SettingsPage";
 import "./styles.css";
 
-// Browser zoom changes the pixel ratio, so keep the pixel font crisp as it changes.
+// Browser zoom changes the pixel ratio, so keep the pixel font of the headings crisp as it changes.
 const applyFontSize = () =>
 	document.documentElement.style.setProperty(
-		"--fs",
+		"--fs-display",
 		`${fontSizeFor(window.devicePixelRatio || 1)}px`,
 	);
 applyFontSize();

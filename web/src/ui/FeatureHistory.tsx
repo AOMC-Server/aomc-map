@@ -64,8 +64,7 @@ export function FeatureHistory() {
 	};
 
 	return (
-		<Modal label="Feature history" onClose={close}>
-			<h2>History of “{target.title}”</h2>
+		<Modal title={`History of “${target.title}”`} onClose={close}>
 			{entries === null && !failed && <p class="muted">Loading…</p>}
 			{failed && <p class="error-text">Could not load the history.</p>}
 			<ul class="feature-history">

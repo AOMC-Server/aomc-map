@@ -11,9 +11,11 @@ import { FeatureLayer, type Hit, type RenderLayer } from "./featureLayer";
 import type { Bounds } from "./geometry";
 import { type DragSession, Input } from "./input";
 import { Renderer } from "./renderer";
+import { easeZoom } from "./smoothZoom";
 import { TileLayer, type TileSource } from "./tileLayer";
 
 type MapPointer = { x: number; z: number; sx: number; sy: number };
+type ScreenPoint = { x: number; y: number };
 export type MapEvents = {
 	click: MapPointer & { hit: Hit | null };
 	move: MapPointer | null;
@@ -25,6 +27,8 @@ export type DragHandler = (sx: number, sy: number) => DragSession | null;
 export type Overlay = (ctx: CanvasRenderingContext2D, map: MapView) => void;
 
 const DEFAULT_VIEW: View = { centerX: 0, centerZ: 0, zoom: 2 };
+/** How many zoom levels an eased zoom may be heading beyond the current view. */
+const MAX_ZOOM_LEAD = 2;
 
 /**
  * Framework-free canvas map. The UI only talks to the map through this class.
@@ -55,6 +59,12 @@ export class MapView {
 	private features: FeatureLayer;
 	private hoverKey: string | null = null;
 	private baseCursor = "grab";
+	/** Where an eased zoom (zoomBy) is heading, while one runs. */
+	private zoomGoal: {
+		zoom: number;
+		anchor: ScreenPoint;
+		smoothing: number;
+	} | null = null;
 
 	constructor(
 		private container: HTMLElement,
@@ -150,6 +160,13 @@ export class MapView {
 		this.renderer.invalidate();
 	}
 
+	/** Draws one feature as hovered (e.g. its row in the layer list is under the mouse). */
+	setHoveredFeature(id: number | null) {
+		if (this.features.hoveredId === id) return;
+		this.features.hoveredId = id;
+		this.renderer.invalidate();
+	}
+
 	hitTest(sx: number, sy: number): Hit | null {
 		return this.features.hitTest(this.view, this.size, sx, sy);
 	}
@@ -199,11 +216,50 @@ export class MapView {
 	}
 
 	cancelAnimation() {
+		this.zoomGoal = null;
 		this.renderer.stopAnimation();
 	}
 
+	/**
+	 * Eases the zoom by `delta` levels, keeping `anchor` (screen px) still. Calls made while it is
+	 * still easing add to the goal, so a fast scroll keeps gliding instead of jumping per step.
+	 * `smoothing` is the easing time constant in ms; lower feels more direct. With `snap`, the goal
+	 * is rounded to a multiple of it, so repeated steps end on the same grid of zoom levels.
+	 */
+	zoomBy(delta: number, anchor: ScreenPoint, smoothing = 80, snap?: number) {
+		const base = this.zoomGoal?.zoom ?? this.view.zoom;
+		const running = this.zoomGoal !== null;
+		// Never more than a couple of levels ahead, so it stops soon after the input does.
+		const ahead = Math.min(
+			Math.max(base + delta, this.view.zoom - MAX_ZOOM_LEAD),
+			this.view.zoom + MAX_ZOOM_LEAD,
+		);
+		const snapped = snap ? Math.round(ahead / snap) * snap : ahead;
+		this.zoomGoal = {
+			zoom: clampZoom(snapped, this.maxZoom),
+			anchor,
+			smoothing,
+		};
+		if (running) return;
+		let last: number | null = null;
+		this.renderer.animate((now) => {
+			const goal = this.zoomGoal;
+			if (!goal) return false;
+			const dt = last === null ? 16 : Math.min(now - last, 50);
+			last = now;
+			const zoom = easeZoom(this.view.zoom, goal.zoom, dt, goal.smoothing);
+			this.setView(
+				zoomAt(this.view, this.size, goal.anchor.x, goal.anchor.y, zoom),
+			);
+			if (zoom !== goal.zoom) return true;
+			this.zoomGoal = null;
+			return false;
+		});
+	}
+
 	/** Animates to a view, keeping `anchor` (screen px) stable while zooming. */
-	tweenTo(target: View, ms: number, anchor?: { x: number; y: number }) {
+	tweenTo(target: View, ms: number, anchor?: ScreenPoint) {
+		this.zoomGoal = null;
 		const from = this.view;
 		const to = { ...target, zoom: clampZoom(target.zoom, this.maxZoom) };
 		const began = performance.now();
@@ -232,6 +288,7 @@ export class MapView {
 	}
 
 	inertia(vx: number, vy: number) {
+		this.zoomGoal = null;
 		let last = performance.now();
 		this.renderer.animate((now) => {
 			const dt = Math.min(now - last, 50);

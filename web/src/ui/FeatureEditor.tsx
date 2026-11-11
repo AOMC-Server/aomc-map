@@ -6,6 +6,7 @@ import {
 	MAX_POPUP,
 } from "@aomc/shared/features";
 import { useEffect, useState } from "preact/hooks";
+import { showNotice } from "../api";
 import { pointsOf, TYPE_LABEL } from "../featureInfo";
 import { createFeature, deleteFeature, updateFeature } from "../layers";
 import { editor, layersData, popup } from "../state";
@@ -61,13 +62,15 @@ export function FeatureEditor() {
 	const [color, setColor] = useState<Dye | null>(existing?.color ?? null);
 	const [saving, setSaving] = useState(false);
 
+	const cancelEditing = () => {
+		editor.value = null;
+	};
+
 	useEffect(() => {
 		startDraw(
 			existing?.type ?? "pin",
 			existing ? pointsOf(existing) : [],
-			() => {
-				editor.value = null;
-			},
+			cancelEditing,
 		);
 		return () => stopDraw();
 	}, []);
@@ -82,7 +85,8 @@ export function FeatureEditor() {
 		setDrawType(next);
 	};
 
-	const save = async () => {
+	/** `another`: stay in the editor with a blank feature (same type and colour) for the next one. */
+	const save = async (another = false) => {
 		if (!ready || saving) return;
 		const common = { name: name.trim(), popup: text, color };
 		const [first] = points;
@@ -100,6 +104,13 @@ export function FeatureEditor() {
 				: await updateFeature(target.featureId, input);
 		setSaving(false);
 		if (!saved) return;
+		if (another && target.mode === "create") {
+			setName("");
+			setText("");
+			startDraw(type, [], cancelEditing);
+			showNotice("Feature added.");
+			return;
+		}
 		closeEditor();
 		popup.value = null;
 	};
@@ -123,11 +134,22 @@ export function FeatureEditor() {
 						</button>
 					)}
 					<span class="spacer" />
+					{target.mode === "create" && (
+						<button
+							type="button"
+							class="btn"
+							disabled={!ready || saving}
+							title="Save this feature and start a new one in the same layer"
+							onClick={() => save(true)}
+						>
+							Save & add another
+						</button>
+					)}
 					<button
 						type="button"
 						class="btn primary"
 						disabled={!ready || saving}
-						onClick={save}
+						onClick={() => save()}
 					>
 						{saving ? "Saving…" : "Save"}
 					</button>

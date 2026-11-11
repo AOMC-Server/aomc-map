@@ -7,6 +7,7 @@ import {
 	type View,
 } from "@aomc/shared/view";
 import { pointsOf } from "../featureInfo";
+import { ClusterIndex, type ClusterNode } from "./cluster";
 import {
 	type Bounds,
 	boundsOf,
@@ -36,10 +37,23 @@ export type Hit =
 /** Features are drawn at the centre of their block. */
 export const BLOCK_CENTER = 0.5;
 
+/** A cluster grows a little with the number of pins in it. */
+const clusterRadius = (count: number) => 13 + Math.min(8, Math.log2(count) * 2);
+
 const ICON_W = 24;
 const ICON_H = 24;
-const CLUSTER_CELL = 56;
-const NO_CLUSTER_BELOW_ZOOM = -3;
+/** Pins closer than this on screen (just after switching to a level; about half at its end) merge. */
+const CLUSTER_RADIUS_PX = 56;
+/**
+ * Cluster levels switch at zooms of k + 0.25, and the crossfade covers this much zoom around
+ * each switch. The grid that wheel zooming snaps to (multiples of 0.5) stays clear of it, so a
+ * view that has come to rest never shows half-faded clusters.
+ */
+const SWITCH_OFFSET = 0.25;
+const FADE_WIDTH = 0.44;
+/** The lowest zoom level that clusters. Closer than that, pins are always shown one by one. */
+export const MIN_CLUSTER_LEVEL = -2;
+const MAX_CLUSTER_LEVEL = 24;
 const LINE_TOLERANCE_PX = 7;
 
 type Prepared = {
@@ -49,6 +63,7 @@ type Prepared = {
 	points: Pt[];
 };
 type DrawnPin = { x: number; y: number; item: Prepared };
+type PinNode = ClusterNode<Prepared>;
 type DrawnCluster = {
 	x: number;
 	y: number;
@@ -57,12 +72,18 @@ type DrawnCluster = {
 	bounds: Bounds;
 };
 
-/** Draws pins (with grid clustering), lines and polygons, and answers hit-test queries. */
+/** Draws pins (clustered by the world-fixed `ClusterIndex`), lines and polygons, and answers hit-test queries. */
 export class FeatureLayer {
 	private prepared: Prepared[] = [];
+	private clusters = new ClusterIndex<Prepared>([], {
+		radiusPx: CLUSTER_RADIUS_PX,
+		minLevel: MIN_CLUSTER_LEVEL,
+		maxLevel: MAX_CLUSTER_LEVEL,
+	});
 	private icons = new Map<Dye, HTMLImageElement>();
 	private drawnPins: DrawnPin[] = [];
 	private drawnClusters: DrawnCluster[] = [];
+	private selectedShown = false;
 	hoveredId: number | null = null;
 	selectedId: number | null = null;
 
@@ -74,6 +95,19 @@ export class FeatureLayer {
 				const points = pointsOf(feature);
 				return { feature, layer, points, bounds: boundsOf(points) };
 			}),
+		);
+		this.clusters = new ClusterIndex(
+			this.prepared
+				.filter((p) => p.feature.type === "pin")
+				.map((p) => {
+					const [x, z] = p.points[0] as Pt;
+					return { x, z, item: p };
+				}),
+			{
+				radiusPx: CLUSTER_RADIUS_PX,
+				minLevel: MIN_CLUSTER_LEVEL,
+				maxLevel: MAX_CLUSTER_LEVEL,
+			},
 		);
 		this.drawnPins = [];
 		this.drawnClusters = [];
@@ -116,19 +150,33 @@ export class FeatureLayer {
 		ctx.lineJoin = "round";
 		ctx.lineCap = "round";
 
-		const pins: Prepared[] = [];
 		for (const p of this.prepared) {
 			if (!intersects(p.bounds, viewport)) continue;
-			if (p.feature.type === "pin") pins.push(p);
-			else if (p.feature.type === "polygon")
-				this.drawShape(ctx, p, project, true);
+			if (p.feature.type === "polygon") this.drawShape(ctx, p, project, true);
 		}
 		for (const p of this.prepared) {
 			if (p.feature.type === "line" && intersects(p.bounds, viewport)) {
 				this.drawShape(ctx, p, project, false);
 			}
 		}
-		this.drawPins(ctx, pins, project, view.zoom > NO_CLUSTER_BELOW_ZOOM);
+		// Clusters are fixed per integer level. Around each switch between two levels they are
+		// crossfaded, so that zooming (which is smooth) never makes pins pop.
+		const p = view.zoom - SWITCH_OFFSET;
+		const switchAt = Math.round(p);
+		const t = Math.min(Math.max((p - switchAt) / FADE_WIDTH + 0.5, 0), 1);
+		const fineLevel = switchAt - 1;
+		const inView = (n: PinNode) =>
+			n.x >= viewport.minX &&
+			n.x <= viewport.maxX &&
+			n.z >= viewport.minZ &&
+			n.z <= viewport.maxZ;
+		this.drawPins(
+			ctx,
+			this.nodesAt(fineLevel).filter(inView),
+			this.nodesAt(fineLevel + 1).filter(inView),
+			t,
+			project,
+		);
 		ctx.restore();
 	}
 
@@ -174,73 +222,108 @@ export class FeatureLayer {
 		ctx.stroke();
 	}
 
+	private nodesAt(level: number): PinNode[] {
+		return level < MIN_CLUSTER_LEVEL
+			? this.clusters.singles()
+			: this.clusters.nodes(level);
+	}
+
+	/**
+	 * `fine` and `coarse` are neighbouring cluster levels; `t` is how far the view has moved from
+	 * the fine one (0) to the coarse one (1). A node that is the same in both stays solid.
+	 */
 	private drawPins(
 		ctx: CanvasRenderingContext2D,
-		pins: Prepared[],
+		fine: PinNode[],
+		coarse: PinNode[],
+		t: number,
 		project: (x: number, z: number) => { x: number; y: number },
-		cluster: boolean,
 	) {
-		const cells = new Map<string, { item: Prepared; x: number; y: number }[]>();
-		for (const item of pins) {
-			const [bx, bz] = item.points[0] as Pt;
-			const s = project(bx, bz);
-			const key = cluster
-				? `${Math.floor(s.x / CLUSTER_CELL)},${Math.floor(s.y / CLUSTER_CELL)}`
-				: `${item.feature.id}`;
-			const list = cells.get(key) ?? [];
-			list.push({ item, x: s.x, y: s.y });
-			cells.set(key, list);
-		}
+		const inFine = new Set(fine);
+		const inCoarse = new Set(coarse);
+		const draw = (nodes: PinNode[], other: Set<PinNode>, weight: number) => {
+			// Hit-testing follows whichever level is stronger right now.
+			const active = weight >= 0.5;
+			for (const node of nodes) {
+				const alpha = other.has(node) ? 1 : weight;
+				if (alpha <= 0.01) continue;
+				const s = project(node.x, node.z);
+				ctx.globalAlpha = alpha;
+				if (node.item) {
+					if (node.item.feature.id === this.selectedId)
+						this.selectedShown = true;
+					this.drawPin(ctx, node.item, s.x, s.y, active);
+					continue;
+				}
+				const r = clusterRadius(node.count);
+				if (active)
+					this.drawnClusters.push({
+						x: s.x,
+						y: s.y,
+						r,
+						count: node.count,
+						bounds: node.bounds,
+					});
+				this.drawCluster(ctx, s.x, s.y, r, node.count);
+			}
+			ctx.globalAlpha = 1;
+		};
 
-		const singles: { item: Prepared; x: number; y: number }[] = [];
-		for (const group of cells.values()) {
-			if (group.length === 1) {
-				singles.push(group[0] as (typeof group)[number]);
-				continue;
-			}
-			const x = group.reduce((n, g) => n + g.x, 0) / group.length;
-			const y = group.reduce((n, g) => n + g.y, 0) / group.length;
-			const bounds = boundsOf(group.map((g) => g.item.points[0] as Pt));
-			this.drawnClusters.push({ x, y, r: 15, count: group.length, bounds });
-			this.drawCluster(ctx, x, y, group.length);
-		}
+		this.selectedShown = false;
+		// Coarse first so that the fine nodes that stay are drawn on top of it.
+		draw(coarse, inFine, t);
+		draw(fine, inCoarse, 1 - t);
 
-		for (const s of singles) {
-			const { item } = s;
-			const emphasised =
-				item.feature.id === this.hoveredId ||
-				item.feature.id === this.selectedId;
-			if (emphasised) {
-				ctx.beginPath();
-				ctx.arc(s.x, s.y - ICON_H / 2, 17, 0, Math.PI * 2);
-				ctx.fillStyle = "rgba(255,255,255,0.35)";
-				ctx.fill();
-				ctx.strokeStyle = "#fff";
-				ctx.lineWidth = 2;
-				ctx.stroke();
-			}
-			const img = this.icon(this.colorOf(item));
-			if (img.complete && img.naturalWidth > 0) {
-				ctx.imageSmoothingEnabled = false;
-				ctx.drawImage(img, s.x - ICON_W / 2, s.y - ICON_H, ICON_W, ICON_H);
-			} else {
-				ctx.beginPath();
-				ctx.arc(s.x, s.y - ICON_H / 2, 6, 0, Math.PI * 2);
-				ctx.fillStyle = DYE_HEX[this.colorOf(item)];
-				ctx.fill();
-			}
-			this.drawnPins.push(s);
+		// The pin whose popup or editor is open must not vanish into a cluster.
+		if (this.selectedId === null || this.selectedShown) return;
+		const selected = this.clusters
+			.singles()
+			.find((n) => n.item?.feature.id === this.selectedId);
+		if (!selected?.item) return;
+		const s = project(selected.x, selected.z);
+		this.drawPin(ctx, selected.item, s.x, s.y, true);
+	}
+
+	private drawPin(
+		ctx: CanvasRenderingContext2D,
+		item: Prepared,
+		x: number,
+		y: number,
+		hittable: boolean,
+	) {
+		const emphasised =
+			item.feature.id === this.hoveredId || item.feature.id === this.selectedId;
+		if (emphasised) {
+			ctx.beginPath();
+			ctx.arc(x, y - ICON_H / 2, 17, 0, Math.PI * 2);
+			ctx.fillStyle = "rgba(255,255,255,0.35)";
+			ctx.fill();
+			ctx.strokeStyle = "#fff";
+			ctx.lineWidth = 2;
+			ctx.stroke();
 		}
+		const img = this.icon(this.colorOf(item));
+		if (img.complete && img.naturalWidth > 0) {
+			ctx.imageSmoothingEnabled = false;
+			ctx.drawImage(img, x - ICON_W / 2, y - ICON_H, ICON_W, ICON_H);
+		} else {
+			ctx.beginPath();
+			ctx.arc(x, y - ICON_H / 2, 6, 0, Math.PI * 2);
+			ctx.fillStyle = DYE_HEX[this.colorOf(item)];
+			ctx.fill();
+		}
+		if (hittable) this.drawnPins.push({ x, y, item });
 	}
 
 	private drawCluster(
 		ctx: CanvasRenderingContext2D,
 		x: number,
 		y: number,
+		r: number,
 		count: number,
 	) {
 		ctx.beginPath();
-		ctx.arc(x, y, 15, 0, Math.PI * 2);
+		ctx.arc(x, y, r, 0, Math.PI * 2);
 		ctx.fillStyle = "rgba(88,101,242,0.92)";
 		ctx.fill();
 		ctx.lineWidth = 2;
@@ -253,14 +336,8 @@ export class FeatureLayer {
 		ctx.fillText(count > 999 ? "999+" : String(count), x, y + 0.5);
 	}
 
-	/** Topmost thing under the pointer: clusters and pins first, then lines, then polygons. */
+	/** Topmost thing under the pointer: pins and clusters first, then lines, then polygons. */
 	hitTest(view: View, size: Size, sx: number, sy: number): Hit | null {
-		for (let i = this.drawnClusters.length - 1; i >= 0; i--) {
-			const c = this.drawnClusters[i] as DrawnCluster;
-			if (Math.hypot(sx - c.x, sy - c.y) <= c.r + 2) {
-				return { kind: "cluster", count: c.count, bounds: c.bounds };
-			}
-		}
 		for (let i = this.drawnPins.length - 1; i >= 0; i--) {
 			const p = this.drawnPins[i] as DrawnPin;
 			if (
@@ -276,6 +353,12 @@ export class FeatureLayer {
 			}
 		}
 
+		for (let i = this.drawnClusters.length - 1; i >= 0; i--) {
+			const c = this.drawnClusters[i] as DrawnCluster;
+			if (Math.hypot(sx - c.x, sy - c.y) <= c.r + 2) {
+				return { kind: "cluster", count: c.count, bounds: c.bounds };
+			}
+		}
 		const at = screenToBlock(view, size, sx, sy);
 		const px = at.x - BLOCK_CENTER;
 		const pz = at.z - BLOCK_CENTER;

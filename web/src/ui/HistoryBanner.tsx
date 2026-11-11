@@ -19,14 +19,16 @@ function BossBar(props: {
 	return (
 		<div class="bossbar-wrap">
 			<div class="bossbar" role="status">
-				<div class="bossbar-title">{props.title}</div>
-				<div class={`bossbar-track ${props.color}`}>
-					<span style={{ width: `${Math.round(props.fill * 100)}%` }} />
+				<div class="bossbar-main">
+					<div class="bossbar-title">{props.title}</div>
+					<div class={`bossbar-track ${props.color}`}>
+						<span style={{ width: `${Math.round(props.fill * 100)}%` }} />
+					</div>
 				</div>
+				<button type="button" class="btn small" onClick={props.onAction}>
+					{props.action}
+				</button>
 			</div>
-			<button type="button" class="btn small" onClick={props.onAction}>
-				{props.action}
-			</button>
 		</div>
 	);
 }

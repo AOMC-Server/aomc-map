@@ -1,7 +1,7 @@
 import type { FeatureType, Point } from "@aomc/shared/features";
 import { signal } from "@preact/signals";
 import { BLOCK_CENTER } from "../map/featureLayer";
-import { isTyping } from "../map/input";
+import { type DragSession, isTyping } from "../map/input";
 import type { MapView } from "../map/MapView";
 
 /**
@@ -97,33 +97,6 @@ export function initDrawTool(map: MapView) {
 		else drawing.value = { ...d, points: [...d.points, p] };
 	});
 
-	map.dragHandler = (sx, sy) => {
-		const d = drawing.value;
-		if (!d) return null;
-		let best = -1;
-		let bestDist = GRAB_RADIUS;
-		d.points.forEach(([x, z], i) => {
-			const s = map.blockToScreen(x + BLOCK_CENTER, z + BLOCK_CENTER);
-			const dist = Math.hypot(s.x - sx, s.y - sy);
-			if (dist <= bestDist) {
-				best = i;
-				bestDist = dist;
-			}
-		});
-		if (best < 0) return null;
-		const index = best;
-		return {
-			move(mx, my) {
-				const current = drawing.value;
-				if (!current) return;
-				const points = [...current.points];
-				points[index] = toBlock(map, mx, my);
-				drawing.value = { ...current, points };
-			},
-			end() {},
-		};
-	};
-
 	window.addEventListener("keydown", (e) => {
 		const d = drawing.value;
 		if (!d || isTyping(e.target)) return;
@@ -137,6 +110,38 @@ export function initDrawTool(map: MapView) {
 			e.preventDefault();
 		}
 	});
+}
+
+/** Lets a vertex of the geometry being placed be dragged to a new block. */
+export function grabDrawPoint(
+	map: MapView,
+	sx: number,
+	sy: number,
+): DragSession | null {
+	const d = drawing.value;
+	if (!d) return null;
+	let best = -1;
+	let bestDist = GRAB_RADIUS;
+	d.points.forEach(([x, z], i) => {
+		const s = map.blockToScreen(x + BLOCK_CENTER, z + BLOCK_CENTER);
+		const dist = Math.hypot(s.x - sx, s.y - sy);
+		if (dist <= bestDist) {
+			best = i;
+			bestDist = dist;
+		}
+	});
+	if (best < 0) return null;
+	const index = best;
+	return {
+		move(mx, my) {
+			const current = drawing.value;
+			if (!current) return;
+			const points = [...current.points];
+			points[index] = toBlock(map, mx, my);
+			drawing.value = { ...current, points };
+		},
+		end() {},
+	};
 }
 
 /** Overlay: the geometry being placed, with vertex handles. */

@@ -88,7 +88,7 @@ All settings are environment variables (see `.env.example`).
 
 ## Using the map
 
-**Viewer.** `/?dim=<slug>&x=&z=&zoom=&rev=` is kept in the address bar, so every view is a shareable link (`rev` is omitted at the latest revision). `embed=1` hides all UI for iframes. Zoom 0 is one block per pixel, negative zooms in (down to -4), positive zooms out. Drag or touch to pan, wheel or pinch to zoom, double-click to zoom in, arrow keys and `+`/`-`. The hotbar at the bottom holds _Layers_, _History_, _Measure_ (two clicks, Esc clears), _Upload_ and, for moderators, _Manage_; the number keys 1 to 5 select them.
+**Viewer.** `/?dim=<slug>&x=&z=&zoom=&rev=` is kept in the address bar, so every view is a shareable link (`rev` is omitted at the latest revision). `embed=1` hides all UI for iframes. Zoom 0 is one block per pixel, negative zooms in (down to -6, 64 pixels per block), positive zooms out. Drag or touch to pan, wheel or pinch to zoom, double-click to zoom in, arrow keys and `+`/`-`. The hotbar at the bottom holds _Layers_, _History_, _Measure_ (click points to measure a path; Shift snaps to straight lines, Esc clears), _Upload_ and, for moderators, _Manage_; the number keys 1 to 5 select them.
 
 **Uploading.** Use _Upload_ in the hotbar, or the API (below). In Xaero's World Map: turn resource packs off, drag with the right mouse button over an area, export as PNG with **Multiple Unscaled Images** on, then upload the images (or a ZIP of them). File names contain `_x<X>_z<Z>` (the block coordinates of the top-left corner). Pure black pixels mean "no data" and never overwrite anything. Processing runs in a background queue, one job at a time; you can close the dialog while it works.
 

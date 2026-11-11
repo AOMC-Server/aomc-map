@@ -1,9 +1,11 @@
 import type { Dye } from "@aomc/shared/colors";
 import { type FeatureInput, MAX_NAME } from "@aomc/shared/features";
-import { useState } from "preact/hooks";
+import { signal } from "@preact/signals";
+import { useEffect, useState } from "preact/hooks";
 import { showNotice } from "../api";
 import { mapView } from "../controller";
 import { featureTitle, pointsOf, TYPE_LABEL } from "../featureInfo";
+import { type LayerMatch, searchLayers } from "../layerSearch";
 import {
 	createLayer,
 	deleteFeature,
@@ -20,6 +22,8 @@ import {
 	type LayerData,
 	layersData,
 	popup,
+	setLayersHidden,
+	showOnlyLayer,
 	sidePanel,
 	toggleLayer,
 	user,
@@ -29,9 +33,35 @@ import { Banner } from "./icons";
 import { layerSharingFor } from "./LayerSharing";
 import { Panel } from "./Panel";
 
+/** Layers that are expanded in the list; kept when the panel is closed and reopened. */
+const openLayers = signal<Set<number>>(new Set());
+
+function toggleOpen(id: number) {
+	const next = new Set(openLayers.value);
+	if (!next.delete(id)) next.add(id);
+	openLayers.value = next;
+}
+
+/** A layer that is hidden would show nothing at the place we are taking the user to. */
+function reveal(layerId: number) {
+	const layer = layersData.value.find((l) => l.id === layerId);
+	if (layer && isLayerHidden(layer)) setLayersHidden([layer], false);
+}
+
+function zoomToLayer(l: LayerData) {
+	const mv = mapView.value;
+	if (!mv || l.features.length === 0) return;
+	reveal(l.id);
+	mv.fitBounds(boundsOf(l.features.flatMap(pointsOf)), { padding: 100 });
+}
+
+const hoverFeature = (id: number | null) =>
+	mapView.value?.setHoveredFeature(id);
+
 function goTo(f: FeatureData) {
 	const mv = mapView.value;
 	if (!mv) return;
+	reveal(f.layerId);
 	const b = boundsOf(pointsOf(f));
 	mv.fitBounds(b, { padding: 140 });
 	popup.value = {
@@ -42,7 +72,12 @@ function goTo(f: FeatureData) {
 	};
 }
 
-function LayerForm(props: { initial?: LayerData; onDone: () => void }) {
+function LayerForm(props: {
+	initial?: LayerData;
+	onDone: () => void;
+	/** Without a cancel button the form is saved or left by other means. */
+	showCancel?: boolean;
+}) {
 	const l = props.initial;
 	const [name, setName] = useState(l?.name ?? "");
 	const [color, setColor] = useState<Dye>(l?.color ?? "red");
@@ -111,64 +146,147 @@ function LayerForm(props: { initial?: LayerData; onDone: () => void }) {
 				>
 					{l ? "Save" : "Create"}
 				</button>
-				<button type="button" class="btn" onClick={props.onDone}>
-					Cancel
-				</button>
+				{props.showCancel !== false && (
+					<button type="button" class="btn" onClick={props.onDone}>
+						Cancel
+					</button>
+				)}
 			</div>
 		</form>
 	);
 }
 
-function ImportButton(props: { layer: LayerData }) {
-	const [replace, setReplace] = useState(false);
+/** Picks a JSON file of features. `replace` swaps out everything in the layer instead of adding to it. */
+function ImportButton(props: { layer: LayerData; replace: boolean }) {
+	const { replace } = props;
 	return (
-		<span class="import">
-			<label class="btn small file-btn">
-				Import
-				<input
-					type="file"
-					accept="application/json,.json"
-					hidden
-					onChange={async (e) => {
-						const input = e.currentTarget;
-						const file = input.files?.[0];
-						input.value = "";
-						if (!file) return;
-						if (
-							replace &&
-							!confirm(
-								"Replace ALL features in this layer with the imported ones?",
-							)
-						)
-							return;
-						let data: FeatureInput[];
-						try {
-							data = JSON.parse(await file.text());
-						} catch {
-							showNotice("That file is not valid JSON.", "error");
-							return;
-						}
-						const out = await importFeatures(props.layer.id, data, replace);
-						if (out) showNotice(`Imported ${out.imported} features.`);
-					}}
-				/>
-			</label>
-			<label class="check small">
-				<input
-					type="checkbox"
-					checked={replace}
-					onChange={(e) => setReplace(e.currentTarget.checked)}
-				/>
+		<label
+			class="btn small"
+			title={
 				replace
-			</label>
-		</span>
+					? "Delete every feature in this layer and use the ones in a JSON file"
+					: "Add the features from a JSON file to this layer"
+			}
+		>
+			{replace ? "Import (replace)" : "Import"}
+			<input
+				type="file"
+				accept="application/json,.json"
+				hidden
+				onChange={async (e) => {
+					const input = e.currentTarget;
+					const file = input.files?.[0];
+					input.value = "";
+					if (!file) return;
+					if (
+						replace &&
+						!confirm(
+							"Replace ALL features in this layer with the imported ones?",
+						)
+					)
+						return;
+					let data: FeatureInput[];
+					try {
+						data = JSON.parse(await file.text());
+					} catch {
+						showNotice("That file is not valid JSON.", "error");
+						return;
+					}
+					const out = await importFeatures(props.layer.id, data, replace);
+					if (out) showNotice(`Imported ${out.imported} features.`);
+				}}
+			/>
+		</label>
 	);
 }
 
-function LayerRow(props: { layer: LayerData }) {
-	const l = props.layer;
-	const [open, setOpen] = useState(false);
-	const [editing, setEditing] = useState(false);
+/** Everything about a layer that is not its features: details, sharing, import and export, deletion. */
+function LayerSettings(props: {
+	layer: LayerData;
+	editable: boolean;
+	onBack: () => void;
+}) {
+	const { layer: l, editable, onBack } = props;
+	return (
+		<div class="layer-settings">
+			<div class="settings-head">
+				<button type="button" class="btn small" onClick={onBack}>
+					← Back
+				</button>
+				<h3>Layer settings</h3>
+			</div>
+
+			{editable && (
+				<section>
+					<h4 class="section-title">Details</h4>
+					<LayerForm initial={l} onDone={onBack} showCancel={false} />
+				</section>
+			)}
+
+			{editable && l.visibility === "private" && l.canManage && (
+				<section>
+					<h4 class="section-title">Access</h4>
+					<p class="hint">Who can see and edit this layer.</p>
+					<button
+						type="button"
+						class="btn small"
+						onClick={() => {
+							layerSharingFor.value = { layerId: l.id, name: l.name };
+						}}
+					>
+						Manage sharing
+					</button>
+				</section>
+			)}
+
+			<section>
+				<h4 class="section-title">Data</h4>
+				<p class="hint">
+					Features are exchanged as JSON files, the same format Export writes.
+				</p>
+				<div class="settings-actions">
+					<a
+						class="btn small"
+						href={`/api/layers/${l.id}/export`}
+						download={`${l.name}.json`}
+					>
+						Export
+					</a>
+					{editable && <ImportButton layer={l} replace={false} />}
+					{editable && <ImportButton layer={l} replace={true} />}
+				</div>
+				{editable && (
+					<p class="hint">
+						Import adds the file's features. Import (replace) deletes everything
+						in this layer first.
+					</p>
+				)}
+			</section>
+
+			{editable && (
+				<section class="danger-zone">
+					<h4 class="section-title">Danger zone</h4>
+					<button
+						type="button"
+						class="btn small danger"
+						onClick={async () => {
+							if (confirm(`Delete layer "${l.name}" and its features?`))
+								await deleteLayer(l.id);
+						}}
+					>
+						Delete layer
+					</button>
+				</section>
+			)}
+		</div>
+	);
+}
+
+function LayerRow(props: { match: LayerMatch; filtering: boolean }) {
+	const l = props.match.layer;
+	const features = props.match.features;
+	const open = props.filtering || openLayers.value.has(l.id);
+	const [settingsOpen, setSettingsOpen] = useState(false);
 	const editable = l.canEdit && canEditMap.value;
 	const hidden = isLayerHidden(l);
 
@@ -185,7 +303,7 @@ function LayerRow(props: { layer: LayerData }) {
 				<button
 					type="button"
 					class="plain layer-name"
-					onClick={() => setOpen(!open)}
+					onClick={() => toggleOpen(l.id)}
 					aria-expanded={open}
 				>
 					<span class="layer-title">{l.name}</span>
@@ -194,7 +312,11 @@ function LayerRow(props: { layer: LayerData }) {
 							private
 						</span>
 					)}
-					<span class="count">{l.features.length}</span>
+					<span class="count">
+						{props.filtering
+							? `${features.length}/${l.features.length}`
+							: l.features.length}
+					</span>
 					<span class="chevron" aria-hidden="true">
 						{open ? "▼" : "▶"}
 					</span>
@@ -203,107 +325,107 @@ function LayerRow(props: { layer: LayerData }) {
 
 			{open && (
 				<div class="layer-body">
-					{editing ? (
-						<LayerForm initial={l} onDone={() => setEditing(false)} />
+					{settingsOpen ? (
+						<LayerSettings
+							layer={l}
+							editable={editable}
+							onBack={() => setSettingsOpen(false)}
+						/>
 					) : (
 						<div class="group layer-actions">
 							{editable && (
-								<>
-									<button
-										type="button"
-										class="btn small"
-										onClick={() => {
-											editor.value = { mode: "create", layerId: l.id };
-										}}
-									>
-										Add feature
-									</button>
-									<button
-										type="button"
-										class="btn small"
-										onClick={() => setEditing(true)}
-									>
-										Settings
-									</button>
-									{l.visibility === "private" && l.canManage && (
-										<button
-											type="button"
-											class="btn small"
-											title="Who can see and edit this layer"
-											onClick={() => {
-												layerSharingFor.value = { layerId: l.id, name: l.name };
-											}}
-										>
-											Sharing
-										</button>
-									)}
-									<ImportButton layer={l} />
-								</>
-							)}
-							<a
-								class="btn small"
-								href={`/api/layers/${l.id}/export`}
-								download={`${l.name}.json`}
-							>
-								Export
-							</a>
-							{editable && (
 								<button
 									type="button"
-									class="btn small danger"
-									onClick={async () => {
-										if (confirm(`Delete layer "${l.name}" and its features?`))
-											await deleteLayer(l.id);
+									class="btn small primary"
+									onClick={() => {
+										editor.value = { mode: "create", layerId: l.id };
 									}}
 								>
-									Delete
+									Add feature
 								</button>
 							)}
+							{l.features.length > 0 && (
+								<button
+									type="button"
+									class="btn small"
+									title="Move the map to show everything in this layer"
+									onClick={() => zoomToLayer(l)}
+								>
+									Zoom to
+								</button>
+							)}
+							{layersData.value.length > 1 && (
+								<button
+									type="button"
+									class="btn small"
+									title="Hide all the other layers"
+									onClick={() => showOnlyLayer(l)}
+								>
+									Only this
+								</button>
+							)}
+							<button
+								type="button"
+								class="btn small"
+								title="Layer details, sharing, import and export"
+								onClick={() => setSettingsOpen(true)}
+							>
+								Settings
+							</button>
 						</div>
 					)}
 
-					<ul class="features">
-						{l.features.map((f) => (
-							<li key={f.id}>
-								<button
-									type="button"
-									class="plain feature-link"
-									onClick={() => goTo(f)}
+					{!settingsOpen && (
+						<ul class="features">
+							{features.map((f) => (
+								<li
+									key={f.id}
+									onMouseEnter={() => hoverFeature(f.id)}
+									onMouseLeave={() => hoverFeature(null)}
 								>
-									<span class="type">{TYPE_LABEL[f.type]}</span>{" "}
-									{f.name || <em>unnamed</em>}
-								</button>
-								{editable && (
-									<span class="feature-actions">
-										<button
-											type="button"
-											class="plain link"
-											onClick={() => {
-												editor.value = {
-													mode: "edit",
-													layerId: l.id,
-													featureId: f.id,
-												};
-											}}
-										>
-											edit
-										</button>
-										<button
-											type="button"
-											class="plain link"
-											onClick={async () => {
-												if (confirm(`Delete "${featureTitle(f)}"?`))
-													await deleteFeature(f.id);
-											}}
-										>
-											delete
-										</button>
-									</span>
-								)}
-							</li>
-						))}
-						{l.features.length === 0 && <li class="muted">No features yet.</li>}
-					</ul>
+									<button
+										type="button"
+										class="plain feature-link"
+										onClick={() => goTo(f)}
+									>
+										<Banner dye={f.color ?? l.color} />
+										<span class="type">{TYPE_LABEL[f.type]}</span>
+										<span class="feature-name">
+											{f.name || <em>unnamed</em>}
+										</span>
+									</button>
+									{editable && (
+										<span class="feature-actions">
+											<button
+												type="button"
+												class="plain link"
+												onClick={() => {
+													editor.value = {
+														mode: "edit",
+														layerId: l.id,
+														featureId: f.id,
+													};
+												}}
+											>
+												edit
+											</button>
+											<button
+												type="button"
+												class="plain link"
+												onClick={async () => {
+													if (confirm(`Delete "${featureTitle(f)}"?`))
+														await deleteFeature(f.id);
+												}}
+											>
+												delete
+											</button>
+										</span>
+									)}
+								</li>
+							))}
+							{features.length === 0 && <li class="muted">No features yet.</li>}
+						</ul>
+					)}
 				</div>
 			)}
 		</li>
@@ -312,7 +434,15 @@ function LayerRow(props: { layer: LayerData }) {
 
 export function LayerPanel() {
 	const [creating, setCreating] = useState(false);
+	const [query, setQuery] = useState("");
 	const layers = layersData.value;
+	const filtering = query.trim() !== "";
+	const matches = searchLayers(layers, query);
+	const featureCount = matches.reduce((sum, m) => sum + m.features.length, 0);
+
+	// The row's hover highlight must not outlive the list.
+	useEffect(() => () => hoverFeature(null), []);
+
 	return (
 		<Panel title="Layers" onClose={() => (sidePanel.value = null)}>
 			{canEditMap.value && (
@@ -331,13 +461,57 @@ export function LayerPanel() {
 				</div>
 			)}
 			{!user.value && <p class="muted">Log in to add or edit layers.</p>}
+			{layers.length > 0 && (
+				<div class="layer-tools">
+					<input
+						type="text"
+						value={query}
+						placeholder="Search layers and features"
+						aria-label="Search layers and features"
+						onInput={(e) => setQuery(e.currentTarget.value)}
+						onKeyDown={(e) => {
+							if (e.key === "Escape" && query) {
+								e.stopPropagation();
+								setQuery("");
+							}
+						}}
+					/>
+					{layers.length > 1 && !filtering && (
+						<div class="layer-bulk">
+							<button
+								type="button"
+								class="plain link"
+								onClick={() => setLayersHidden(layers, false)}
+							>
+								Show all
+							</button>
+							<button
+								type="button"
+								class="plain link"
+								onClick={() => setLayersHidden(layers, true)}
+							>
+								Hide all
+							</button>
+						</div>
+					)}
+					{filtering && (
+						<p class="hint">
+							{featureCount} feature{featureCount === 1 ? "" : "s"} in{" "}
+							{matches.length} layer{matches.length === 1 ? "" : "s"}
+						</p>
+					)}
+				</div>
+			)}
 			<ul class="layers">
-				{layers.map((l) => (
-					<LayerRow key={l.id} layer={l} />
+				{matches.map((m) => (
+					<LayerRow key={m.layer.id} match={m} filtering={filtering} />
 				))}
 			</ul>
 			{layers.length === 0 && (
 				<p class="muted">No layers in this dimension yet.</p>
+			)}
+			{layers.length > 0 && matches.length === 0 && (
+				<p class="muted">Nothing matches “{query.trim()}”.</p>
 			)}
 		</Panel>
 	);

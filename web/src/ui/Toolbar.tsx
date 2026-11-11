@@ -27,9 +27,9 @@ export function Toolbar() {
 
 	return (
 		<header class="topbar" ref={ref}>
-			<div class="topbar-left">
-				{detail && <h1 class="map-title sign">{detail.map.name}</h1>}
-				<div class="dimensions" role="tablist" aria-label="Dimension">
+			<div class="topbar-left dock">
+				{detail && <h1 class="map-title">{detail.map.name}</h1>}
+				<div class="dimensions tabbar" role="tablist" aria-label="Dimension">
 					{dims.map((d) => {
 						const active = d.slug === dimSlug.value;
 						return (

@@ -19,8 +19,7 @@ export function LayerSharing() {
 	if (!target) return null;
 	const scope = layerScope(target.layerId);
 	return (
-		<Modal label="Layer sharing" onClose={close}>
-			<h2>Sharing “{target.name}”</h2>
+		<Modal title={`Sharing “${target.name}”`} onClose={close}>
 			<p class="muted">
 				Map moderators always see private layers. Everyone else needs to be a
 				member here.

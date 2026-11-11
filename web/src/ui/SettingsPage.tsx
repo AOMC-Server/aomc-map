@@ -67,7 +67,7 @@ function Preferences() {
 			<Toggle
 				field="showCoordinates"
 				label="Show cursor coordinates"
-				hint="In the bottom left corner, like the F3 screen."
+				hint="In the bottom left corner of the map."
 			/>
 			<Toggle
 				field="showOverworldEquivalent"

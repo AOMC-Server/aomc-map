@@ -5,7 +5,7 @@ export function LoginButton() {
 	const u = user.value;
 	if (!u) {
 		return (
-			<div class="account">
+			<div class="account dock">
 				<a class="btn primary" href={loginUrl()}>
 					Log in with Discord
 				</a>
@@ -13,7 +13,7 @@ export function LoginButton() {
 		);
 	}
 	return (
-		<div class="account">
+		<div class="account dock">
 			<span class="player">
 				{u.avatarUrl ? (
 					<img class="avatar" src={u.avatarUrl} alt="" width={28} height={28} />

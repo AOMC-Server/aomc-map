@@ -1,6 +1,6 @@
 import type { ComponentChildren } from "preact";
 
-/** Side panel drawn as an inventory window, with a title and a close button; the editor adds a footer. */
+/** Side panel with a title bar and a close button; the editor adds a footer. */
 export function Panel(props: {
 	title: string;
 	onClose: () => void;
@@ -12,7 +12,7 @@ export function Panel(props: {
 	children: ComponentChildren;
 }) {
 	return (
-		<aside class={`panel gui ${props.class ?? ""}`} aria-label={props.title}>
+		<aside class={`panel ${props.class ?? ""}`} aria-label={props.title}>
 			<header class="panel-head">
 				<h2>{props.title}</h2>
 				<button

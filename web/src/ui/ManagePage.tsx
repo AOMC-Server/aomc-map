@@ -305,7 +305,7 @@ export function ManagePage() {
 	} else {
 		body = (
 			<>
-				<div class="tabs" role="tablist">
+				<div class="tabs tabbar" role="tablist">
 					{tabs.map((t) => (
 						<button
 							key={t}

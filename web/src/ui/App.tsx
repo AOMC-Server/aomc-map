@@ -1,6 +1,6 @@
 import { useEffect, useRef } from "preact/hooks";
 import { boot } from "../controller";
-import { editor, embed, loadError, sidePanel } from "../state";
+import { activeTool, editor, embed, loadError, sidePanel } from "../state";
 import { uploadOpen } from "../upload";
 import { FeatureEditor } from "./FeatureEditor";
 import { FeatureHistory, featureHistoryFor } from "./FeatureHistory";
@@ -9,6 +9,7 @@ import { HistoryPanel } from "./HistoryPanel";
 import { Hotbar } from "./Hotbar";
 import { LayerPanel } from "./LayerPanel";
 import { LayerSharing, layerSharingFor } from "./LayerSharing";
+import { MeasureCard } from "./MeasureCard";
 import { Popup } from "./Popup";
 import { StatusBar } from "./StatusBar";
 import { Toast } from "./Toast";
@@ -42,11 +43,11 @@ export function App() {
 	const panelOpen = editor.value !== null || sidePanel.value !== null;
 	return (
 		<div
-			class={`app ${embed.value ? "embed" : ""} ${panelOpen ? "panel-open" : ""}`}
+			class={`app ${embed.value ? "embed" : ""} ${panelOpen ? "panel-open" : ""} ${activeTool.value === "measure" ? "measuring" : ""}`}
 		>
 			<div class="map-host" ref={host} />
 			{loadError.value && (
-				<div class="load-error gui">
+				<div class="load-error">
 					<h2>Couldn't load the map</h2>
 					<p>{loadError.value}</p>
 				</div>
@@ -56,6 +57,7 @@ export function App() {
 				<>
 					<Toolbar />
 					<SidePanel />
+					<MeasureCard />
 					<HistoryBanner />
 					<StatusBar />
 					<Hotbar />

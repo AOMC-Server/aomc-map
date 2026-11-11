@@ -75,7 +75,7 @@ export function Hotbar() {
 			key: "3",
 			icon: "compass",
 			label: "Measure",
-			hint: "Click two points (Esc clears)",
+			hint: "Click points to measure a path (Esc clears)",
 			active: activeTool.value === "measure",
 			run: () => {
 				activeTool.value = activeTool.value === "measure" ? "none" : "measure";
@@ -118,7 +118,7 @@ export function Hotbar() {
 	});
 
 	return (
-		<nav class="hotbar" aria-label="Tools">
+		<nav class="hotbar dock" aria-label="Tools">
 			{slots.map((s) => {
 				const content = (
 					<>

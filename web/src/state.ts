@@ -78,6 +78,20 @@ export function toggleLayer(l: LayerData) {
 	layerOverrides.value = next;
 }
 
+/** Shows or hides the given layers, overriding their defaults. */
+export function setLayersHidden(layers: LayerData[], hidden: boolean) {
+	const next = new Map(layerOverrides.value);
+	for (const l of layers) next.set(l.id, hidden);
+	layerOverrides.value = next;
+}
+
+/** Shows `only` and hides every other layer of the dimension. */
+export function showOnlyLayer(only: LayerData) {
+	const next = new Map(layerOverrides.value);
+	for (const l of layersData.value) next.set(l.id, l.id !== only.id);
+	layerOverrides.value = next;
+}
+
 /** The clicked feature whose popup is open, with the block position the popup is anchored to. */
 export const popup = signal<{
 	featureId: number;

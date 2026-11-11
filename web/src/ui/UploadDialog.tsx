@@ -74,9 +74,7 @@ export function UploadDialog() {
 	};
 
 	return (
-		<Modal label="Upload map data" onClose={close}>
-			<h2>Upload map data</h2>
-
+		<Modal title="Upload map data" onClose={close}>
 			{state.phase === "idle" && (
 				<>
 					<ol class="steps">

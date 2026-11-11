@@ -1,5 +1,6 @@
 import { effect } from "@preact/signals";
-import { featureTitle, pointsOf } from "../featureInfo";
+import { pointsOf } from "../featureInfo";
+import { MIN_CLUSTER_LEVEL } from "../map/featureLayer";
 import type { MapView } from "../map/MapView";
 import { activeTool, editor, hoverInfo, popup } from "../state";
 import { drawing } from "./draw";
@@ -13,9 +14,10 @@ export function initFeatureInteraction(map: MapView) {
 			hoverInfo.value = null;
 			return;
 		}
+		// A feature without a name has nothing to show on hover.
 		const text =
-			hit.kind === "cluster" ? `${hit.count} pins` : featureTitle(hit.feature);
-		hoverInfo.value = { text, sx, sy };
+			hit.kind === "cluster" ? `${hit.count} pins` : hit.feature.name.trim();
+		hoverInfo.value = text ? { text, sx, sy } : null;
 	});
 	map.on("move", (e) => {
 		const current = hoverInfo.value;
@@ -30,7 +32,11 @@ export function initFeatureInteraction(map: MapView) {
 			return;
 		}
 		if (hit.kind === "cluster") {
-			map.fitBounds(hit.bounds, { padding: 120 });
+			// Stop short of the zoom where pins are clustered, so the cluster always opens up.
+			map.fitBounds(hit.bounds, {
+				padding: 120,
+				closestZoom: MIN_CLUSTER_LEVEL - 0.5,
+			});
 			return;
 		}
 		const f = hit.feature;

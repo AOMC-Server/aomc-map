@@ -36,7 +36,7 @@ export function Popup() {
 		>
 			<button
 				type="button"
-				class="plain popup-close"
+				class="btn small close popup-close"
 				aria-label="Close"
 				onClick={() => (popup.value = null)}
 			>
