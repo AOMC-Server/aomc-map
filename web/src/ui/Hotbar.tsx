@@ -1,5 +1,5 @@
 import type { ComponentChildren } from "preact";
-import { useEffect } from "preact/hooks";
+import { useEffect, useRef } from "preact/hooks";
 import { isTyping } from "../map/input";
 import {
 	activeTool,
@@ -107,6 +107,22 @@ export function Hotbar() {
 			href: "/manage",
 		});
 
+	// On small screens the position readout sits beside the hotbar and needs to know its width.
+	const ref = useRef<HTMLElement>(null);
+	useEffect(() => {
+		const el = ref.current;
+		if (!el) return;
+		const publish = () =>
+			document.documentElement.style.setProperty(
+				"--hotbar-w",
+				`${el.offsetWidth}px`,
+			);
+		publish();
+		const observer = new ResizeObserver(publish);
+		observer.observe(el);
+		return () => observer.disconnect();
+	}, []);
+
 	useEffect(() => {
 		const onKey = (e: KeyboardEvent) => {
 			if (e.ctrlKey || e.metaKey || e.altKey || isTyping(e.target)) return;
@@ -122,7 +138,7 @@ export function Hotbar() {
 	});
 
 	return (
-		<nav class="hotbar dock" aria-label="Tools">
+		<nav class="hotbar dock" aria-label="Tools" ref={ref}>
 			{slots.map((s) => {
 				const content = (
 					<>

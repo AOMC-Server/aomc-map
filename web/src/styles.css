@@ -1015,7 +1015,17 @@ input[type="range"]:disabled {
 	align-items: center;
 	gap: 8px;
 	padding: 0 10px 0 2px;
+	font: inherit;
 	font-weight: 600;
+	color: inherit;
+	background: none;
+	border: 0;
+	cursor: default;
+}
+
+.player:focus-visible {
+	outline: 2px solid var(--focus);
+	outline-offset: 2px;
 }
 
 .avatar {
@@ -2731,6 +2741,44 @@ body.resizing {
 
 	.player {
 		padding: 0;
+		cursor: pointer;
+	}
+
+	/* The account buttons fold away behind the avatar until it is tapped. */
+	.account:not(.open) .account-action {
+		display: none;
+	}
+
+	/* The hotbar moves to the right so the position readout fits in the bottom left corner. */
+	.hotbar {
+		left: auto;
+		right: 8px;
+		transform: none;
+	}
+
+	.hotbar-slot {
+		width: 44px;
+		height: 44px;
+	}
+
+	.slot-tip {
+		left: auto;
+		right: -4px;
+		transform: none;
+	}
+
+	.debug {
+		bottom: calc(var(--safe-bottom) + 8px);
+		max-width: calc(100% - var(--hotbar-w, 240px) - 24px);
+	}
+
+	.debug .line {
+		white-space: normal;
+	}
+
+	.debug .readout,
+	.debug .preload {
+		min-width: 0;
 	}
 
 	/* Only the selected dimension keeps its name; the others are recognised by their block. */
