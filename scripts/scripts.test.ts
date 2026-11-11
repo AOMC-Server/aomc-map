@@ -93,6 +93,20 @@ describe("backup", () => {
 		);
 	});
 
+	test("two runs in the same second do not collide", async () => {
+		const t = await withData();
+		const dest = tmp("backup");
+		const now = new Date(2026, 5, 1, 9, 0, 0);
+		const a = await backup({ dataDir: t.env.DATA_DIR, dest, now });
+		const b = await backup({ dataDir: t.env.DATA_DIR, dest, now });
+		const c = await backup({ dataDir: t.env.DATA_DIR, dest, now, keep: 2 });
+		expect(a.snapshot).toEndWith("db-20260601-090000.sqlite");
+		expect(b.snapshot).toEndWith("db-20260601-090000-1.sqlite");
+		expect(c.snapshot).toEndWith("db-20260601-090000-2.sqlite");
+		// Pruning understands the suffixes and removes the oldest.
+		expect(c.pruned).toEqual(["db-20260601-090000.sqlite"]);
+	});
+
 	test("keeps only the newest N snapshots", async () => {
 		const t = await withData();
 		const dest = tmp("backup");

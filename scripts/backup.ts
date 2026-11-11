@@ -41,11 +41,12 @@ export async function backup(opts: {
 	if (!existsSync(dbFile)) throw new Error(`no database at ${dbFile}`);
 	await mkdir(opts.dest, { recursive: true });
 
-	const snapshot = join(
-		opts.dest,
-		`db-${stamp(opts.now ?? new Date())}.sqlite`,
-	);
-	if (existsSync(snapshot)) throw new Error(`${snapshot} already exists`);
+	// Two runs in the same second get -1, -2, ... instead of overwriting or failing.
+	const base = `db-${stamp(opts.now ?? new Date())}`;
+	let snapshot = join(opts.dest, `${base}.sqlite`);
+	for (let n = 1; existsSync(snapshot); n++) {
+		snapshot = join(opts.dest, `${base}-${n}.sqlite`);
+	}
 	const db = new Database(dbFile, { readonly: true });
 	try {
 		db.query("VACUUM INTO ?").run(snapshot);
@@ -72,9 +73,14 @@ export async function backup(opts: {
 
 	const pruned: string[] = [];
 	if (opts.keep !== undefined) {
+		// Oldest first: by timestamp, then by the -N suffix (a plain "." would sort after "-").
+		const order = (name: string) => {
+			const m = /^db-(\d{8}-\d{6})(?:-(\d+))?\.sqlite$/.exec(name);
+			return m ? `${m[1]}-${String(m[2] ?? 0).padStart(6, "0")}` : null;
+		};
 		const snapshots = (await readdir(opts.dest))
-			.filter((n) => /^db-\d{8}-\d{6}\.sqlite$/.test(n))
-			.sort();
+			.filter((n) => order(n) !== null)
+			.sort((a, b) => (order(a) as string).localeCompare(order(b) as string));
 		for (const old of snapshots.slice(
 			0,
 			Math.max(0, snapshots.length - opts.keep),
