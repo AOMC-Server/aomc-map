@@ -37,19 +37,36 @@ export function FeatureHistory() {
 	const [entries, setEntries] = useState<FeatureHistoryEntry[] | null>(null);
 	const [failed, setFailed] = useState(false);
 	const [busy, setBusy] = useState(false);
+	const [nextBefore, setNextBefore] = useState<number | null>(null);
+	const [loadingMore, setLoadingMore] = useState(false);
 	const featureId = target?.featureId;
 
 	useEffect(() => {
 		if (featureId === undefined) return;
 		setEntries(null);
 		setFailed(false);
-		void loadFeatureHistory(featureId).then((list) => {
-			setEntries(list);
-			setFailed(list === null);
+		setNextBefore(null);
+		void loadFeatureHistory(featureId).then((page) => {
+			setEntries(page?.history ?? null);
+			setNextBefore(page?.nextBefore ?? null);
+			setFailed(page === null);
 		});
 	}, [featureId]);
 
 	if (!target) return null;
+
+	const loadOlder = async () => {
+		if (nextBefore === null || loadingMore) return;
+		setLoadingMore(true);
+		try {
+			const page = await loadFeatureHistory(target.featureId, nextBefore);
+			if (!page) return;
+			setEntries((prev) => [...(prev ?? []), ...page.history]);
+			setNextBefore(page.nextBefore);
+		} finally {
+			setLoadingMore(false);
+		}
+	};
 
 	const restore = async (e: FeatureHistoryEntry) => {
 		const what = e.deleted ? "deleted state" : "this version";
@@ -78,7 +95,7 @@ export function FeatureHistory() {
 							<div>
 								{e.deleted ? (
 									<b>Deleted</b>
-								) : i === entries.length - 1 ? (
+								) : i === entries.length - 1 && nextBefore === null ? (
 									<b>Created</b>
 								) : (
 									<b>Edited</b>
@@ -103,6 +120,16 @@ export function FeatureHistory() {
 					</li>
 				))}
 			</ul>
+			{nextBefore !== null && (
+				<button
+					type="button"
+					class="btn small"
+					disabled={loadingMore}
+					onClick={loadOlder}
+				>
+					{loadingMore ? "Loading…" : "Load older"}
+				</button>
+			)}
 			{!isModerator.value && entries && (
 				<p class="muted">Only moderators can restore earlier versions.</p>
 			)}

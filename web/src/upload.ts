@@ -97,9 +97,11 @@ export function startUpload(dimSlug: string, items: UploadItem[]) {
 		const reason =
 			xhr.status === 401
 				? "You need to log in to upload."
-				: xhr.status === 413
-					? "The upload is too large for the server. Send fewer or smaller files."
-					: (body?.error ?? `Upload failed (${xhr.status}).`);
+				: xhr.status === 429
+					? "Too many uploads. Wait a moment and try again."
+					: xhr.status === 413
+						? "The upload is too large for the server. Send fewer or smaller files."
+						: (body?.error ?? `Upload failed (${xhr.status}).`);
 		uploadState.value = {
 			phase: "failed",
 			error: reason,

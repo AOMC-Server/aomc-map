@@ -1,4 +1,4 @@
-import { MINUTE } from "../time";
+import { MINUTE } from "@aomc/shared/time";
 
 export function formatTime(ms: number): string {
 	return new Date(ms).toLocaleString(undefined, {

@@ -2,6 +2,7 @@ import type { InferResponseType } from "hono/client";
 import { useEffect, useState } from "preact/hooks";
 import { api, attempt, loginUrl } from "../api";
 import { loadUser } from "../controller";
+import { inviteProblem } from "../errors";
 import { user } from "../state";
 
 type Preview = InferResponseType<
@@ -42,7 +43,7 @@ export function InvitePage(props: { token: string }) {
 			location.replace("/");
 			return;
 		}
-		setState({ phase: "failed", invite, message: result.error });
+		setState({ phase: "failed", invite, message: inviteProblem(result) });
 	};
 
 	useEffect(() => {
@@ -52,7 +53,7 @@ export function InvitePage(props: { token: string }) {
 				api.api.invites[":token"].$get({ param: { token } }),
 			);
 			if (!result.ok) {
-				setState({ phase: "invalid", message: result.error });
+				setState({ phase: "invalid", message: inviteProblem(result) });
 				return;
 			}
 			const { invite } = result.body;

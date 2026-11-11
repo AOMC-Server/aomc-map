@@ -64,6 +64,10 @@ export function FeatureEditor() {
 	const [text, setText] = useState(existing?.popup ?? "");
 	const [color, setColor] = useState<Dye | null>(existing?.color ?? null);
 	const [saving, setSaving] = useState(false);
+	// The revision the edit is based on; moves forward only when a conflict is reported.
+	const [baseRevision, setBaseRevision] = useState<number | undefined>(
+		existing?.revisionId,
+	);
 	const popupField = useRef<HTMLTextAreaElement>(null);
 
 	const cancelEditing = () => {
@@ -102,12 +106,16 @@ export function FeatureEditor() {
 					: null;
 		if (!input) return;
 		setSaving(true);
-		let saved: Awaited<ReturnType<typeof createFeature>> = null;
+		let saved = false;
 		try {
-			saved =
-				target.mode === "create"
-					? await createFeature(layer.id, input)
-					: await updateFeature(target.featureId, input);
+			if (target.mode === "create") {
+				saved = (await createFeature(layer.id, input)) !== null;
+			} else {
+				const out = await updateFeature(target.featureId, input, baseRevision);
+				saved = out.saved;
+				if (!out.saved && out.conflict)
+					setBaseRevision(out.conflict.revisionId);
+			}
 		} finally {
 			setSaving(false);
 		}

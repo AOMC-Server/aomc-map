@@ -1,6 +1,6 @@
+import { DAY, HOUR } from "@aomc/shared/time";
 import { type Size, screenToBlock, type View } from "@aomc/shared/view";
 import { type Bounds, intersects } from "./map/geometry";
-import { DAY, HOUR } from "./time";
 
 /** The parts of a revision the timeline and the upload log work with. */
 export type TimelineRevision = {

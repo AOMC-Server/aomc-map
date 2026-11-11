@@ -65,17 +65,59 @@ export async function createFeature(layerId: number, input: FeatureInput) {
 	return out?.feature ?? null;
 }
 
-export async function updateFeature(id: number, patch: Partial<FeatureInput>) {
-	const out = await mutate(() =>
-		api.api.features[":id"].$patch({ param: { id: String(id) }, json: patch }),
+export type FeatureUpdate =
+	| { saved: true }
+	| { saved: false; conflict: { revisionId: number } | null };
+
+/**
+ * Saves changes to a feature made on top of `baseRevisionId`. If someone changed it meanwhile
+ * the layers are reloaded and the revision that is current now is returned, so the caller can
+ * keep what the user typed and let them save again on top of it.
+ */
+export async function updateFeature(
+	id: number,
+	patch: Partial<FeatureInput>,
+	baseRevisionId: number | undefined,
+): Promise<FeatureUpdate> {
+	const res = await attempt(() =>
+		api.api.features[":id"].$patch({
+			param: { id: String(id) },
+			json: { ...patch, baseRevisionId },
+		}),
 	);
-	return out?.feature ?? null;
+	if (res.ok) {
+		await loadLayers();
+		return { saved: true };
+	}
+	if (res.status === 409) {
+		await loadLayers();
+		const current = (res.detail as { feature?: { revisionId?: number } } | null)
+			?.feature?.revisionId;
+		showNotice(
+			"Someone else changed this feature while you were editing. Their version is on the map now; save again to replace it with yours.",
+			"error",
+		);
+		return {
+			saved: false,
+			conflict: current === undefined ? null : { revisionId: current },
+		};
+	}
+	showNotice(res.error, "error");
+	return { saved: false, conflict: null };
 }
 
-export function deleteFeature(id: number) {
-	return mutateOk(() =>
+/** Deletes a feature; if the server refuses because it changed, the layers are reloaded to show the current state. */
+export async function deleteFeature(id: number) {
+	const res = await attempt(() =>
 		api.api.features[":id"].$delete({ param: { id: String(id) } }),
 	);
+	if (res.ok) {
+		await loadLayers();
+		return true;
+	}
+	showNotice(res.error, "error");
+	if (res.status === 409 || res.status === 404) await loadLayers();
+	return false;
 }
 
 export function importFeatures(

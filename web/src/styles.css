@@ -2115,6 +2115,10 @@ body.resizing {
 	box-shadow: var(--surface-shadow);
 }
 
+.modal:focus {
+	outline: none;
+}
+
 .modal-body {
 	overflow-y: auto;
 	padding: 14px 18px 18px;

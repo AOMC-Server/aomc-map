@@ -65,6 +65,7 @@ function deletable(r: RevisionInfo, now: number) {
 		r.kind === "upload" &&
 		(r.status === "done" || r.status === "failed") &&
 		r.canDelete &&
+		!r.deleting &&
 		(r.deletableUntil === null || now < r.deletableUntil)
 	);
 }
@@ -74,7 +75,9 @@ function RevisionRow(props: { r: RevisionInfo; odd: boolean; now: number }) {
 	const row = useRef<HTMLLIElement>(null);
 	const active =
 		r.rev !== null && rev.value !== null && effectiveRev.value === r.rev;
-	const removing = deleting.value.get(r.id);
+	// Started in this browser (with progress), or queued by someone else.
+	const removing =
+		deleting.value.get(r.id) ?? (r.deleting ? "deleting…" : undefined);
 	const busy = inFlight(r) || removing !== undefined;
 	const canView = r.rev !== null && r.status === "done" && !removing;
 	const canDelete = deletable(r, props.now) && !busy;

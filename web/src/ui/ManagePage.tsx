@@ -102,7 +102,7 @@ function ThemeSelect(props: {
 	);
 }
 
-const formatBlocks = (n: number) =>
+const formatBlocksShort = (n: number) =>
 	n >= 1000 && n % 1024 === 0 ? `${n / 1024}k` : String(n);
 
 /** Accepts "2048", "2k" (2048) or "1.5k"; undefined if invalid. */
@@ -122,7 +122,7 @@ function PreloadRingRow(props: {
 	onRemove: () => void;
 }) {
 	const { ring } = props;
-	const [radius, setRadius] = useState(formatBlocks(ring.radius));
+	const [radius, setRadius] = useState(formatBlocksShort(ring.radius));
 	const levels = Array.from({ length: props.maxZoom + 1 }, (_, i) => i);
 	return (
 		<div class="preload-ring">
@@ -152,7 +152,7 @@ function PreloadRingRow(props: {
 				onBlur={() => {
 					const parsed = parseBlocks(radius);
 					if (parsed === undefined || parsed === ring.radius) {
-						setRadius(formatBlocks(ring.radius));
+						setRadius(formatBlocksShort(ring.radius));
 						return;
 					}
 					props.onChange({ ...ring, radius: parsed });

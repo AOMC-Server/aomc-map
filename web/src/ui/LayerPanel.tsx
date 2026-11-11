@@ -15,13 +15,16 @@ import {
 	reorderLayers,
 	updateLayer,
 } from "../layers";
+import { BLOCK_CENTER } from "../map/featureLayer";
 import { boundsOf } from "../map/geometry";
 import { moveItem } from "../reorder";
 import {
 	canEditMap,
+	currentMap,
 	editor,
 	type FeatureData,
 	isLayerHidden,
+	isModerator,
 	type LayerData,
 	layersData,
 	popup,
@@ -71,8 +74,8 @@ function goTo(f: FeatureData) {
 	popup.value = {
 		featureId: f.id,
 		layerId: f.layerId,
-		x: (b.minX + b.maxX) / 2 + 0.5,
-		z: (b.minZ + b.maxZ) / 2 + 0.5,
+		x: (b.minX + b.maxX) / 2 + BLOCK_CENTER,
+		z: (b.minZ + b.maxZ) / 2 + BLOCK_CENTER,
 	};
 }
 
@@ -312,6 +315,8 @@ function LayerRow(props: {
 	const open = props.filtering || openLayers.value.has(l.id);
 	const [settingsOpen, setSettingsOpen] = useState(false);
 	const editable = l.canEdit && canEditMap.value;
+	const maxFeatures = currentMap.value?.limits.maxFeaturesPerLayer;
+	const full = maxFeatures !== undefined && l.features.length >= maxFeatures;
 	const hidden = isLayerHidden(l);
 	// A search shows only some of the features, so their order cannot be changed meanwhile.
 	const featureOrder =
@@ -375,6 +380,12 @@ function LayerRow(props: {
 								<button
 									type="button"
 									class="btn small primary"
+									disabled={full}
+									title={
+										full
+											? `This layer is full (${maxFeatures} features)`
+											: undefined
+									}
 									onClick={() => {
 										editor.value = { mode: "create", layerId: l.id };
 									}}
@@ -491,6 +502,12 @@ export function LayerPanel() {
 	const filtering = query.trim() !== "";
 	const matches = searchLayers(layers, query);
 	const canReorder = canEditMap.value && !filtering && layers.length > 1;
+	// Counts this dimension only; the server enforces the limit over all of them.
+	const maxLayers = currentMap.value?.limits.maxLayersPerUser;
+	const layersFull =
+		maxLayers !== undefined &&
+		!isModerator.value &&
+		layers.filter((l) => l.createdBy === user.value?.id).length >= maxLayers;
 	const featureCount = matches.reduce((sum, m) => sum + m.features.length, 0);
 
 	// The row's hover highlight must not outlive the list.
@@ -506,6 +523,12 @@ export function LayerPanel() {
 						<button
 							type="button"
 							class="btn wide"
+							disabled={layersFull}
+							title={
+								layersFull
+									? `You already have ${maxLayers} layers, the most one person may create`
+									: undefined
+							}
 							onClick={() => setCreating(true)}
 						>
 							+ New layer

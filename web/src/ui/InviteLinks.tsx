@@ -1,4 +1,4 @@
-import { DEFAULT_INVITE_HOURS } from "@aomc/shared";
+import { DEFAULT_INVITE_HOURS, MAX_INVITE_USES } from "@aomc/shared";
 import { useEffect, useState } from "preact/hooks";
 import {
 	type CreatedInvite,
@@ -15,9 +15,6 @@ const EXPIRIES: ExpiryOption[] = [
 	{ label: "30 days", value: 24 * 30 },
 	{ label: "Never", value: null },
 ];
-
-/** The most uses the server accepts for one link. */
-const MAX_USES = 1000;
 
 function describeStatus(i: InviteInfo): string {
 	if (i.status !== "active") return i.status;
@@ -62,7 +59,7 @@ export function InviteLinks<R extends string>(props: { scope: Scope<R> }) {
 						maxUses.trim() === ""
 							? null
 							: Math.min(
-									MAX_USES,
+									MAX_INVITE_USES,
 									Math.max(1, Number.parseInt(maxUses, 10) || 1),
 								),
 				},
@@ -109,7 +106,7 @@ export function InviteLinks<R extends string>(props: { scope: Scope<R> }) {
 						type="text"
 						inputMode="numeric"
 						placeholder="unlimited"
-						maxLength={String(MAX_USES).length}
+						maxLength={String(MAX_INVITE_USES).length}
 						value={maxUses}
 						onInput={(e) =>
 							setMaxUses(e.currentTarget.value.replace(/\D/g, ""))

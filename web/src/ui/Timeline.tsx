@@ -1,3 +1,4 @@
+import { HOUR } from "@aomc/shared/time";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { setRev } from "../controller";
 import {
@@ -7,7 +8,6 @@ import {
 	type RevisionInfo,
 	rev,
 } from "../state";
-import { HOUR } from "../time";
 import {
 	axisTicks,
 	buildAxis,

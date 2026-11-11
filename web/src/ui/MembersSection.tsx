@@ -14,8 +14,12 @@ const sortMembers = <R extends string>(list: Member<R>[]) =>
 	);
 
 /** Members of the map or of one private layer: change roles, remove people, add by Discord id. */
-export function MembersSection<R extends string>(props: { scope: Scope<R> }) {
-	const { scope } = props;
+export function MembersSection<R extends string>(props: {
+	scope: Scope<R>;
+	/** Whose access is fixed (a layer's creator): shown as "creator", without controls. */
+	creatorId?: string;
+}) {
+	const { scope, creatorId } = props;
 	const [members, setMembers] = useState<Member<R>[] | null>(null);
 	const [newId, setNewId] = useState("");
 	const [newRole, setNewRole] = useState<R>(scope.defaultRole);
@@ -53,6 +57,10 @@ export function MembersSection<R extends string>(props: { scope: Scope<R> }) {
 		e.preventDefault();
 		const id = newId.trim();
 		if (!id) return;
+		if (id === creatorId) {
+			showNotice("The creator always has editor access.", "error");
+			return;
+		}
 		if (await act(() => scope.add(id, newRole))) {
 			setNewId("");
 			showNotice("Member added.");
@@ -89,30 +97,38 @@ export function MembersSection<R extends string>(props: { scope: Scope<R> }) {
 							{m.username}
 							{m.userId === user.value?.id && <span class="muted"> (you)</span>}
 						</span>
-						<select
-							value={m.role}
-							disabled={busy}
-							aria-label={`Role of ${m.username}`}
-							title={scope.roleHelp[m.role]}
-							onChange={async (e) => {
-								const select = e.currentTarget;
-								const role = roleOf(select.value);
-								if (!role) return;
-								// A rejected change leaves the control showing what is really set.
-								if (!(await act(() => scope.setRole(m.userId, role))))
-									select.value = m.role;
-							}}
-						>
-							{roleOptions}
-						</select>
-						<button
-							type="button"
-							class="btn small danger"
-							disabled={busy}
-							onClick={() => remove(m)}
-						>
-							Remove
-						</button>
+						{m.userId === creatorId ? (
+							<span class="muted" title="The creator always has editor access">
+								creator
+							</span>
+						) : (
+							<>
+								<select
+									value={m.role}
+									disabled={busy}
+									aria-label={`Role of ${m.username}`}
+									title={scope.roleHelp[m.role]}
+									onChange={async (e) => {
+										const select = e.currentTarget;
+										const role = roleOf(select.value);
+										if (!role) return;
+										// A rejected change leaves the control showing what is really set.
+										if (!(await act(() => scope.setRole(m.userId, role))))
+											select.value = m.role;
+									}}
+								>
+									{roleOptions}
+								</select>
+								<button
+									type="button"
+									class="btn small danger"
+									disabled={busy}
+									onClick={() => remove(m)}
+								>
+									Remove
+								</button>
+							</>
+						)}
 					</li>
 				))}
 			</ul>

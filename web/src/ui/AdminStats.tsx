@@ -1,8 +1,8 @@
 import { ADMIN_STATS_RANGES, type AdminStatsRange } from "@aomc/shared";
+import { DAY, HOUR } from "@aomc/shared/time";
 import type { InferResponseType } from "hono/client";
 import { useState } from "preact/hooks";
 import { api } from "../api";
-import { DAY, HOUR } from "../time";
 import { Chart, type ChartSeries } from "./Chart";
 import { formatBytes, formatDay, formatDuration, formatTime } from "./format";
 import { RangePicker } from "./RangePicker";
@@ -144,7 +144,7 @@ function Traffic(props: { data: Body }) {
 	})).filter((s) => s.values.some((v) => v > 0));
 
 	const range = traffic.range;
-	const errors = range.total.s4xx;
+	const errors = range.total.s4xx + range.total.s5xx;
 	return (
 		<>
 			<div class="admin-toolbar">
@@ -232,7 +232,7 @@ function Traffic(props: { data: Body }) {
 									<td class="stats-num">{number(r.requests)}</td>
 									<td class="stats-num">{formatBytes(r.bytes)}</td>
 									<td class="stats-num">{number(r.s3xx)}</td>
-									<td class="stats-num">{number(r.s4xx)}</td>
+									<td class="stats-num">{number(r.s4xx + r.s5xx)}</td>
 									<td class="stats-num">
 										{formatBytes(traffic.allTime.byCategory[c.key].bytes)}
 									</td>

@@ -88,7 +88,9 @@ function setRevisions(list: RevisionInfo[]) {
 }
 
 async function refresh(dim: string) {
-	const active = revisionsData.value.filter(inFlight).map((r) => r.id);
+	const active = revisionsData.value
+		.filter((r) => inFlight(r) || r.deleting)
+		.map((r) => r.id);
 	const query: Record<string, string> = { dimension: dim, limit: "100" };
 	if (active.length) query.active = active.join(",");
 	const res = await attempt(() => api.api.revisions.$get({ query }));
@@ -260,16 +262,20 @@ export async function deleteUpload(id: number): Promise<boolean> {
 	return error === null;
 }
 
-export async function loadFeatureHistory(featureId: number) {
+/** One page of a feature's history, newest first; `before` continues after a page's `nextBefore`. */
+export async function loadFeatureHistory(featureId: number, before?: number) {
 	const out = await run(() =>
-		api.api.features[":id"].history.$get({ param: { id: String(featureId) } }),
+		api.api.features[":id"].history.$get({
+			param: { id: String(featureId) },
+			query: before === undefined ? {} : { before: String(before) },
+		}),
 	);
-	return out?.history ?? null;
+	return out ?? null;
 }
 
 export type FeatureHistoryEntry = NonNullable<
 	Awaited<ReturnType<typeof loadFeatureHistory>>
->[number];
+>["history"][number];
 
 /** Makes an old version of a feature current again (moderators), then shows the present. */
 export async function restoreFeatureRevision(

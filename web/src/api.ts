@@ -1,5 +1,6 @@
 import { hc } from "hono/client";
 import type { AppType } from "../../server/src/app";
+import { type ErrorBody, failureMessage } from "./errors";
 import { notice } from "./state";
 
 /** Typed client; request and response types come from the server's route definitions. */
@@ -33,7 +34,9 @@ export type Success<R extends Res> = Exclude<
 	{ error: string }
 >;
 
-type Result<T> = { ok: true; body: T } | { ok: false; error: string };
+type Result<T> =
+	| { ok: true; body: T }
+	| { ok: false; error: string; status: number; detail: ErrorBody | null };
 
 /** Runs an API call and turns every kind of failure into an error message. */
 export async function attempt<R extends Res>(
@@ -42,17 +45,19 @@ export async function attempt<R extends Res>(
 	try {
 		const res = await call();
 		if (res.ok) return { ok: true, body: (await res.json()) as Success<R> };
-		const body = (await res.json().catch(() => null)) as {
-			error?: string;
-		} | null;
+		const detail = (await res.json().catch(() => null)) as ErrorBody | null;
 		return {
 			ok: false,
-			error: body?.error ?? `Request failed (${res.status})`,
+			error: failureMessage(res.status, detail),
+			status: res.status,
+			detail,
 		};
 	} catch (err) {
 		return {
 			ok: false,
 			error: err instanceof Error ? err.message : "Network error",
+			status: 0,
+			detail: null,
 		};
 	}
 }

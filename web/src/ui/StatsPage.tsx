@@ -1,10 +1,10 @@
 import { STATS_RANGES, type StatsRange } from "@aomc/shared";
+import { DAY } from "@aomc/shared/time";
 import type { InferResponseType } from "hono/client";
 import { useEffect, useState } from "preact/hooks";
 import { api, loginUrl } from "../api";
 import { loadUser } from "../controller";
 import { user } from "../state";
-import { DAY } from "../time";
 import { Chart } from "./Chart";
 import { Page } from "./Page";
 import { RangePicker } from "./RangePicker";
