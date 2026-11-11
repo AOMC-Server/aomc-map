@@ -19,6 +19,13 @@ describe("slugify", () => {
 		expect(slugify("Lost City #2")).toBe("lost_city_2");
 	});
 
+	test("keeps hyphens and underscores, but not at the ends", () => {
+		expect(slugify("deep-dark")).toBe("deep-dark");
+		expect(slugify("The End - Outer Islands")).toBe("the_end_-_outer_islands");
+		expect(slugify("--_x_--")).toBe("x");
+		expect(slugify(`${"a".repeat(39)}-b`)).toBe("a".repeat(39));
+	});
+
 	test("nothing usable gives an empty slug", () => {
 		expect(slugify("!!!")).toBe("");
 		expect(slugify("")).toBe("");

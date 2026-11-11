@@ -14,14 +14,28 @@
 				root.palette = "overworld";
 				root.style = "bedrock";
 				try {
-					const s = JSON.parse(localStorage.getItem("aomc.settings") || "{}");
+					const STYLES = ["bedrock", "win98", "xp", "modern"];
+					const PALETTES = ["overworld", "nether", "end"];
+					const s = JSON.parse(localStorage.getItem("aomc.settings") || "{}") || {};
 					const light = matchMedia("(prefers-color-scheme: light)").matches;
 					if (s.mode === "light" || (s.mode === "system" && light)) root.mode = "light";
-					if (typeof s.style === "string") root.style = s.style;
+					if (STYLES.includes(s.style)) root.style = s.style;
 					const p = JSON.parse(localStorage.getItem("aomc.palette") || "null");
 					const dim = new URLSearchParams(location.search).get("dim");
-					const onMap = location.pathname.replace(/\/+$/, "") === "";
-					if (p && onMap && s.dimensionColours !== false && (!dim || dim === p.dim)) {
+					// Same pages as main.tsx; everything else is the map.
+					const path = location.pathname.replace(/\/+$/, "");
+					const onMap =
+						!/^\/invite\/[^/?#]+\/?$/.test(location.pathname) &&
+						path !== "/settings" &&
+						path !== "/manage" &&
+						path !== "/stats";
+					if (
+						p &&
+						PALETTES.includes(p.palette) &&
+						onMap &&
+						s.dimensionColours !== false &&
+						(!dim || dim === p.dim)
+					) {
 						root.palette = p.palette;
 					}
 				} catch {}

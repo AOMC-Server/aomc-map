@@ -3,7 +3,8 @@ export type Inline =
 	| { kind: "bold"; text: string }
 	| { kind: "link"; text: string; href: string };
 
-const TOKEN = /\*\*(.+?)\*\*|\[([^\]\n]+)\]\(([^\s)]+)\)/g;
+/** A link URL may hold balanced parentheses, as Wikipedia addresses do: [x](https://en.wikipedia.org/wiki/A_(b)). */
+const TOKEN = /\*\*(.+?)\*\*|\[([^\]\n]+)\]\(((?:[^\s()]|\([^\s()]*\))+)\)/g;
 
 /** Only http(s) links are allowed; anything else (javascript:, data:, ...) is shown as plain text. */
 export function safeHref(url: string): string | null {

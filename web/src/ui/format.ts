@@ -1,3 +1,5 @@
+import { MINUTE } from "../time";
+
 export function formatTime(ms: number): string {
 	return new Date(ms).toLocaleString(undefined, {
 		dateStyle: "medium",
@@ -49,7 +51,7 @@ export function formatEventDay(r: {
 
 /** "3h", "25m": how long until `ms` from now, roughly. */
 export function formatRemaining(ms: number): string {
-	const minutes = Math.max(Math.ceil(ms / 60_000), 1);
+	const minutes = Math.max(Math.ceil(ms / MINUTE), 1);
 	if (minutes < 60) return `${minutes}m`;
 	const hours = Math.floor(minutes / 60);
 	if (hours < 48) return `${hours}h`;

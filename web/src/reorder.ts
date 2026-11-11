@@ -12,6 +12,20 @@ export function moveItem<T>(
 }
 
 /**
+ * The sort orders that put `items` in the order they have after moving one: every item gets its
+ * new position (0..n-1), and only the ones whose order changes are returned.
+ */
+export function renumber<T extends { sortOrder: number }>(
+	items: readonly T[],
+	from: number,
+	to: number,
+): { item: T; sortOrder: number }[] {
+	return moveItem(items, from, to).flatMap((item, i) =>
+		item.sortOrder === i ? [] : [{ item, sortOrder: i }],
+	);
+}
+
+/**
  * Where the dragged item ends up: the number of other items whose middle is above `y`, the middle
  * of the dragged item. `mids` are the middles of all items before the drag started.
  */

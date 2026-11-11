@@ -1,5 +1,6 @@
 import { convertView, type View } from "@aomc/shared/view";
 import { effect, signal } from "@preact/signals";
+import type { InferResponseType } from "hono/client";
 import { api, showNotice } from "./api";
 import { loadLayers } from "./layers";
 import { MapView } from "./map/MapView";
@@ -34,17 +35,33 @@ import { initTools } from "./tools";
 import { stopDraw } from "./tools/draw";
 import { formatUrl, parseUrl } from "./url";
 
+/** The response of the tile hash lookup, typed from the server's route (the query is not typed there). */
+type TileHashes = InferResponseType<
+	(typeof api.api.dimensions)[":dim"]["tiles"][":zoom"]["hashes"]["$get"],
+	200
+>;
+
 /** The live map instance, for UI that needs to talk to it. */
 export const mapView = signal<MapView | null>(null);
 
-export async function loadUser() {
-	const res = await api.api.me.$get();
-	if (res.ok) user.value = (await res.json()).user;
+/** Loads who is logged in. False if the server could not be asked. */
+export async function loadUser(): Promise<boolean> {
+	try {
+		const res = await api.api.me.$get();
+		if (res.ok) user.value = (await res.json()).user;
+		return res.ok;
+	} catch {
+		return false;
+	}
 }
 
 async function fetchMap() {
-	const res = await api.api.map.$get();
-	return res.ok ? res.json() : null;
+	try {
+		const res = await api.api.map.$get();
+		return res.ok ? await res.json() : null;
+	} catch {
+		return null;
+	}
 }
 
 /** For pages without the map: loads the map details (name, dimensions, your role). */
@@ -52,6 +69,15 @@ export async function loadMapDetail(): Promise<boolean> {
 	const detail = await fetchMap();
 	if (detail) currentMap.value = detail;
 	return detail !== null;
+}
+
+/** What the standalone pages need: the map details and the user. False if either failed. */
+export async function loadPageData(): Promise<boolean> {
+	const [mapLoaded, userLoaded] = await Promise.all([
+		loadMapDetail(),
+		loadUser(),
+	]);
+	return mapLoaded && userLoaded;
 }
 
 function closeFeatureUi() {
@@ -119,6 +145,19 @@ export function setRev(value: number | null) {
 	rev.value = value === null || value >= head ? null : Math.max(value, 0);
 }
 
+/** An upload shown on its own is erased when it is deleted; stop showing it then. */
+async function dropIsolatedIfGone() {
+	const shown = isolatedUpload.value;
+	if (!shown) return;
+	try {
+		const res = await api.api.revisions[":id"].$get({
+			param: { id: String(shown.id) },
+		});
+		if (res.status === 404 && isolatedUpload.value?.id === shown.id)
+			isolatedUpload.value = null;
+	} catch {}
+}
+
 /**
  * Re-reads the map so a new head revision, renamed or archived dimensions and the like show up
  * without a reload. The signal is only assigned when something changed, since that restarts
@@ -130,6 +169,7 @@ export async function refreshMap(): Promise<void> {
 	if (!current || !detail || currentMap.value !== current) return;
 	if (JSON.stringify(detail) === JSON.stringify(current)) return;
 	currentMap.value = detail;
+	if (detail.map.epoch !== current.map.epoch) void dropIsolatedIfGone();
 	// The dimension being viewed may have been archived.
 	const visible = visibleDimensions.value;
 	if (!visible.some((d) => d.slug === dimSlug.value)) {
@@ -143,7 +183,8 @@ export async function boot(container: HTMLElement) {
 	embed.value = initial.embed;
 	const [detail] = await Promise.all([fetchMap(), loadUser()]);
 	if (!detail) {
-		loadError.value = "The map could not be loaded.";
+		loadError.value =
+			"The map could not be loaded. Check your connection and try again.";
 		return;
 	}
 	currentMap.value = detail;
@@ -211,9 +252,7 @@ export async function boot(container: HTMLElement) {
 							{ signal },
 						);
 						if (!res.ok) throw new Error(`tile lookup ${res.status}`);
-						const body = (await res.json()) as {
-							tiles: { x: number; y: number; hash: string }[];
-						};
+						const body = (await res.json()) as TileHashes;
 						return new Map(
 							body.tiles.map((t) => [`${t.x}/${t.y}`, `/blobs/${t.hash}.webp`]),
 						);

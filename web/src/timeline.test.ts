@@ -3,13 +3,15 @@ import {
 	axisTicks,
 	buildAxis,
 	clusterByX,
-	eventAt,
 	eventForRev,
 	eventNearest,
 	filterRevisions,
 	groupByDay,
 	inBreak,
 	outOfOrder,
+	revisionStops,
+	stepRevision,
+	stopIndex,
 	type TimelineRevision,
 	timelineEvents,
 	timeToU,
@@ -82,14 +84,6 @@ describe("events", () => {
 		expect([...outOfOrder(all)]).toEqual([3]);
 	});
 
-	test("eventAt picks the newest made by then", () => {
-		const events = timelineEvents(all);
-		expect(eventAt(events, T0 - 1)).toBeNull();
-		expect(eventAt(events, T0)?.id).toBe(1);
-		expect(eventAt(events, T0 + 1.5 * DAY)?.id).toBe(3);
-		expect(eventAt(events, T0 + 10 * DAY)?.id).toBe(2);
-	});
-
 	test("eventNearest picks the closest, whichever side it is on", () => {
 		const events = timelineEvents(all);
 		const at = (t: number) => eventNearest(events, t, (e) => e.exportedAt ?? 0);
@@ -109,6 +103,40 @@ describe("events", () => {
 		expect(eventForRev(events, 0)).toBeNull();
 		expect(eventForRev(events, 2)?.id).toBe(2);
 		expect(eventForRev(events, null)?.id).toBe(3);
+	});
+});
+
+describe("stepping through revisions", () => {
+	// Rev 2 (the head) was exported before rev 1, which came in late.
+	const events = timelineEvents([rev(1, 2, T0), rev(2, 1, T0 + DAY)]);
+	const walk = (from: number | null, dir: -1 | 1) => {
+		const seen: (number | null)[] = [from];
+		for (let i = 0; i < 10; i++) {
+			const next = stepRevision(events, 2, seen.at(-1) as number | null, dir);
+			if (next === undefined) return seen;
+			seen.push(next);
+		}
+		throw new Error("never ends");
+	};
+
+	test("the head is only the latest, at the end", () => {
+		expect(revisionStops(events, 2)).toEqual([0, 1, null]);
+		expect(revisionStops([], 0)).toEqual([null]);
+	});
+
+	test("steps back to before the first upload and stops there", () => {
+		expect(walk(null, -1)).toEqual([null, 1, 0]);
+		expect(stopIndex(events, 2, 0)).toBe(0);
+	});
+
+	test("steps forward to the latest and stops there", () => {
+		expect(walk(0, 1)).toEqual([0, 1, null]);
+	});
+
+	test("a revision between uploads counts as the one before it", () => {
+		const gappy = timelineEvents([rev(1, 2, T0), rev(2, 5, T0 + DAY)]);
+		expect(stepRevision(gappy, 9, 3, -1)).toBe(1);
+		expect(stepRevision(gappy, 9, 3, 1)).toBe(5);
 	});
 });
 

@@ -1,12 +1,14 @@
 import { STATS_RANGES, type StatsRange } from "@aomc/shared";
 import type { InferResponseType } from "hono/client";
 import { useEffect, useState } from "preact/hooks";
-import { api, attempt, loginUrl } from "../api";
+import { api, loginUrl } from "../api";
 import { loadUser } from "../controller";
 import { user } from "../state";
+import { DAY } from "../time";
 import { Chart } from "./Chart";
 import { Page } from "./Page";
 import { RangePicker } from "./RangePicker";
+import { number, SortHeader, TileGrid, useStats } from "./statsCommon";
 
 type StatsBody = InferResponseType<typeof api.api.stats.$get, 200>;
 type UserStats = NonNullable<StatsBody["me"]>;
@@ -63,8 +65,6 @@ const COLUMNS: Column[] = [
 	{ key: "layersCreated", label: "Layers", hint: "Layers created" },
 ];
 
-const number = (n: number) => n.toLocaleString();
-
 /** An area of square blocks in km² (a block is a metre). */
 function formatArea(blocks: number): string {
 	return `${(blocks / 1_000_000).toLocaleString(undefined, { maximumFractionDigits: 2 })} km²`;
@@ -89,22 +89,6 @@ const STAT_TABS: { id: StatTab; label: string }[] = [
 	{ id: "me", label: "Your stats" },
 	{ id: "global", label: "Global stats" },
 ];
-
-type Tile = { label: string; value: string; hint?: string };
-
-function TileGrid(props: { tiles: Tile[] }) {
-	return (
-		<div class="stats-grid">
-			{props.tiles.map((t) => (
-				<div key={t.label} class="stats-tile">
-					<div class="label">{t.label}</div>
-					<div class="stats-value">{t.value}</div>
-					{t.hint && <div class="muted hint">{t.hint}</div>}
-				</div>
-			))}
-		</div>
-	);
-}
 
 /**
  * The contributions, then the part of them sent by the AOMC Webmapper mod. `note` is about the
@@ -161,8 +145,6 @@ function StatTiles(props: { stats: UserStats; note: string }) {
 		</>
 	);
 }
-
-const DAY = 24 * 3600_000;
 
 function AreaChart(props: { data: StatsBody; signedIn: boolean }) {
 	const { areaHistory: points, since } = props.data;
@@ -235,21 +217,7 @@ function Leaderboard(props: { rows: Row[]; me: string | null }) {
 						<th class="stats-rank">#</th>
 						<th>Player</th>
 						{COLUMNS.map((c) => (
-							<th
-								key={c.key}
-								class="stats-num"
-								aria-sort={c.key === sort ? "descending" : undefined}
-							>
-								<button
-									type="button"
-									class={`stats-sort ${c.key === sort ? "active" : ""}`}
-									title={c.hint}
-									onClick={() => setSort(c.key)}
-								>
-									{c.label}
-									{c.key === sort ? " ▼" : ""}
-								</button>
-							</th>
+							<SortHeader key={c.key} column={c} sort={sort} onSort={setSort} />
 						))}
 					</tr>
 				</thead>
@@ -289,8 +257,6 @@ function Leaderboard(props: { rows: Row[]; me: string | null }) {
 /** /stats: your contributions and a leaderboard of everyone's. */
 export function StatsPage() {
 	const [range, setRange] = useState<StatsRange>(readRange);
-	const [data, setData] = useState<StatsBody | null>(null);
-	const [error, setError] = useState<string | null>(null);
 	const [picked, setPicked] = useState<StatTab | null>(null);
 
 	useEffect(() => {
@@ -302,19 +268,12 @@ export function StatsPage() {
 		if (range === "all") url.searchParams.delete("range");
 		else url.searchParams.set("range", range);
 		history.replaceState(null, "", url);
-
-		let stale = false;
-		void attempt(() => api.api.stats.$get({ query: { range } })).then((r) => {
-			if (stale) return;
-			if (r.ok) {
-				setData(r.body);
-				setError(null);
-			} else setError(r.error);
-		});
-		return () => {
-			stale = true;
-		};
 	}, [range]);
+
+	const { data, error } = useStats(
+		() => api.api.stats.$get({ query: { range } }),
+		[range],
+	);
 
 	const u = user.value;
 	// Until one is picked, show your own stats when logged in and the global ones otherwise.

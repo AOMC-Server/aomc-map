@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { dropIndex, moveItem } from "./reorder";
+import { dropIndex, moveItem, renumber } from "./reorder";
 
 describe("moveItem", () => {
 	test("moves an item without touching the original", () => {
@@ -31,5 +31,26 @@ describe("dropIndex", () => {
 	test("goes to the ends", () => {
 		expect(dropIndex(mids, 0, 1000)).toBe(3);
 		expect(dropIndex(mids, 3, -1000)).toBe(0);
+	});
+});
+
+describe("renumber", () => {
+	const dims = (...orders: number[]) =>
+		orders.map((sortOrder, i) => ({ slug: `d${i}`, sortOrder }));
+
+	test("numbers every item by its new position, changed ones only", () => {
+		const out = renumber(dims(0, 1, 2), 0, 1);
+		expect(out.map((c) => [c.item.slug, c.sortOrder])).toEqual([
+			["d1", 0],
+			["d0", 1],
+		]);
+	});
+
+	test("repairs ties and gaps that a plain swap would keep", () => {
+		const out = renumber(dims(0, 0, 5), 2, 1);
+		expect(out.map((c) => [c.item.slug, c.sortOrder])).toEqual([
+			["d2", 1],
+			["d1", 2],
+		]);
 	});
 });

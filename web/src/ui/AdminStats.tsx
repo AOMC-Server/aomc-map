@@ -1,10 +1,12 @@
 import { ADMIN_STATS_RANGES, type AdminStatsRange } from "@aomc/shared";
 import type { InferResponseType } from "hono/client";
-import { useEffect, useState } from "preact/hooks";
-import { api, attempt } from "../api";
+import { useState } from "preact/hooks";
+import { api } from "../api";
+import { DAY, HOUR } from "../time";
 import { Chart, type ChartSeries } from "./Chart";
-import { formatBytes, formatDuration, formatTime } from "./format";
+import { formatBytes, formatDay, formatDuration, formatTime } from "./format";
 import { RangePicker } from "./RangePicker";
+import { number, SortHeader, TileGrid, useStats } from "./statsCommon";
 
 type Body = InferResponseType<typeof api.api.admin.stats.$get, 200>;
 type Category = keyof Body["traffic"]["range"]["byCategory"];
@@ -36,18 +38,6 @@ const STORAGE_NOTES: Record<string, string> = {
 	boot: "Server started",
 };
 
-const MINUTE = 60_000;
-const HOUR = 60 * MINUTE;
-const DAY = 24 * HOUR;
-
-const number = (n: number) => n.toLocaleString();
-
-const formatDay = (t: number) =>
-	new Date(t).toLocaleDateString(undefined, {
-		year: "numeric",
-		month: "short",
-		day: "numeric",
-	});
 const formatTimeOfDay = (t: number) =>
 	new Date(t).toLocaleTimeString(undefined, {
 		hour: "numeric",
@@ -60,32 +50,6 @@ const formatDayTime = (t: number) =>
 		hour: "numeric",
 		minute: "2-digit",
 	});
-/** For tooltips, where there is room for the year. */
-const formatFull = (t: number) =>
-	new Date(t).toLocaleString(undefined, {
-		year: "numeric",
-		month: "short",
-		day: "numeric",
-		hour: "numeric",
-		minute: "2-digit",
-	});
-
-type Tile = { label: string; value: string; hint?: string };
-
-function Tiles(props: { items: Tile[] }) {
-	return (
-		<div class="stats-grid">
-			{props.items.map((t) => (
-				<div key={t.label} class="stats-tile">
-					<div class="label">{t.label}</div>
-					<div class="stats-value">{t.value}</div>
-					{t.hint && <div class="muted hint">{t.hint}</div>}
-				</div>
-			))}
-		</div>
-	);
-}
-
 function Storage(props: { data: Body }) {
 	const { storage, now, since, overview } = props.data;
 	const cur = storage.current;
@@ -129,8 +93,8 @@ function Storage(props: { data: Body }) {
 				Summed from the recorded size of every image, not measured on disk. A
 				point is added after each upload, deletion and cleanup.
 			</p>
-			<Tiles
-				items={[
+			<TileGrid
+				tiles={[
 					{
 						label: "Tile images",
 						value: formatBytes(cur.blobBytes),
@@ -156,7 +120,7 @@ function Storage(props: { data: Body }) {
 					series={series}
 					formatY={formatBytes}
 					formatX={formatX}
-					formatTip={formatFull}
+					formatTip={formatTime}
 					note={(i) =>
 						i === xs.length - 1
 							? "Now"
@@ -203,8 +167,8 @@ function Traffic(props: { data: Body }) {
 				What this server sent, counted as it happens. Redirects and errors carry
 				almost no data.
 			</p>
-			<Tiles
-				items={[
+			<TileGrid
+				tiles={[
 					{
 						label: "Sent in this period",
 						value: formatBytes(range.total.bytes),
@@ -231,7 +195,7 @@ function Traffic(props: { data: Body }) {
 					xs={traffic.points.map((p) => p.t)}
 					series={series}
 					formatY={metric === "bytes" ? formatBytes : number}
-					formatTip={traffic.bucketMs < DAY ? formatFull : formatDay}
+					formatTip={traffic.bucketMs < DAY ? formatTime : formatDay}
 					formatX={
 						traffic.bucketMs < HOUR
 							? formatTimeOfDay
@@ -315,21 +279,12 @@ function Domains(props: { data: Body }) {
 							<tr>
 								<th>Domain</th>
 								{DOMAIN_COLUMNS.map((c) => (
-									<th
+									<SortHeader
 										key={c.key}
-										class="stats-num"
-										aria-sort={c.key === sort ? "descending" : undefined}
-									>
-										<button
-											type="button"
-											class={`stats-sort ${c.key === sort ? "active" : ""}`}
-											title={c.hint}
-											onClick={() => setSort(c.key)}
-										>
-											{c.label}
-											{c.key === sort ? " ▼" : ""}
-										</button>
-									</th>
+										column={c}
+										sort={sort}
+										onSort={setSort}
+									/>
 								))}
 								<th>Share of data</th>
 							</tr>
@@ -373,8 +328,8 @@ function Overview(props: { data: Body }) {
 	return (
 		<>
 			<h2>Server</h2>
-			<Tiles
-				items={[
+			<TileGrid
+				tiles={[
 					{
 						label: "Users",
 						value: number(o.users.total),
@@ -424,24 +379,10 @@ function Overview(props: { data: Body }) {
 /** The owners' view of storage, network traffic and the server. */
 export function AdminStats() {
 	const [range, setRange] = useState<AdminStatsRange>("7d");
-	const [data, setData] = useState<Body | null>(null);
-	const [error, setError] = useState<string | null>(null);
-
-	useEffect(() => {
-		let stale = false;
-		void attempt(() => api.api.admin.stats.$get({ query: { range } })).then(
-			(r) => {
-				if (stale) return;
-				if (r.ok) {
-					setData(r.body);
-					setError(null);
-				} else setError(r.error);
-			},
-		);
-		return () => {
-			stale = true;
-		};
-	}, [range]);
+	const { data, error } = useStats(
+		() => api.api.admin.stats.$get({ query: { range } }),
+		[range],
+	);
 
 	return (
 		<div class="admin-stats">

@@ -55,8 +55,12 @@ export function FeatureHistory() {
 		const what = e.deleted ? "deleted state" : "this version";
 		if (!confirm(`Restore ${what} from ${formatTime(e.createdAt)}?`)) return;
 		setBusy(true);
-		const ok = await restoreFeatureRevision(target.featureId, e.revisionId);
-		setBusy(false);
+		let ok = false;
+		try {
+			ok = await restoreFeatureRevision(target.featureId, e.revisionId);
+		} finally {
+			setBusy(false);
+		}
 		if (ok) {
 			close();
 			popup.value = null;

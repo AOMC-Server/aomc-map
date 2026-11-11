@@ -88,26 +88,32 @@ function LayerForm(props: {
 	const [hidden, setHidden] = useState(l?.hiddenByDefault ?? false);
 	const [priv, setPriv] = useState(l?.visibility === "private");
 	const [busy, setBusy] = useState(false);
+	// Whoever creates a layer may make it private; afterwards that is up to its creator or a moderator.
+	const canSetVisibility = !l || l.canManage;
 
 	const submit = async (e: Event) => {
 		e.preventDefault();
 		if (!name.trim() || busy) return;
 		setBusy(true);
 		const visibility = priv ? "private" : "public";
-		const ok = l
-			? await updateLayer(l.id, {
-					name: name.trim(),
-					color,
-					hiddenByDefault: hidden,
-					visibility,
-				})
-			: (await createLayer({
-					name: name.trim(),
-					color,
-					hiddenByDefault: hidden,
-					visibility,
-				})) !== null;
-		setBusy(false);
+		let ok = false;
+		try {
+			ok = l
+				? await updateLayer(l.id, {
+						name: name.trim(),
+						color,
+						hiddenByDefault: hidden,
+						visibility,
+					})
+				: (await createLayer({
+						name: name.trim(),
+						color,
+						hiddenByDefault: hidden,
+						visibility,
+					})) !== null;
+		} finally {
+			setBusy(false);
+		}
 		if (ok) props.onDone();
 	};
 
@@ -134,10 +140,18 @@ function LayerForm(props: {
 				/>
 				Hidden by default
 			</label>
-			<label class="check">
+			<label
+				class="check"
+				title={
+					canSetVisibility
+						? undefined
+						: "Only the layer's creator or a moderator can change this"
+				}
+			>
 				<input
 					type="checkbox"
 					checked={priv}
+					disabled={!canSetVisibility}
 					onChange={(e) => setPriv(e.currentTarget.checked)}
 				/>
 				Private (only invited members and moderators)
@@ -267,7 +281,7 @@ function LayerSettings(props: {
 				)}
 			</section>
 
-			{editable && (
+			{editable && l.canManage && (
 				<section class="danger-zone">
 					<h4 class="section-title">Danger zone</h4>
 					<button

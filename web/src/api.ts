@@ -28,7 +28,7 @@ export function showNotice(text: string, kind: "error" | "info" = "info") {
 export type Res = { ok: boolean; status: number; json(): Promise<unknown> };
 
 /** Body of a successful response: the route's result without its `{ error }` variants. */
-type Success<R extends Res> = Exclude<
+export type Success<R extends Res> = Exclude<
 	Awaited<ReturnType<R["json"]>>,
 	{ error: string }
 >;
@@ -59,7 +59,8 @@ export async function attempt<R extends Res>(
 
 /**
  * Runs an API call, reporting failures to the user. Returns the parsed body, or null on failure.
- * `after` runs once the call succeeded (e.g. to reload what it changed).
+ * `after` runs once the call succeeded (e.g. to reload what it changed); if it throws, the user
+ * is told, but the call still counts as having worked.
  */
 export async function run<R extends Res>(
 	call: () => Promise<R>,
@@ -70,7 +71,16 @@ export async function run<R extends Res>(
 		showNotice(result.error, "error");
 		return null;
 	}
-	await after?.();
+	try {
+		await after?.();
+	} catch (err) {
+		showNotice(
+			err instanceof Error
+				? err.message
+				: "Could not refresh after the change.",
+			"error",
+		);
+	}
 	return result.body;
 }
 

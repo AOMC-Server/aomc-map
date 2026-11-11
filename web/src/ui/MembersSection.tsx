@@ -1,15 +1,15 @@
+import { ROLES_DESCENDING, type Role } from "@aomc/shared";
 import { useEffect, useState } from "preact/hooks";
 import { showNotice } from "../api";
 import type { Member, Scope } from "../sharing";
 import { user } from "../state";
 
-const RANK = ["owner", "moderator", "editor", "viewer"];
-
 /** Highest role first, then by name. */
 const sortMembers = <R extends string>(list: Member<R>[]) =>
 	[...list].sort(
 		(a, b) =>
-			RANK.indexOf(a.role) - RANK.indexOf(b.role) ||
+			ROLES_DESCENDING.indexOf(a.role as Role) -
+				ROLES_DESCENDING.indexOf(b.role as Role) ||
 			a.username.localeCompare(b.username),
 	);
 
@@ -33,8 +33,12 @@ export function MembersSection<R extends string>(props: { scope: Scope<R> }) {
 
 	const act = async (fn: () => Promise<boolean>) => {
 		setBusy(true);
-		const done = await fn();
-		setBusy(false);
+		let done = false;
+		try {
+			done = await fn();
+		} finally {
+			setBusy(false);
+		}
 		if (done) await reload();
 		return done;
 	};
@@ -90,9 +94,13 @@ export function MembersSection<R extends string>(props: { scope: Scope<R> }) {
 							disabled={busy}
 							aria-label={`Role of ${m.username}`}
 							title={scope.roleHelp[m.role]}
-							onChange={(e) => {
-								const role = roleOf(e.currentTarget.value);
-								if (role) void act(() => scope.setRole(m.userId, role));
+							onChange={async (e) => {
+								const select = e.currentTarget;
+								const role = roleOf(select.value);
+								if (!role) return;
+								// A rejected change leaves the control showing what is really set.
+								if (!(await act(() => scope.setRole(m.userId, role))))
+									select.value = m.role;
 							}}
 						>
 							{roleOptions}

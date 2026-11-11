@@ -38,7 +38,10 @@ export function App() {
 	const host = useRef<HTMLDivElement>(null);
 
 	useEffect(() => {
-		if (host.current) void boot(host.current);
+		if (host.current)
+			boot(host.current).catch(() => {
+				loadError.value = "The map could not be started.";
+			});
 	}, []);
 
 	const panelOpen = editor.value !== null || sidePanel.value !== null;
@@ -51,6 +54,9 @@ export function App() {
 				<div class="load-error">
 					<h2>Couldn't load the map</h2>
 					<p>{loadError.value}</p>
+					<button type="button" class="btn" onClick={() => location.reload()}>
+						Retry
+					</button>
 				</div>
 			)}
 			<Popup />

@@ -2,6 +2,8 @@ import { signal } from "@preact/signals";
 import { api, attempt, run, showNotice } from "./api";
 import { refreshMap, setRev } from "./controller";
 import { loadLayers } from "./layers";
+import { pollUntil } from "./poll";
+import { inFlight, mergeRevisions, pageHasGap } from "./revisionLog";
 import {
 	dimSlug,
 	isolatedUpload,
@@ -14,24 +16,37 @@ export type Outcome = { status: "done" | "failed"; error: string | null };
 
 const POLL_MS = 1500;
 const MAX_POLL_FAILURES = 5;
+/** How long to follow a job before giving up on it (it may well still finish). */
+const FOLLOW_TIMEOUT_MS = 30 * 60_000;
 
-/** Quiet lookup (no error toast): used while polling a job. */
-export async function fetchRevision(id: number): Promise<RevisionInfo | null> {
+type Lookup =
+	| { kind: "found"; revision: RevisionInfo }
+	| { kind: "gone" }
+	| { kind: "error" };
+
+/** Quiet lookup (no error toast), telling a deleted revision apart from a failed request. */
+async function lookupRevision(id: number): Promise<Lookup> {
 	try {
 		const res = await api.api.revisions[":id"].$get({
 			param: { id: String(id) },
 		});
-		return res.ok ? (await res.json()).revision : null;
+		if (res.status === 404) return { kind: "gone" };
+		return res.ok
+			? { kind: "found", revision: (await res.json()).revision }
+			: { kind: "error" };
 	} catch {
-		return null;
+		return { kind: "error" };
 	}
+}
+
+/** The revision, or null if it is gone or could not be fetched; used while polling a job. */
+export async function fetchRevision(id: number): Promise<RevisionInfo | null> {
+	const found = await lookupRevision(id);
+	return found.kind === "found" ? found.revision : null;
 }
 
 /** The dimension `revisionsData` holds the whole history of. */
 let loadedDim: string | null = null;
-
-const inFlight = (r: RevisionInfo) =>
-	r.status === "pending" || r.status === "processing";
 
 /**
  * Loads the upload log of the dimension being viewed (newest first): all of it the first time
@@ -61,10 +76,17 @@ async function loadAll(dim: string) {
 		before = out.nextBefore;
 	}
 	loadedDim = dim;
-	revisionsData.value = all;
+	setRevisions(all);
 }
 
-/** Merges the newest page (and the revisions still being processed) into what is loaded. */
+/** Replaces the loaded history of the dimension, dropping an isolated upload that is gone from it. */
+function setRevisions(list: RevisionInfo[]) {
+	revisionsData.value = list;
+	const shown = isolatedUpload.value;
+	if (shown && !list.some((r) => r.id === shown.id))
+		isolatedUpload.value = null;
+}
+
 async function refresh(dim: string) {
 	const active = revisionsData.value.filter(inFlight).map((r) => r.id);
 	const query: Record<string, string> = { dimension: dim, limit: "100" };
@@ -72,67 +94,84 @@ async function refresh(dim: string) {
 	const res = await attempt(() => api.api.revisions.$get({ query }));
 	if (!res.ok || dimSlug.value !== dim || loadedDim !== dim) return;
 	const { revisions, nextBefore } = res.body;
-	const fresh = new Map(revisions.map((r) => [r.id, r]));
-	// The page holds every revision from `nextBefore` up; one missing from it was deleted.
-	const covered = (id: number) =>
-		nextBefore === null || id > nextBefore || active.includes(id);
-	const kept = revisionsData.value
-		.filter((r) => fresh.has(r.id) || !covered(r.id))
-		.map((r) => fresh.get(r.id) ?? r);
-	const known = new Set(kept.map((r) => r.id));
-	const merged = [...kept, ...revisions.filter((r) => !known.has(r.id))].sort(
-		(a, b) => b.id - a.id,
+	// More than a page of new uploads since the last look: the ones in between are unknown.
+	if (pageHasGap(revisionsData.value, nextBefore)) return loadAll(dim);
+	const merged = mergeRevisions(
+		revisionsData.value,
+		revisions,
+		nextBefore,
+		active,
 	);
 	if (JSON.stringify(merged) !== JSON.stringify(revisionsData.value))
-		revisionsData.value = merged;
+		setRevisions(merged);
 }
 
 /**
  * Follows a revision until it finishes, using server-sent events and falling back to polling if
- * the stream breaks. Resolves once with the outcome; polling gives up after repeated failures.
+ * the stream breaks. Resolves once with the outcome; gives up after repeated failures, after
+ * `FOLLOW_TIMEOUT_MS`, or when `signal` aborts (the job itself keeps running).
  */
 export function watchRevision(
 	revisionId: number,
 	onProgress?: (p: Progress) => void,
+	signal?: AbortSignal,
 ): Promise<Outcome> {
 	return new Promise((resolve) => {
 		let settled = false;
+		let source: EventSource | undefined;
+		const stop = new AbortController();
 		const settle = (outcome: Outcome) => {
 			if (settled) return;
 			settled = true;
+			source?.close();
+			stop.abort();
+			clearTimeout(timer);
+			signal?.removeEventListener("abort", onAbort);
 			resolve(outcome);
 		};
+		const onAbort = () => settle({ status: "failed", error: "Cancelled." });
+		const timer = setTimeout(
+			() =>
+				settle({
+					status: "failed",
+					error: "Still processing; check the history panel later.",
+				}),
+			FOLLOW_TIMEOUT_MS,
+		);
+		if (signal?.aborted) return onAbort();
+		signal?.addEventListener("abort", onAbort);
 
 		const poll = async () => {
 			let failures = 0;
-			while (!settled) {
-				const r = await fetchRevision(revisionId);
-				if (r?.status === "done")
-					return settle({ status: "done", error: null });
-				if (r?.status === "failed")
-					return settle({ status: "failed", error: r.error });
-				failures = r ? 0 : failures + 1;
-				if (failures >= MAX_POLL_FAILURES)
-					return settle({
-						status: "failed",
-						error: "Lost contact with the server.",
-					});
-				await new Promise((r) => setTimeout(r, POLL_MS));
-			}
+			const out = await pollUntil<Outcome>(
+				async () => {
+					const r = await fetchRevision(revisionId);
+					if (r?.status === "done") return { status: "done", error: null };
+					if (r?.status === "failed")
+						return { status: "failed", error: r.error };
+					failures = r ? 0 : failures + 1;
+					if (failures >= MAX_POLL_FAILURES)
+						return { status: "failed", error: "Lost contact with the server." };
+				},
+				{
+					intervalMs: POLL_MS,
+					timeoutMs: FOLLOW_TIMEOUT_MS,
+					signal: stop.signal,
+				},
+			);
+			if (out.done) settle(out.value);
 		};
 
-		const source = new EventSource(`/api/revisions/${revisionId}/events`);
+		source = new EventSource(`/api/revisions/${revisionId}/events`);
 		const progress = (e: MessageEvent) => {
 			if (!settled) onProgress?.(JSON.parse(e.data) as Progress);
 		};
 		source.addEventListener("pending", progress);
 		source.addEventListener("processing", progress);
 		source.addEventListener("done", () => {
-			source.close();
 			settle({ status: "done", error: null });
 		});
 		source.addEventListener("failed", (e) => {
-			source.close();
 			settle({
 				status: "failed",
 				error:
@@ -142,7 +181,7 @@ export function watchRevision(
 		});
 		source.onerror = () => {
 			if (settled) return;
-			source.close();
+			source?.close();
 			void poll();
 		};
 	});
@@ -158,30 +197,22 @@ const setDeleting = (id: number, label: string | null) => {
 	deleting.value = next;
 };
 
-const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
-
-async function revisionGone(id: number): Promise<boolean> {
-	try {
-		const res = await api.api.revisions[":id"].$get({
-			param: { id: String(id) },
-		});
-		return res.status === 404;
-	} catch {
-		return false;
-	}
-}
-
 /**
  * Deletes an upload from the map and all of its history (moderators, or its author for a while
- * after uploading it). The server erases it in
- * the background; this waits until it is gone (or the erase failed) and refreshes the map.
+ * after uploading it). The server erases it in the background; this waits until it is gone (or
+ * the erase failed) and refreshes the map.
  */
 export async function deleteUpload(id: number): Promise<boolean> {
+	if (deleting.value.has(id)) return false;
+	// Marked busy before the request, so the row cannot be deleted twice meanwhile.
+	setDeleting(id, "deleting…");
 	const out = await run(() =>
 		api.api.revisions[":id"].$delete({ param: { id: String(id) } }),
 	);
-	if (!out) return false;
-	setDeleting(id, "deleting…");
+	if (!out) {
+		setDeleting(id, null);
+		return false;
+	}
 	// Shows it as busy right away, wherever it is in the log.
 	const busy = await fetchRevision(id);
 	if (busy)
@@ -200,23 +231,25 @@ export async function deleteUpload(id: number): Promise<boolean> {
 	});
 	events.onerror = () => events.close();
 
-	let error: string | null = null;
 	let failures = 0;
-	for (;;) {
-		const r = await fetchRevision(id);
-		if (r === null) {
-			// Gone; but a lost connection looks the same, so make sure it is a 404.
-			if (await revisionGone(id)) break;
-			if (++failures >= MAX_POLL_FAILURES) {
-				error = "Lost contact with the server.";
-				break;
+	const result = await pollUntil<{ error: string | null }>(
+		async () => {
+			const found = await lookupRevision(id);
+			if (found.kind === "gone") return { error: null };
+			if (found.kind === "error") {
+				if (++failures >= MAX_POLL_FAILURES)
+					return { error: "Lost contact with the server." };
+				return undefined;
 			}
-		} else if (r.status === "done" && r.error) {
-			error = r.error;
-			break;
-		}
-		await sleep(POLL_MS);
-	}
+			failures = 0;
+			const r = found.revision;
+			if (r.status === "done" && r.error) return { error: r.error };
+		},
+		{ intervalMs: POLL_MS, timeoutMs: FOLLOW_TIMEOUT_MS },
+	);
+	const error = result.done
+		? result.value.error
+		: "Still deleting; check the history panel later.";
 
 	events.close();
 	setDeleting(id, null);

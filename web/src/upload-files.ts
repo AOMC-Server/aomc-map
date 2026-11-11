@@ -6,14 +6,20 @@ export type UploadItem = {
 
 export const itemKey = (i: UploadItem) => `${i.path}:${i.file.size}`;
 
+const wanted = (name: string) => /\.(png|zip)$/i.test(name);
+
+/** Inside a folder, only exports count: thumbnails, notes and hidden files are skipped. */
+export const wantedInFolder = (name: string) =>
+	wanted(name) && !name.startsWith(".");
+
 /** Files from an <input>; a chosen folder gives each file its path inside it. */
 export const fromFileList = (list: FileList | File[]): UploadItem[] =>
-	[...list].map((file) => ({
-		file,
-		path: file.webkitRelativePath || file.name,
-	}));
-
-const wanted = (name: string) => /\.(png|zip)$/i.test(name);
+	[...list]
+		.filter((file) => !file.webkitRelativePath || wantedInFolder(file.name))
+		.map((file) => ({
+			file,
+			path: file.webkitRelativePath || file.name,
+		}));
 
 async function walk(
 	entry: FileSystemEntry,
@@ -23,7 +29,7 @@ async function walk(
 ): Promise<void> {
 	if (entry.isFile) {
 		// Inside a folder, skip what is not an export (thumbnails, notes, hidden files).
-		if (inFolder && (!wanted(entry.name) || entry.name.startsWith("."))) return;
+		if (inFolder && !wantedInFolder(entry.name)) return;
 		const file = await new Promise<File>((resolve, reject) =>
 			(entry as FileSystemFileEntry).file(resolve, reject),
 		);

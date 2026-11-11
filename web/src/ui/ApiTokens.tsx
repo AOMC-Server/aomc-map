@@ -6,22 +6,27 @@ import {
 	TOKEN_SCOPES,
 	type TokenScope,
 } from "@aomc/shared";
+import { MAX_NAME } from "@aomc/shared/features";
 import type { InferResponseType } from "hono/client";
 import { useEffect, useState } from "preact/hooks";
-import { api, ok, run, showNotice } from "../api";
+import { api, ok, run } from "../api";
 import { formatTime } from "./format";
+import { type ExpiryOption, ExpirySelect, ShownOnce } from "./shareCommon";
 
 type TokenInfo = InferResponseType<
 	typeof api.api.tokens.$get,
 	200
 >["tokens"][number];
 
-const EXPIRIES: { label: string; days: number | null }[] = [
-	{ label: "30 days", days: 30 },
-	{ label: "90 days", days: 90 },
-	{ label: "6 months", days: 180 },
-	{ label: "1 year", days: 365 },
-	{ label: "Never", days: null },
+const EXPIRIES: ExpiryOption[] = [
+	{ label: "30 days", value: 30 },
+	{ label: "90 days", value: 90 },
+	{
+		label: `${DEFAULT_TOKEN_EXPIRY_DAYS} days`,
+		value: DEFAULT_TOKEN_EXPIRY_DAYS,
+	},
+	{ label: "1 year", value: 365 },
+	{ label: "Never", value: null },
 ];
 
 const SCOPE_INFO: Record<TokenScope, { label: string; hint: string }> = {
@@ -63,6 +68,7 @@ export function ApiTokens() {
 	const [busy, setBusy] = useState(false);
 	// Shown once, right after creation; kept only in this component's state.
 	const [created, setCreated] = useState<{
+		id: number;
 		name: string;
 		token: string;
 	} | null>(null);
@@ -75,19 +81,26 @@ export function ApiTokens() {
 		void reload();
 	}, []);
 
+	const createToken = (trimmed: string) =>
+		run(() =>
+			api.api.tokens.$post({
+				json: { name: trimmed, expiresInDays: days, scopes },
+			}),
+		);
+
 	const create = async (e: Event) => {
 		e.preventDefault();
 		const trimmed = name.trim();
 		if (!trimmed) return;
 		setBusy(true);
-		const body = await run(() =>
-			api.api.tokens.$post({
-				json: { name: trimmed, expiresInDays: days, scopes },
-			}),
-		);
-		setBusy(false);
+		let body: Awaited<ReturnType<typeof createToken>> = null;
+		try {
+			body = await createToken(trimmed);
+		} finally {
+			setBusy(false);
+		}
 		if (body) {
-			setCreated({ name: body.name, token: body.token });
+			setCreated({ id: body.id, name: body.name, token: body.token });
 			setName("");
 			await reload();
 		}
@@ -97,22 +110,17 @@ export function ApiTokens() {
 		if (!confirm(`Revoke "${t.name}"? Scripts using it will stop working.`))
 			return;
 		setBusy(true);
-		const done = await ok(() =>
-			api.api.tokens[":id"].$delete({ param: { id: String(t.id) } }),
-		);
-		setBusy(false);
-		if (done) {
-			if (created && tokens?.length === 1) setCreated(null);
-			await reload();
-		}
-	};
-
-	const copy = async (token: string) => {
+		let done = false;
 		try {
-			await navigator.clipboard.writeText(token);
-			showNotice("Token copied");
-		} catch {
-			showNotice("Copy failed; select the token and copy it manually", "error");
+			done = await ok(() =>
+				api.api.tokens[":id"].$delete({ param: { id: String(t.id) } }),
+			);
+		} finally {
+			setBusy(false);
+		}
+		if (done) {
+			if (created?.id === t.id) setCreated(null);
+			await reload();
 		}
 	};
 
@@ -144,31 +152,18 @@ export function ApiTokens() {
 			</p>
 
 			{created && (
-				<div class="new-link">
-					<p>
-						<b>{created.name}</b> was created. Copy it now: it won't be shown
-						again.
-					</p>
-					<div class="link-row">
-						<input
-							type="text"
-							readOnly
-							value={created.token}
-							aria-label="New API token"
-							onFocus={(e) => e.currentTarget.select()}
-						/>
-						<button
-							type="button"
-							class="btn"
-							onClick={() => void copy(created.token)}
-						>
-							Copy
-						</button>
-						<button type="button" class="btn" onClick={() => setCreated(null)}>
-							Done
-						</button>
-					</div>
-				</div>
+				<ShownOnce
+					intro={
+						<>
+							<b>{created.name}</b> was created. Copy it now: it won't be shown
+							again.
+						</>
+					}
+					value={created.token}
+					label="New API token"
+					copied="Token copied"
+					onDone={() => setCreated(null)}
+				/>
 			)}
 
 			<form class="invite-form" onSubmit={create}>
@@ -177,33 +172,12 @@ export function ApiTokens() {
 					<input
 						type="text"
 						placeholder="e.g. upload script"
-						maxLength={100}
+						maxLength={MAX_NAME}
 						value={name}
 						onInput={(e) => setName(e.currentTarget.value)}
 					/>
 				</label>
-				<label>
-					<span class="label">Expires</span>
-					<select
-						value={days === null ? "never" : String(days)}
-						onChange={(e) =>
-							setDays(
-								e.currentTarget.value === "never"
-									? null
-									: Number(e.currentTarget.value),
-							)
-						}
-					>
-						{EXPIRIES.map((x) => (
-							<option
-								key={x.label}
-								value={x.days === null ? "never" : String(x.days)}
-							>
-								{x.label}
-							</option>
-						))}
-					</select>
-				</label>
+				<ExpirySelect options={EXPIRIES} value={days} onChange={setDays} />
 				<fieldset class="token-scopes">
 					<legend class="label">Scopes</legend>
 					{TOKEN_SCOPES.map((s) => (

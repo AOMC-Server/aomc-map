@@ -37,7 +37,24 @@ describe("parseInline", () => {
 
 	test("unsafe links stay as literal text", () => {
 		expect(parseInline("[x](javascript:alert(1))")).toEqual([
-			{ kind: "text", text: "[x](javascript:alert(1)" },
+			{ kind: "text", text: "[x](javascript:alert(1))" },
+		]);
+	});
+
+	test("link addresses may contain balanced parentheses", () => {
+		expect(
+			parseInline("[Dirt](https://en.wikipedia.org/wiki/Dirt_(soil)) and more"),
+		).toEqual([
+			{
+				kind: "link",
+				text: "Dirt",
+				href: "https://en.wikipedia.org/wiki/Dirt_(soil)",
+			},
+			{ kind: "text", text: " and more" },
+		]);
+		expect(parseInline("([a](https://e.com))")).toEqual([
+			{ kind: "text", text: "(" },
+			{ kind: "link", text: "a", href: "https://e.com/" },
 			{ kind: "text", text: ")" },
 		]);
 	});

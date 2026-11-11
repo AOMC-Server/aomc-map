@@ -1,12 +1,15 @@
 import type { Dye } from "@aomc/shared/colors";
 import type { FeatureType, Point } from "@aomc/shared/features";
+import { canEdit, canModerate } from "@aomc/shared/roles";
 import type { DimensionTheme } from "@aomc/shared/schemas";
 import type { View } from "@aomc/shared/view";
 import { computed, signal } from "@preact/signals";
 import type { InferResponseType } from "hono/client";
 import type { api } from "./api";
 
-export type User = { id: string; username: string; avatarUrl: string | null };
+export type User = NonNullable<
+	InferResponseType<typeof api.api.me.$get, 200>["user"]
+>;
 
 export type MapDetail = InferResponseType<typeof api.api.map.$get, 200>;
 export type Dimension = MapDetail["dimensions"][number];
@@ -124,12 +127,12 @@ export const editor = signal<EditorTarget | null>(null);
 const viewingHistory = computed(() => rev.value !== null);
 export const canEditMap = computed(() => {
 	const role = currentMap.value?.role;
-	return !viewingHistory.value && role !== undefined && role !== "viewer";
+	return !viewingHistory.value && role !== undefined && canEdit(role);
 });
 
 export const isModerator = computed(() => {
 	const role = currentMap.value?.role;
-	return role === "moderator" || role === "owner";
+	return role !== undefined && canModerate(role);
 });
 
 export const effectiveRev = computed(() => {

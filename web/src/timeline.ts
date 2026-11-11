@@ -1,5 +1,6 @@
 import { type Size, screenToBlock, type View } from "@aomc/shared/view";
 import { type Bounds, intersects } from "./map/geometry";
+import { DAY, HOUR } from "./time";
 
 /** The parts of a revision the timeline and the upload log work with. */
 export type TimelineRevision = {
@@ -12,9 +13,6 @@ export type TimelineRevision = {
 	exportedAt: number | null;
 	createdAt: number;
 };
-
-const HOUR = 3_600_000;
-const DAY = 24 * HOUR;
 
 /** When an upload counts as made: its export time, or else when it was uploaded (as the server stacks tiles). */
 export const eventTime = (r: TimelineRevision) => r.exportedAt ?? r.createdAt;
@@ -76,25 +74,6 @@ export function outOfOrder(
 	return out;
 }
 
-/** The event to look at for time `t`: the newest one made by then, or null if none was. */
-export function eventAt<E extends TimelineRevision & { rev: number }>(
-	events: readonly E[],
-	t: number,
-): E | null {
-	let best: E | null = null;
-	for (const e of events) {
-		const et = eventTime(e);
-		if (et > t) continue;
-		if (
-			!best ||
-			et > eventTime(best) ||
-			(et === eventTime(best) && e.rev > best.rev)
-		)
-			best = e;
-	}
-	return best;
-}
-
 /**
  * The event closest to a point, `posOf` giving where each one is (pixels on screen, say), so the
  * choice follows what is drawn. On a tie the newer revision wins.
@@ -130,6 +109,50 @@ export function eventForRev<E extends { rev: number }>(
 		if (!best || e.rev > best.rev) best = e;
 	}
 	return best;
+}
+
+/**
+ * The revisions the keyboard steps through, in the order the timeline shows them: before the
+ * first upload, each upload by export time, then the latest (null). The head is the latest, so
+ * it only counts there, at the end; every other revision appears once.
+ */
+export function revisionStops<E extends { rev: number }>(
+	events: readonly E[],
+	head: number,
+): (number | null)[] {
+	const first = events.reduce((m, e) => Math.min(m, e.rev), head);
+	const stops = [Math.max(first - 1, 0), ...events.map((e) => e.rev)].map(
+		(r) => (r >= head ? null : r),
+	);
+	stops.push(null);
+	return stops.filter((s, i) => s !== null || i === stops.length - 1);
+}
+
+/** Where `rev` (null = latest) sits among `revisionStops`. */
+export function stopIndex<E extends { rev: number }>(
+	events: readonly E[],
+	head: number,
+	rev: number | null,
+): number {
+	const stops = revisionStops(events, head);
+	if (rev === null || rev >= head) return stops.length - 1;
+	const e = eventForRev(events, rev);
+	return e ? Math.max(stops.indexOf(e.rev), 0) : 0;
+}
+
+/**
+ * The revision one stop before (`dir` -1) or after (1) `rev`, or undefined at either end.
+ * null is the latest.
+ */
+export function stepRevision<E extends { rev: number }>(
+	events: readonly E[],
+	head: number,
+	rev: number | null,
+	dir: -1 | 1,
+): number | null | undefined {
+	const stops = revisionStops(events, head);
+	const i = stopIndex(events, head, rev) + dir;
+	return i >= 0 && i < stops.length ? stops[i] : undefined;
 }
 
 // Axis ---------------------------------------------------------------------------------------

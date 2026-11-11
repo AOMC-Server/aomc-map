@@ -1,3 +1,4 @@
+import { canEdit } from "@aomc/shared/roles";
 import { useEffect, useState } from "preact/hooks";
 import { loginUrl } from "../api";
 import { currentMap, dimSlug, user, visibleDimensions } from "../state";
@@ -14,8 +15,8 @@ import {
 	itemKey,
 	type UploadItem,
 } from "../upload-files";
-import { exportDates, formatBytes, validateFiles } from "../upload-validate";
-import { formatDay } from "./format";
+import { exportDates, validateFiles } from "../upload-validate";
+import { formatBytes, formatDay } from "./format";
 import { Modal } from "./Modal";
 
 function ProgressBar(props: { percent?: number; label: string }) {
@@ -54,9 +55,13 @@ export function UploadDialog() {
 	}, [dimSlug.value]);
 
 	if (!detail) return null;
-	const canUpload = detail.role !== "viewer";
+	const canUpload = canEdit(detail.role);
 	const validation = validateFiles(
-		files.map((i) => ({ name: i.file.name, size: i.file.size })),
+		files.map((i) => ({
+			name: i.file.name,
+			size: i.file.size,
+			path: i.path,
+		})),
 		detail.limits,
 	);
 	const dates = exportDates(files.map((i) => i.path));

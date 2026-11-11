@@ -1,4 +1,5 @@
 import {
+	type createMapInviteSchema,
 	type DimensionTheme,
 	type LayerRole,
 	layerRoleSchema,
@@ -9,6 +10,7 @@ import type { InferResponseType } from "hono/client";
 import { api, ok, run } from "./api";
 import { refreshMap } from "./controller";
 import { mutateOk } from "./layers";
+import { user } from "./state";
 
 type MemberRole = (typeof memberRoleSchema.options)[number];
 
@@ -29,10 +31,7 @@ export type CreatedInvite = InferResponseType<
 	201
 >;
 
-export type InviteOptions = {
-	expiresInHours: number | null;
-	maxUses: number | null;
-};
+export type InviteOptions = ReturnType<typeof createMapInviteSchema.parse>;
 
 /** Who can be added to, and invited into, the map or one private layer. */
 export type Scope<R extends string> = {
@@ -53,6 +52,10 @@ export type Scope<R extends string> = {
 	createInvite(options: InviteOptions, role: R): Promise<CreatedInvite | null>;
 };
 
+/** Changing your own membership changes what you may do, so the cached role is re-read. */
+const ownChange = (userId: string) =>
+	userId === user.value?.id ? refreshMap : undefined;
+
 export const mapScope: Scope<MemberRole> = {
 	key: "map",
 	roles: memberRoleSchema.options,
@@ -71,11 +74,19 @@ export const mapScope: Scope<MemberRole> = {
 	add: (userId, role) =>
 		ok(() => api.api.members.$post({ json: { userId, role } })),
 	setRole: (userId, role) =>
-		ok(() =>
-			api.api.members[":userId"].$patch({ param: { userId }, json: { role } }),
+		ok(
+			() =>
+				api.api.members[":userId"].$patch({
+					param: { userId },
+					json: { role },
+				}),
+			ownChange(userId),
 		),
 	remove: (userId) =>
-		ok(() => api.api.members[":userId"].$delete({ param: { userId } })),
+		ok(
+			() => api.api.members[":userId"].$delete({ param: { userId } }),
+			ownChange(userId),
+		),
 	async loadInvites() {
 		const out = await run(() => api.api.invites.$get());
 		return out?.invites ?? null;

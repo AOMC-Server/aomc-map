@@ -1,7 +1,7 @@
 import { signal } from "@preact/signals";
 import { showNotice } from "./api";
-import { mapView, refreshMap, selectDimension } from "./controller";
-import type { Bounds } from "./map/geometry";
+import { mapView, refreshMap, selectDimension, setRev } from "./controller";
+import { type Bounds, boundsOf } from "./map/geometry";
 import { fetchRevision, loadRevisions, watchRevision } from "./revisions";
 import { currentMap } from "./state";
 import type { UploadItem } from "./upload-files";
@@ -97,7 +97,9 @@ export function startUpload(dimSlug: string, items: UploadItem[]) {
 		const reason =
 			xhr.status === 401
 				? "You need to log in to upload."
-				: (body?.error ?? `Upload failed (${xhr.status}).`);
+				: xhr.status === 413
+					? "The upload is too large for the server. Send fewer or smaller files."
+					: (body?.error ?? `Upload failed (${xhr.status}).`);
 		uploadState.value = {
 			phase: "failed",
 			error: reason,
@@ -108,19 +110,15 @@ export function startUpload(dimSlug: string, items: UploadItem[]) {
 }
 
 /** The area covered by all of them. */
-function union(boxes: Bounds[]): Bounds | null {
-	const [first, ...rest] = boxes;
-	if (!first) return null;
-	return rest.reduce(
-		(a, b) => ({
-			minX: Math.min(a.minX, b.minX),
-			minZ: Math.min(a.minZ, b.minZ),
-			maxX: Math.max(a.maxX, b.maxX),
-			maxZ: Math.max(a.maxZ, b.maxZ),
-		}),
-		first,
-	);
-}
+const union = (boxes: Bounds[]): Bounds | null =>
+	boxes.length === 0
+		? null
+		: boundsOf(
+				boxes.flatMap((b) => [
+					[b.minX, b.minZ],
+					[b.maxX, b.maxZ],
+				]),
+			);
 
 /** An upload makes one revision per export; they are processed in order, so follow them in order. */
 async function follow(revisionIds: number[]) {
@@ -189,6 +187,7 @@ async function follow(revisionIds: number[]) {
 /** Zooms the map to the area covered by a finished upload. */
 export function showUploadOnMap(bbox: Bounds, dimSlug: string | null) {
 	if (dimSlug) selectDimension(dimSlug);
+	setRev(null);
 	mapView.value?.fitBounds(bbox, { padding: 100, closestZoom: 0 });
 	uploadOpen.value = false;
 }

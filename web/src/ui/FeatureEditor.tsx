@@ -102,11 +102,15 @@ export function FeatureEditor() {
 					: null;
 		if (!input) return;
 		setSaving(true);
-		const saved =
-			target.mode === "create"
-				? await createFeature(layer.id, input)
-				: await updateFeature(target.featureId, input);
-		setSaving(false);
+		let saved: Awaited<ReturnType<typeof createFeature>> = null;
+		try {
+			saved =
+				target.mode === "create"
+					? await createFeature(layer.id, input)
+					: await updateFeature(target.featureId, input);
+		} finally {
+			setSaving(false);
+		}
 		if (!saved) return;
 		if (another && target.mode === "create") {
 			setName("");

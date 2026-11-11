@@ -1,4 +1,4 @@
-import { DIMENSION_THEMES, type DimensionTheme } from "@aomc/shared/schemas";
+import type { DimensionTheme } from "@aomc/shared/schemas";
 import { signal } from "@preact/signals";
 
 /**
@@ -50,9 +50,6 @@ export const isStyle = (value: unknown): value is StyleId =>
 
 export const isModeChoice = (value: unknown): value is ModeChoice =>
 	MODES.some((m) => m.id === value);
-
-export const isPalette = (value: unknown): value is DimensionTheme =>
-	DIMENSION_THEMES.includes(value as DimensionTheme);
 
 export const resolveMode = (choice: ModeChoice, prefersLight: boolean): Mode =>
 	choice === "system" ? (prefersLight ? "light" : "dark") : choice;

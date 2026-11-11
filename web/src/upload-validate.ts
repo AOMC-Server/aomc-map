@@ -1,7 +1,14 @@
+import { uploadPathsSchema } from "@aomc/shared/schemas";
 import { parseXaeroCoords, parseXaeroExportDate } from "@aomc/shared/xaero";
 import type { UploadLimits } from "./state";
+import { formatBytes } from "./ui/format";
 
-export type FileInfo = { name: string; size: number };
+export type FileInfo = {
+	name: string;
+	size: number;
+	/** Where the file came from (folders included), sent along with it. */
+	path?: string;
+};
 
 export type Validation = {
 	/** Problems that make the server reject the upload. */
@@ -10,6 +17,20 @@ export type Validation = {
 	zipCount: number;
 	totalBytes: number;
 };
+
+/** Multipart boundaries, per-file headers and the other form fields, which the server's limit counts too. */
+const REQUEST_BASE_BYTES = 1024;
+const PART_BYTES = 256;
+
+/** Roughly how many bytes the request carries beyond the files themselves. */
+export function requestOverhead(files: FileInfo[]): number {
+	const paths = JSON.stringify(files.map((f) => f.path ?? f.name));
+	return (
+		REQUEST_BASE_BYTES +
+		paths.length * 3 +
+		files.reduce((n, f) => n + PART_BYTES + f.name.length * 3, 0)
+	);
+}
 
 const ext = (name: string) => name.slice(name.lastIndexOf(".")).toLowerCase();
 
@@ -25,6 +46,12 @@ export function validateFiles(
 
 	for (const f of files) {
 		totalBytes += f.size;
+		if (
+			f.path !== undefined &&
+			!uploadPathsSchema.element.safeParse(f.path).success
+		) {
+			errors.push(`${f.name}: the folder path is too long`);
+		}
 		const e = ext(f.name);
 		if (e === ".png") {
 			pngCount++;
@@ -40,11 +67,15 @@ export function validateFiles(
 		}
 	}
 	if (files.length > limits.maxFilesPerUpload) {
-		errors.push(`Too many files (max ${limits.maxFilesPerUpload} per upload)`);
-	}
-	if (totalBytes > limits.maxUploadBytes) {
 		errors.push(
-			`Too large: ${formatBytes(totalBytes)} (max ${formatBytes(limits.maxUploadBytes)})`,
+			`Too many files (max ${limits.maxFilesPerUpload} per upload, counting the files inside ZIPs)`,
+		);
+	}
+	// The server limits the whole request, not just the files.
+	const requestBytes = totalBytes + requestOverhead(files);
+	if (requestBytes > limits.maxUploadBytes) {
+		errors.push(
+			`Too large: about ${formatBytes(requestBytes)} with overhead (max ${formatBytes(limits.maxUploadBytes)})`,
 		);
 	}
 	return { errors, pngCount, zipCount, totalBytes };
@@ -76,11 +107,4 @@ export function exportDates(
 		else dates.add(date);
 	}
 	return { dates: [...dates].sort((a, b) => a - b), undated };
-}
-
-export function formatBytes(n: number): string {
-	if (n < 1024) return `${n} B`;
-	if (n < 1024 * 1024) return `${(n / 1024).toFixed(1)} KB`;
-	if (n < 1024 * 1024 * 1024) return `${(n / 1024 / 1024).toFixed(1)} MB`;
-	return `${(n / 1024 / 1024 / 1024).toFixed(2)} GB`;
 }

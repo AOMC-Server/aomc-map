@@ -1,7 +1,8 @@
-import { useSignalEffect } from "@preact/signals";
+import { effect } from "@preact/signals";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { isolateUpload, mapView, setRev } from "../controller";
 import type { Bounds } from "../map/geometry";
+import { inFlight } from "../revisionLog";
 import { deleting, loadRevisions } from "../revisions";
 import { settings, updateSettings } from "../settings";
 import {
@@ -35,9 +36,6 @@ import {
 } from "./format";
 import { Panel } from "./Panel";
 import { pointAt, Timeline } from "./Timeline";
-
-const inFlight = (r: RevisionInfo) =>
-	r.status === "pending" || r.status === "processing";
 
 /**
  * Looks at the map as of the upload, and at where it was made. With "In view" the camera stays
@@ -180,13 +178,28 @@ function RevisionRow(props: { r: RevisionInfo; odd: boolean; now: number }) {
 /** The blocks in view, following the camera with a short delay. */
 function useViewBounds(enabled: boolean): Bounds | null {
 	const [bounds, setBounds] = useState<Bounds | null>(null);
-	useSignalEffect(() => {
-		const v = view.value;
-		const mv = mapView.value;
-		if (!enabled || !mv) return;
-		const timer = setTimeout(() => setBounds(viewBounds(v, mv.getSize())), 150);
-		return () => clearTimeout(timer);
-	});
+	useEffect(() => {
+		if (!enabled) {
+			setBounds(null);
+			return;
+		}
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		let first = true;
+		const stop = effect(() => {
+			const v = view.value;
+			const mv = mapView.value;
+			if (!mv) return;
+			const update = () => setBounds(viewBounds(v, mv.getSize()));
+			clearTimeout(timer);
+			if (first) update();
+			else timer = setTimeout(update, 150);
+			first = false;
+		});
+		return () => {
+			stop();
+			clearTimeout(timer);
+		};
+	}, [enabled]);
 	if (!enabled) return null;
 	const mv = mapView.peek();
 	return bounds ?? (mv ? viewBounds(view.peek(), mv.getSize()) : null);

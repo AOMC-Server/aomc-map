@@ -1,17 +1,15 @@
 import { describe, expect, test } from "bun:test";
 import { DIMENSION_THEMES } from "@aomc/shared/schemas";
-import { isModeChoice, isPalette, isStyle, resolveMode, STYLES } from "./theme";
+import { isModeChoice, isStyle, resolveMode, STYLES } from "./theme";
 
 describe("appearance", () => {
-	test("validates modes, styles and palettes", () => {
+	test("validates modes and styles", () => {
 		expect(isModeChoice("system")).toBe(true);
 		expect(isModeChoice("light")).toBe(true);
 		expect(isModeChoice("dim")).toBe(false);
 		expect(isStyle("xp")).toBe(true);
 		expect(isStyle("vista")).toBe(false);
 		expect(isStyle(null)).toBe(false);
-		expect(isPalette("nether")).toBe(true);
-		expect(isPalette("aether")).toBe(false);
 	});
 
 	test("system mode follows the system preference", () => {
@@ -33,5 +31,17 @@ describe("appearance", () => {
 		for (const style of STYLES) {
 			expect(css).toContain(`[data-style="${style.id}"]`);
 		}
+	});
+
+	test("the inline script in index.html knows the same styles and palettes", async () => {
+		const html = await Bun.file(
+			new URL("../index.html", import.meta.url),
+		).text();
+		const list = (name: string) =>
+			JSON.parse(
+				new RegExp(`const ${name} = (\\[[^\\]]*\\])`).exec(html)?.[1] ?? "null",
+			);
+		expect(list("STYLES")).toEqual(STYLES.map((s) => s.id));
+		expect(list("PALETTES")).toEqual([...DIMENSION_THEMES]);
 	});
 });

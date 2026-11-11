@@ -1,5 +1,7 @@
 import { MAX_NAME } from "@aomc/shared/features";
+import { canManage, canModerate } from "@aomc/shared/roles";
 import {
+	createDimensionSchema,
 	DEFAULT_PRELOAD,
 	DIMENSION_THEMES,
 	type DimensionTheme,
@@ -8,10 +10,10 @@ import {
 	type PreloadRing,
 } from "@aomc/shared/schemas";
 import type { ComponentChildren } from "preact";
-import { useEffect, useState } from "preact/hooks";
+import { useState } from "preact/hooks";
 import { loginUrl } from "../api";
-import { loadMapDetail, loadUser } from "../controller";
 import { MAX_PRELOAD_TILES, preloadTiles } from "../map/tileLayer";
+import { renumber } from "../reorder";
 import { describeDimensionScale, formatScale, parseScale } from "../scale";
 import {
 	addDimension,
@@ -26,9 +28,11 @@ import { AdminStats } from "./AdminStats";
 import { InviteLinks } from "./InviteLinks";
 import { BlockIcon } from "./icons";
 import { MembersSection } from "./MembersSection";
-import { Page } from "./Page";
+import { LoadFailed, Page, usePageLoad } from "./Page";
 
 type Tab = "settings" | "dimensions" | "members" | "invites" | "statistics";
+
+const slugSchema = createDimensionSchema.shape.slug;
 
 const TAB_LABELS: Record<Tab, string> = {
 	settings: "Settings",
@@ -47,8 +51,11 @@ function SettingsTab() {
 	const save = async (e: Event) => {
 		e.preventDefault();
 		setBusy(true);
-		await updateMapName(name.trim());
-		setBusy(false);
+		try {
+			await updateMapName(name.trim());
+		} finally {
+			setBusy(false);
+		}
 	};
 
 	return (
@@ -263,14 +270,13 @@ function DimensionRow(props: {
 	const prev = all[index - 1];
 	const next = all[index + 1];
 
-	const swap = (other: Dimension) =>
+	const move = (to: number) =>
 		props.run(async () => {
-			// Give both a distinct, explicit position so ties never hide the move.
-			const a = index;
-			const b = all.indexOf(other);
-			const ok1 = await updateDimension(d.slug, { sortOrder: b });
-			const ok2 = await updateDimension(other.slug, { sortOrder: a });
-			return ok1 && ok2;
+			// Every dimension gets its position, so ties and gaps never hide the move.
+			for (const { item, sortOrder } of renumber(all, index, to)) {
+				if (!(await updateDimension(item.slug, { sortOrder }))) return false;
+			}
+			return true;
 		});
 
 	return (
@@ -335,7 +341,7 @@ function DimensionRow(props: {
 					class="btn small"
 					disabled={props.busy || !prev}
 					aria-label="Move up"
-					onClick={() => prev && swap(prev)}
+					onClick={() => move(index - 1)}
 				>
 					↑
 				</button>
@@ -344,7 +350,7 @@ function DimensionRow(props: {
 					class="btn small"
 					disabled={props.busy || !next}
 					aria-label="Move down"
-					onClick={() => next && swap(next)}
+					onClick={() => move(index + 1)}
 				>
 					↓
 				</button>
@@ -378,16 +384,30 @@ function DimensionsTab() {
 
 	const run = async (fn: () => Promise<boolean>) => {
 		setBusy(true);
-		await fn();
-		setBusy(false);
+		try {
+			await fn();
+		} finally {
+			setBusy(false);
+		}
 	};
+
+	const scale = parseScale(newScale);
+	// Why the form cannot be submitted yet, once a name has been typed.
+	const problem = !newName.trim()
+		? null
+		: !newSlug
+			? "The slug is empty: type one using letters, digits, - or _."
+			: !slugSchema.safeParse(newSlug).success
+				? "The slug may only have lowercase letters, digits, - and _, and must start with a letter or digit."
+				: scale === undefined
+					? "The scale must be a positive number, or empty."
+					: null;
 
 	const add = async (e: Event) => {
 		e.preventDefault();
-		const slug = newSlug || slugify(newName);
-		if (!newName.trim() || !slug) return;
-		const scale = parseScale(newScale);
-		if (scale === undefined) return;
+		if (!newName.trim() || !newSlug || problem !== null || scale === undefined)
+			return;
+		const slug = newSlug;
 		await run(async () => {
 			const ok = await addDimension(
 				slug,
@@ -482,40 +502,34 @@ function DimensionsTab() {
 				<button
 					type="submit"
 					class="btn"
-					disabled={
-						busy ||
-						!newName.trim() ||
-						!newSlug ||
-						parseScale(newScale) === undefined
-					}
+					disabled={busy || !newName.trim() || problem !== null}
 				>
 					Add
 				</button>
 			</form>
+			{problem && <p class="hint error-text">{problem}</p>}
 		</div>
 	);
 }
 
 /** /manage: map settings, dimensions, members, invite links and statistics, for moderators and owners. */
 export function ManagePage() {
-	const [loaded, setLoaded] = useState(false);
-
-	useEffect(() => {
-		void Promise.all([loadMapDetail(), loadUser()]).then(() => setLoaded(true));
-	}, []);
+	const { status, retry } = usePageLoad();
 
 	const detail = currentMap.value;
 	const role = detail?.role;
 	const tabs: Tab[] = [];
-	if (role === "owner") tabs.push("settings");
-	if (role === "owner" || role === "moderator") tabs.push("dimensions");
-	if (role === "owner") tabs.push("members", "invites", "statistics");
+	if (role && canManage(role)) tabs.push("settings");
+	if (role && canModerate(role)) tabs.push("dimensions");
+	if (role && canManage(role)) tabs.push("members", "invites", "statistics");
 	const [tab, setTab] = useState<Tab>("settings");
 	const active = tabs.includes(tab) ? tab : tabs[0];
 
 	let body: ComponentChildren;
-	if (!loaded) {
+	if (status === "loading") {
 		body = <p class="muted">Loading…</p>;
+	} else if (status === "failed") {
+		body = <LoadFailed retry={retry} />;
 	} else if (!detail) {
 		body = <p class="error-text">The map could not be loaded.</p>;
 	} else if (!user.value) {

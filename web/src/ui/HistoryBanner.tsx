@@ -7,7 +7,7 @@ import {
 	rev,
 	revisionsData,
 } from "../state";
-import { formatEventTime, formatTime } from "./format";
+import { formatEventTime } from "./format";
 
 function BossBar(props: {
 	title: ComponentChildren;
@@ -44,7 +44,7 @@ export function HistoryBanner() {
 				title={
 					<>
 						Only the upload by <b>{only.authorName}</b> ·{" "}
-						{formatTime(only.createdAt)}
+						{formatEventTime(only)}
 					</>
 				}
 				action="Show everything"

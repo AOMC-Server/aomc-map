@@ -1,6 +1,5 @@
 import { DEFAULT_INVITE_HOURS } from "@aomc/shared";
 import { useEffect, useState } from "preact/hooks";
-import { showNotice } from "../api";
 import {
 	type CreatedInvite,
 	type InviteInfo,
@@ -8,13 +7,17 @@ import {
 	type Scope,
 } from "../sharing";
 import { formatTime } from "./format";
+import { type ExpiryOption, ExpirySelect, ShownOnce } from "./shareCommon";
 
-const EXPIRIES: { label: string; hours: number | null }[] = [
-	{ label: "1 day", hours: 24 },
-	{ label: "7 days", hours: DEFAULT_INVITE_HOURS },
-	{ label: "30 days", hours: 24 * 30 },
-	{ label: "Never", hours: null },
+const EXPIRIES: ExpiryOption[] = [
+	{ label: "1 day", value: 24 },
+	{ label: "7 days", value: DEFAULT_INVITE_HOURS },
+	{ label: "30 days", value: 24 * 30 },
+	{ label: "Never", value: null },
 ];
+
+/** The most uses the server accepts for one link. */
+const MAX_USES = 1000;
 
 function describeStatus(i: InviteInfo): string {
 	if (i.status !== "active") return i.status;
@@ -25,18 +28,6 @@ function describeStatus(i: InviteInfo): string {
 			? "never expires"
 			: `expires ${formatTime(i.expiresAt)}`;
 	return `${uses}, ${until}`;
-}
-
-async function copy(text: string) {
-	try {
-		await navigator.clipboard.writeText(text);
-		showNotice("Link copied.");
-	} catch {
-		showNotice(
-			"Could not copy; select the link and copy it manually.",
-			"error",
-		);
-	}
 }
 
 /** Create, copy and revoke invite links for the map or one private layer. */
@@ -62,17 +53,24 @@ export function InviteLinks<R extends string>(props: { scope: Scope<R> }) {
 	const create = async (e: Event) => {
 		e.preventDefault();
 		setBusy(true);
-		const out = await scope.createInvite(
-			{
-				expiresInHours: hours,
-				maxUses:
-					maxUses.trim() === ""
-						? null
-						: Math.max(1, Number.parseInt(maxUses, 10) || 1),
-			},
-			role,
-		);
-		setBusy(false);
+		let out: CreatedInvite | null = null;
+		try {
+			out = await scope.createInvite(
+				{
+					expiresInHours: hours,
+					maxUses:
+						maxUses.trim() === ""
+							? null
+							: Math.min(
+									MAX_USES,
+									Math.max(1, Number.parseInt(maxUses, 10) || 1),
+								),
+				},
+				role,
+			);
+		} finally {
+			setBusy(false);
+		}
 		if (out) {
 			setCreated(out);
 			await reload();
@@ -104,34 +102,14 @@ export function InviteLinks<R extends string>(props: { scope: Scope<R> }) {
 						</select>
 					</label>
 				)}
-				<label>
-					<span class="label">Expires</span>
-					<select
-						value={hours === null ? "never" : String(hours)}
-						onChange={(e) =>
-							setHours(
-								e.currentTarget.value === "never"
-									? null
-									: Number(e.currentTarget.value),
-							)
-						}
-					>
-						{EXPIRIES.map((x) => (
-							<option
-								key={x.label}
-								value={x.hours === null ? "never" : String(x.hours)}
-							>
-								{x.label}
-							</option>
-						))}
-					</select>
-				</label>
+				<ExpirySelect options={EXPIRIES} value={hours} onChange={setHours} />
 				<label>
 					<span class="label">Max uses</span>
 					<input
 						type="text"
 						inputMode="numeric"
 						placeholder="unlimited"
+						maxLength={String(MAX_USES).length}
 						value={maxUses}
 						onInput={(e) =>
 							setMaxUses(e.currentTarget.value.replace(/\D/g, ""))
@@ -144,23 +122,12 @@ export function InviteLinks<R extends string>(props: { scope: Scope<R> }) {
 			</form>
 
 			{created && (
-				<div class="new-link">
-					<p class="muted">
-						Copy it now: for safety the link is only shown once.
-					</p>
-					<div class="link-row">
-						<input
-							type="text"
-							readOnly
-							value={created.url}
-							aria-label="Invite link"
-							onFocus={(e) => e.currentTarget.select()}
-						/>
-						<button type="button" class="btn" onClick={() => copy(created.url)}>
-							Copy
-						</button>
-					</div>
-				</div>
+				<ShownOnce
+					intro="Copy it now: for safety the link is only shown once."
+					value={created.url}
+					label="Invite link"
+					copied="Link copied."
+				/>
 			)}
 
 			<ul class="invite-list">

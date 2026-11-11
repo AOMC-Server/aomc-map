@@ -18,7 +18,13 @@ type State =
 
 export const inviteTokenFromPath = (path: string): string | null => {
 	const m = /^\/invite\/([^/?#]+)\/?$/.exec(path);
-	return m ? decodeURIComponent(m[1] as string) : null;
+	if (!m) return null;
+	try {
+		return decodeURIComponent(m[1] as string);
+	} catch {
+		// Not a link we made; the server will say the invite is unknown.
+		return m[1] as string;
+	}
 };
 
 /** /invite/<token>: log in if needed, accept, and land on the map. */
@@ -59,7 +65,7 @@ export function InvitePage(props: { token: string }) {
 		})();
 	}, [token]);
 
-	const loginHref = loginUrl(`/invite/${token}?accept=1`);
+	const loginHref = loginUrl(`/invite/${encodeURIComponent(token)}?accept=1`);
 
 	return (
 		<main class="invite-page">

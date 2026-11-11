@@ -7,6 +7,7 @@ import {
 	type RevisionInfo,
 	rev,
 } from "../state";
+import { HOUR } from "../time";
 import {
 	axisTicks,
 	buildAxis,
@@ -14,6 +15,9 @@ import {
 	eventForRev,
 	eventNearest,
 	eventTime,
+	revisionStops,
+	stepRevision,
+	stopIndex,
 	timeToU,
 	uToTime,
 	yearMarks,
@@ -22,7 +26,6 @@ import { formatEventTime } from "./format";
 
 type Event = RevisionInfo & { rev: number };
 
-const HOUR = 3_600_000;
 /** Markers closer than this many pixels are drawn as one. */
 const CLUSTER_PX = 9;
 /** Room a year label needs on the axis. */
@@ -111,27 +114,12 @@ export function Timeline(props: {
 		: current
 			? xOf(eventTime(current))
 			: xOf(uToTime(axis, 0));
-	// Positions to step through with the keyboard: before the first, each upload, the latest.
-	const firstRev = events.reduce((m, e) => Math.min(m, e.rev), head);
-	const beforeRev = Math.max(firstRev - 1, 0);
-	const positions: (number | null)[] = [
-		beforeRev,
-		...events.map((e) => e.rev),
-		null,
-	];
-	const resolve = (r: number | null) => (r === null || r >= head ? null : r);
-
-	const position = latest
-		? positions.length - 1
-		: current
-			? events.indexOf(current) + 1
-			: 0;
+	const stops = revisionStops(events, head);
+	const position = stopIndex(events, head, rev.value);
+	const beforeRev = stops[0] as number;
 	const step = (dir: -1 | 1) => {
-		const now = resolve(rev.value);
-		for (let i = position + dir; i >= 0 && i < positions.length; i += dir) {
-			const target = resolve(positions[i] as number | null);
-			if (target !== now) return setRev(target);
-		}
+		const target = stepRevision(events, head, rev.value, dir);
+		if (target !== undefined) setRev(target);
 	};
 
 	const zoomAround = (x: number, factor: number) => {
@@ -302,7 +290,7 @@ export function Timeline(props: {
 				role="slider"
 				aria-label="Time line of uploads"
 				aria-valuemin={0}
-				aria-valuemax={positions.length - 1}
+				aria-valuemax={stops.length - 1}
 				aria-valuenow={position}
 				aria-valuetext={
 					latest
@@ -431,7 +419,7 @@ export function Timeline(props: {
 				<button
 					type="button"
 					class="btn small"
-					disabled={latest}
+					disabled={position >= stops.length - 1}
 					onClick={() => step(1)}
 					title="Next upload (→)"
 				>

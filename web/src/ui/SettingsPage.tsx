@@ -1,6 +1,4 @@
-import { useEffect, useState } from "preact/hooks";
 import { loginUrl } from "../api";
-import { loadMapDetail, loadUser } from "../controller";
 import {
 	type Settings,
 	settings,
@@ -10,7 +8,7 @@ import {
 import { user, visibleDimensions } from "../state";
 import { MODES, STYLES } from "../theme";
 import { ApiTokens } from "./ApiTokens";
-import { Page } from "./Page";
+import { LoadFailed, Page, usePageLoad } from "./Page";
 
 type BooleanSetting = {
 	[K in keyof Settings]: Settings[K] extends boolean ? K : never;
@@ -221,11 +219,7 @@ function Debugging() {
 
 /** /settings: your preferences and API tokens. */
 export function SettingsPage() {
-	const [loaded, setLoaded] = useState(false);
-
-	useEffect(() => {
-		void Promise.all([loadUser(), loadMapDetail()]).then(() => setLoaded(true));
-	}, []);
+	const { status, retry } = usePageLoad();
 
 	const u = user.value;
 	return (
@@ -254,7 +248,11 @@ export function SettingsPage() {
 			<Preferences />
 			<Debugging />
 
-			{!loaded ? null : u ? (
+			{status === "loading" ? null : status === "failed" ? (
+				<section class="page-section">
+					<LoadFailed retry={retry} />
+				</section>
+			) : u ? (
 				<ApiTokens />
 			) : (
 				<section class="page-section">

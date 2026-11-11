@@ -3,24 +3,31 @@ import type {
 	FeatureInput,
 	UpdateLayer,
 } from "@aomc/shared/features";
-import { api, ok, type Res, run } from "./api";
+import { api, attempt, ok, type Res, run, showNotice } from "./api";
 import { dimSlug, layersData, rev } from "./state";
+
+let loadSeq = 0;
 
 /** Loads the layers of the current dimension, as of the current revision. */
 export async function loadLayers(): Promise<void> {
 	const dim = dimSlug.value;
 	if (!dim) {
+		loadSeq++;
 		layersData.value = [];
 		return;
 	}
 	const at = rev.value;
-	const res = await api.api.layers.$get({
-		query: { dim, ...(at === null ? {} : { at: String(at) }) },
-	});
-	// A newer load may have been started while this one was in flight.
-	if (dimSlug.value !== dim || rev.value !== at) return;
-	if (res.ok)
-		layersData.value = (await res.json()).layers as typeof layersData.value;
+	const seq = ++loadSeq;
+	const result = await attempt(() =>
+		api.api.layers.$get({
+			query: { dim, ...(at === null ? {} : { at: String(at) }) },
+		}),
+	);
+	// A newer load may have been started while this one was in flight; the last one wins.
+	if (seq !== loadSeq) return;
+	if (result.ok)
+		layersData.value = result.body.layers as typeof layersData.value;
+	else showNotice(`Could not load the layers: ${result.error}`, "error");
 }
 
 export const mutate = <R extends Res>(call: () => Promise<R>) =>
