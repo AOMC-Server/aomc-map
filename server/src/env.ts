@@ -3,6 +3,7 @@ import { z } from "zod";
 const DEV_SESSION_SECRET = "dev-only-secret-change-me";
 
 const envSchema = z.object({
+	NODE_ENV: z.string().optional(),
 	PORT: z.coerce.number().int().default(3000),
 	DATA_DIR: z.string().default("./data"),
 	PUBLIC_URL: z.string().url().default("http://localhost:3000"),
@@ -11,8 +12,13 @@ const envSchema = z.object({
 	SESSION_SECRET: z.string().min(16).default(DEV_SESSION_SECRET),
 	PREVIEW_CACHE_MAX: z.coerce.number().int().min(1).default(500), // cached link-preview images
 	WEB_DIST: z.string().optional(), // defaults to <repo>/web/dist
-	DEFAULT_TILE_SIZE: z.coerce.number().int().default(512),
-	MAX_ZOOM: z.coerce.number().int().min(1).max(12).default(8),
+	DEFAULT_TILE_SIZE: z.coerce
+		.number()
+		.int()
+		.positive()
+		.refine((n) => n % 2 === 0, "must be even")
+		.default(512),
+	MAX_ZOOM: z.coerce.number().int().min(0).max(12).default(8),
 	MAX_UPLOAD_BYTES: z.coerce
 		.number()
 		.int()
@@ -44,17 +50,23 @@ const envSchema = z.object({
 		),
 });
 
-export type Env = z.infer<typeof envSchema>;
+export type Env = z.infer<typeof envSchema> & {
+	/** Cookies get the Secure flag when the site is served over https. */
+	COOKIE_SECURE: boolean;
+};
 
 export function parseEnv(
 	source: Record<string, string | undefined> = process.env,
 ): Env {
 	const env = envSchema.parse(source);
+	const https = env.PUBLIC_URL.startsWith("https:");
 	if (
-		env.PUBLIC_URL.startsWith("https:") &&
+		(https || env.NODE_ENV === "production") &&
 		env.SESSION_SECRET === DEV_SESSION_SECRET
 	) {
-		throw new Error("SESSION_SECRET must be set when PUBLIC_URL is https");
+		throw new Error(
+			"SESSION_SECRET must be set when PUBLIC_URL is https or NODE_ENV is production",
+		);
 	}
-	return env;
+	return { ...env, COOKIE_SECURE: https };
 }

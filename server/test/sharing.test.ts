@@ -1,11 +1,13 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
+import { createApiToken } from "../src/auth/tokens";
 import { invites, layerMembers, members } from "../src/db/schema";
 import {
 	type Auth,
 	bootTiles,
 	call,
 	cleanupTempDirs,
+	makeSessionCookie,
 	makeUser,
 } from "./helpers";
 
@@ -375,7 +377,7 @@ describe("layer invites", () => {
 					`/api/invites/${made.body.token}/accept`,
 				)
 			).status,
-		).toBe(404);
+		).toBe(410);
 		expect(
 			(await call(t, null, "GET", `/api/invites/${made.body.token}`)).status,
 		).toBe(410);
@@ -534,5 +536,216 @@ describe("layer members", () => {
 			role: "editor",
 		});
 		expect(await flag(friend)).toBe(false);
+	});
+});
+
+describe("invite validity", () => {
+	const accept = (t: Ctx, user: Auth, token: string) =>
+		call(t, user, "POST", `/api/invites/${token}/accept`);
+
+	test("a map invite stops working once its creator is no longer an owner", async () => {
+		const t = await boot();
+		const made = await mapInvite(t);
+		await t.db
+			.update(members)
+			.set({ role: "moderator" })
+			.where(eq(members.userId, "owner"));
+		const a = await makeUser(t.db, "a");
+
+		const preview = await call(t, null, "GET", `/api/invites/${made.token}`);
+		expect(preview.status).toBe(410);
+		expect(preview.body.reason).toBe("gone");
+		expect((await accept(t, a, made.token)).status).toBe(410);
+		expect(await t.db.select().from(members)).toHaveLength(2);
+		const [row] = await t.db.select().from(invites);
+		expect(row?.uses).toBe(0);
+	});
+
+	test("removing the creator from the map also kills their invites", async () => {
+		const t = await boot();
+		const made = await mapInvite(t);
+		await t.db.delete(members).where(eq(members.userId, "owner"));
+		const a = await makeUser(t.db, "a");
+		expect((await accept(t, a, made.token)).status).toBe(410);
+	});
+
+	test("invites of a creator who is still an owner keep working", async () => {
+		const t = await boot();
+		const made = await mapInvite(t);
+		await t.db.insert(members).values({ userId: "editor", role: "owner" });
+		await t.db
+			.update(members)
+			.set({ role: "moderator" })
+			.where(eq(members.userId, "mod"));
+		const b = await makeUser(t.db, "b");
+		const second = await mapInvite(t, {}, t.editor);
+		expect((await accept(t, b, second.token)).status).toBe(200);
+		expect((await accept(t, b, made.token)).status).toBe(200);
+	});
+
+	test("a layer invite made by a moderator dies with their moderation", async () => {
+		const t = await boot();
+		const layer = await privateLayer(t);
+		const byMod = await call(
+			t,
+			t.mod,
+			"POST",
+			`/api/layers/${layer.id}/invites`,
+			{
+				role: "viewer",
+			},
+		);
+		const byCreator = await call(
+			t,
+			t.editor,
+			"POST",
+			`/api/layers/${layer.id}/invites`,
+			{ role: "viewer" },
+		);
+		await t.db.delete(members).where(eq(members.userId, "mod"));
+		const stranger = await makeUser(t.db, "stranger");
+		expect((await accept(t, stranger, byMod.body.token)).status).toBe(410);
+		// The layer's creator may always manage it, so their link survives.
+		expect((await accept(t, stranger, byCreator.body.token)).status).toBe(200);
+		expect(await layerNames(t, stranger)).toEqual(["Secret"]);
+	});
+
+	test("layer invites report alreadyMember", async () => {
+		const t = await boot();
+		const layer = await privateLayer(t);
+		const invite = async (role: "viewer" | "editor") =>
+			(
+				await call(t, t.editor, "POST", `/api/layers/${layer.id}/invites`, {
+					role,
+				})
+			).body.token as string;
+		const viewerLink = await invite("viewer");
+		const editorLink = await invite("editor");
+		const flag = async (user: Auth, token: string) =>
+			(await call(t, user, "GET", `/api/invites/${token}`)).body.invite
+				.alreadyMember;
+
+		const friend = await makeUser(t.db, "friend");
+		expect(await flag(null, viewerLink)).toBe(false);
+		expect(await flag(friend, viewerLink)).toBe(false);
+		expect(await flag(t.editor, editorLink)).toBe(true);
+
+		await t.db
+			.insert(layerMembers)
+			.values({ layerId: layer.id, userId: "friend", role: "viewer" });
+		expect(await flag(friend, viewerLink)).toBe(true);
+		expect(await flag(friend, editorLink)).toBe(false);
+		const again = await accept(t, friend, viewerLink);
+		expect(again.body.alreadyMember).toBe(true);
+	});
+
+	test("tokens need the manage scope to accept a map invite, but not a layer invite", async () => {
+		const t = await boot();
+		const made = await mapInvite(t);
+		const layer = await privateLayer(t);
+		const layerLink = (
+			await call(t, t.editor, "POST", `/api/layers/${layer.id}/invites`, {
+				role: "viewer",
+			})
+		).body.token as string;
+
+		const scoped = async (
+			id: string,
+			scopes: ("read" | "features" | "manage")[],
+		) => {
+			await makeUser(t.db, id);
+			const { token } = await createApiToken(t.db, id, "s", null, scopes);
+			return { auth: { Authorization: `Bearer ${token}` } };
+		};
+		const featuresOnly = await scoped("f", ["read", "features"]);
+		const denied = await accept(t, featuresOnly, made.token);
+		expect(denied.status).toBe(403);
+		expect(await t.db.select().from(members)).toHaveLength(2);
+		expect((await accept(t, featuresOnly, layerLink)).status).toBe(200);
+
+		const manager = await scoped("m", ["read", "features", "manage"]);
+		expect((await accept(t, manager, made.token)).status).toBe(200);
+	});
+
+	test("a browser session may accept a map invite", async () => {
+		const t = await boot();
+		const made = await mapInvite(t);
+		await makeUser(t.db, "web");
+		const res = await t.app.request(`/api/invites/${made.token}/accept`, {
+			method: "POST",
+			headers: {
+				Cookie: await makeSessionCookie(t.db, "web"),
+				Origin: "http://localhost:3000",
+			},
+		});
+		expect(res.status).toBe(200);
+		const [row] = await t.db
+			.select()
+			.from(members)
+			.where(eq(members.userId, "web"));
+		expect(row?.role).toBe("moderator");
+	});
+});
+
+describe("a layer's creator", () => {
+	test("keeps access when a moderator makes their public layer private", async () => {
+		const t = await boot();
+		const alice = await makeUser(t.db, "alice");
+		const made = await call(t, alice, "POST", "/api/layers", {
+			dimension: "overworld",
+			name: "Alice's",
+			color: "red",
+		});
+		expect(made.status).toBe(201);
+		const id = made.body.layer.id as number;
+		// Older layers may lack the creator's membership row; access must not depend on it.
+		await t.db.delete(layerMembers).where(eq(layerMembers.userId, "alice"));
+
+		const patched = await call(t, t.mod, "PATCH", `/api/layers/${id}`, {
+			visibility: "private",
+		});
+		expect(patched.status).toBe(200);
+
+		const stranger = await makeUser(t.db, "stranger");
+		expect(await layerNames(t, stranger)).toEqual([]);
+		expect(await layerNames(t, alice)).toEqual(["Alice's"]);
+		const pin = {
+			type: "pin",
+			name: "home",
+			popup: "",
+			color: "red",
+			geometry: [1, 2],
+		};
+		expect(
+			(await call(t, alice, "POST", `/api/layers/${id}/features`, pin)).status,
+		).toBe(201);
+		expect(
+			(await call(t, alice, "GET", `/api/layers/${id}/export`)).status,
+		).toBe(200);
+		expect(
+			(await call(t, stranger, "GET", `/api/layers/${id}/export`)).status,
+		).toBe(404);
+	});
+
+	test("cannot be removed, left out or changed in the layer's members", async () => {
+		const t = await boot();
+		const layer = await privateLayer(t);
+		const path = `/api/layers/${layer.id}/members`;
+		expect((await call(t, t.editor, "DELETE", `${path}/editor`)).status).toBe(
+			409,
+		);
+		expect((await call(t, t.mod, "DELETE", `${path}/editor`)).status).toBe(409);
+		expect(
+			(await call(t, t.mod, "PATCH", `${path}/editor`, { role: "viewer" }))
+				.status,
+		).toBe(409);
+		expect(
+			(await call(t, t.mod, "POST", path, { userId: "editor", role: "viewer" }))
+				.status,
+		).toBe(409);
+		const list = await call(t, t.editor, "GET", path);
+		expect(list.body.members).toEqual([
+			expect.objectContaining({ userId: "editor", role: "editor" }),
+		]);
 	});
 });

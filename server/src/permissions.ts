@@ -3,6 +3,7 @@ import {
 	canEdit,
 	canManage,
 	canModerate,
+	type LayerRole,
 	type Role,
 } from "@aomc/shared";
 import { and, eq, isNull } from "drizzle-orm";
@@ -16,7 +17,8 @@ export type LayerInfo = {
 	visibility: "public" | "private";
 	createdBy: string;
 };
-export type LayerRole = "viewer" | "editor" | null;
+/** A layer role, or null for no access of their own. */
+export type LayerAccess = LayerRole | null;
 
 /**
  * The map is public: an explicit membership wins, otherwise a logged-in user is an editor and
@@ -50,8 +52,8 @@ export function canDeleteUpload(
 export function effectiveLayerRole(
 	actor: Actor,
 	layer: LayerInfo,
-	membership: LayerRole,
-): LayerRole {
+	membership: LayerAccess,
+): LayerAccess {
 	if (membership) return membership;
 	return actor !== null && actor.id === layer.createdBy ? "editor" : null;
 }
@@ -59,7 +61,7 @@ export function effectiveLayerRole(
 export function canViewLayer(
 	role: Role,
 	layer: LayerInfo,
-	layerRole: LayerRole,
+	layerRole: LayerAccess,
 ): boolean {
 	if (layer.visibility === "public") return true;
 	return canModerate(role) || layerRole !== null;
@@ -68,7 +70,7 @@ export function canViewLayer(
 export function canEditLayer(
 	role: Role,
 	layer: LayerInfo,
-	layerRole: LayerRole,
+	layerRole: LayerAccess,
 ): boolean {
 	if (!canEdit(role)) return false;
 	if (layer.visibility === "public") return true;

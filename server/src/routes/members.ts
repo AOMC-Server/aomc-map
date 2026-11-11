@@ -1,4 +1,8 @@
-import { setMemberSchema, updateMemberSchema } from "@aomc/shared";
+import {
+	type MemberRole,
+	setMemberSchema,
+	updateMemberSchema,
+} from "@aomc/shared";
 import { count, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { validator } from "hono-openapi";
@@ -8,21 +12,32 @@ import { members, users } from "../db/schema";
 import { doc } from "../openapi";
 import { canManage, leavesNoOwner } from "../permissions";
 import type { AppEnv } from "../types";
+import { findUser, mayRemove, UNKNOWN_USER_ERROR } from "./util";
 
-async function guardLastOwner(
+type Reader = Pick<Db, "select">;
+
+/** Run the check and the write that depends on it as one unit. */
+const atomically = <T>(
 	db: Db,
+	fn: (tx: Reader & Pick<Db, "insert" | "update" | "delete">) => T,
+) => db.transaction(fn, { behavior: "immediate" });
+
+function guardLastOwner(
+	db: Reader,
 	userId: string,
-	next: "moderator" | "owner" | null,
-): Promise<string | null> {
-	const [current] = await db
+	next: MemberRole | null,
+): string | null {
+	const current = db
 		.select({ role: members.role })
 		.from(members)
-		.where(eq(members.userId, userId));
+		.where(eq(members.userId, userId))
+		.get();
 	if (!current) return null;
-	const [row] = await db
+	const row = db
 		.select({ owners: count() })
 		.from(members)
-		.where(eq(members.role, "owner"));
+		.where(eq(members.role, "owner"))
+		.get();
 	return leavesNoOwner(row?.owners ?? 0, current.role, next)
 		? "the map must keep at least one owner"
 		: null;
@@ -69,25 +84,21 @@ export const memberRoutes = new Hono<AppEnv>()
 			if (!canManage(c.var.role)) return c.json({ error: "forbidden" }, 403);
 
 			const body = c.req.valid("json");
-			const [target] = await db
-				.select({ id: users.id })
-				.from(users)
-				.where(eq(users.id, body.userId));
-			if (!target)
-				return c.json(
-					{ error: "user not found (they must log in once first)" },
-					404,
-				);
-			const err = await guardLastOwner(db, body.userId, body.role);
+			if (!findUser(db, body.userId))
+				return c.json({ error: UNKNOWN_USER_ERROR }, 404);
+			const err = atomically(db, (tx) => {
+				const blocked = guardLastOwner(tx, body.userId, body.role);
+				if (blocked) return blocked;
+				tx.insert(members)
+					.values({ userId: body.userId, role: body.role })
+					.onConflictDoUpdate({
+						target: members.userId,
+						set: { role: body.role },
+					})
+					.run();
+				return null;
+			});
 			if (err) return c.json({ error: err }, 409);
-
-			await db
-				.insert(members)
-				.values({ userId: body.userId, role: body.role })
-				.onConflictDoUpdate({
-					target: members.userId,
-					set: { role: body.role },
-				});
 			return c.json({ ok: true }, 201);
 		},
 	)
@@ -107,15 +118,23 @@ export const memberRoutes = new Hono<AppEnv>()
 
 			const userId = c.req.param("userId");
 			const { role } = c.req.valid("json");
-			const [current] = await db
-				.select({ role: members.role })
-				.from(members)
-				.where(eq(members.userId, userId));
-			if (!current) return c.json({ error: "not found" }, 404);
-			const err = await guardLastOwner(db, userId, role);
-			if (err) return c.json({ error: err }, 409);
-
-			await db.update(members).set({ role }).where(eq(members.userId, userId));
+			const result = atomically(db, (tx) => {
+				const current = tx
+					.select({ role: members.role })
+					.from(members)
+					.where(eq(members.userId, userId))
+					.get();
+				if (!current) return "missing";
+				const blocked = guardLastOwner(tx, userId, role);
+				if (blocked) return blocked;
+				tx.update(members)
+					.set({ role })
+					.where(eq(members.userId, userId))
+					.run();
+				return null;
+			});
+			if (result === "missing") return c.json({ error: "not found" }, 404);
+			if (result) return c.json({ error: result }, 409);
 			return c.json({ ok: true });
 		},
 	)
@@ -132,20 +151,24 @@ export const memberRoutes = new Hono<AppEnv>()
 		async (c) => {
 			const { db } = c.var;
 			const userId = c.req.param("userId");
-			// Members may always step down themselves, unless they are the last owner.
-			if (userId !== userOf(c).id && !canManage(c.var.role))
+			if (!mayRemove(userOf(c), userId, canManage(c.var.role)))
 				return c.json({ error: "forbidden" }, 403);
 
-			const deleted = await db
-				.select({ role: members.role })
-				.from(members)
-				.where(eq(members.userId, userId))
-				.get();
-			if (!deleted) return c.json({ error: "not found" }, 404);
-			const err = await guardLastOwner(db, userId, null);
-			if (err) return c.json({ error: err }, 409);
-
-			await db.delete(members).where(eq(members.userId, userId));
+			// Members may always step down themselves, unless they are the last owner.
+			const result = atomically(db, (tx) => {
+				const present = tx
+					.select({ role: members.role })
+					.from(members)
+					.where(eq(members.userId, userId))
+					.get();
+				if (!present) return "missing";
+				const blocked = guardLastOwner(tx, userId, null);
+				if (blocked) return blocked;
+				tx.delete(members).where(eq(members.userId, userId)).run();
+				return null;
+			});
+			if (result === "missing") return c.json({ error: "not found" }, 404);
+			if (result) return c.json({ error: result }, 409);
 			return c.json({ ok: true });
 		},
 	);

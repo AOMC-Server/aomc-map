@@ -18,6 +18,7 @@ const WRITE_SCOPES: [RegExp, TokenScope][] = [
 	[/^\/api\/features(\/.*)?$/, "features"],
 	// Revoking: layer invites need `features`; map invites need an owner, which needs `manage`.
 	[/^\/api\/invites\/\d+\/?$/, "features"],
+	// Layer invites need only this; acceptInvite refuses map invites to tokens without `manage`.
 	[/^\/api\/invites\/[^/]+\/accept\/?$/, "features"],
 	[/^\/api\/invites\/?$/, "manage"],
 	[/^\/api\/members(\/.*)?$/, "manage"],

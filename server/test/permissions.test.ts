@@ -8,8 +8,9 @@ import {
 	canManageLayer,
 	canModerate,
 	canViewLayer,
+	effectiveLayerRole,
 	effectiveRole,
-	type LayerRole,
+	type LayerAccess,
 	leavesNoOwner,
 } from "../src/permissions";
 
@@ -60,22 +61,27 @@ describe("layer view/edit", () => {
 	const priv = { visibility: "private", createdBy: "someone" } as const;
 
 	// [layer, map role, layer role, canView, canEdit]
-	const table: [typeof pub | typeof priv, Role, LayerRole, boolean, boolean][] =
-		[
-			[pub, "viewer", null, true, false],
-			[pub, "editor", null, true, true],
-			[pub, "editor", "viewer", true, true],
-			[pub, "moderator", null, true, true],
-			[priv, "viewer", null, false, false],
-			[priv, "viewer", "viewer", true, false],
-			[priv, "viewer", "editor", true, false],
-			[priv, "editor", null, false, false],
-			[priv, "editor", "viewer", true, false],
-			[priv, "editor", "editor", true, true],
-			[priv, "moderator", null, true, true],
-			[priv, "moderator", "viewer", true, true],
-			[priv, "owner", null, true, true],
-		];
+	const table: [
+		typeof pub | typeof priv,
+		Role,
+		LayerAccess,
+		boolean,
+		boolean,
+	][] = [
+		[pub, "viewer", null, true, false],
+		[pub, "editor", null, true, true],
+		[pub, "editor", "viewer", true, true],
+		[pub, "moderator", null, true, true],
+		[priv, "viewer", null, false, false],
+		[priv, "viewer", "viewer", true, false],
+		[priv, "viewer", "editor", true, false],
+		[priv, "editor", null, false, false],
+		[priv, "editor", "viewer", true, false],
+		[priv, "editor", "editor", true, true],
+		[priv, "moderator", null, true, true],
+		[priv, "moderator", "viewer", true, true],
+		[priv, "owner", null, true, true],
+	];
 	for (const [layer, role, layerRole, view, edit] of table) {
 		test(`${layer.visibility} layer: map ${role}, layer ${layerRole}`, () => {
 			expect(canViewLayer(role, layer, layerRole)).toBe(view);
@@ -125,4 +131,19 @@ describe("leavesNoOwner", () => {
 			expect(leavesNoOwner(owners, current, next)).toBe(expected),
 		);
 	}
+});
+
+describe("effectiveLayerRole", () => {
+	const layer = { visibility: "private", createdBy: "u1" } as const;
+	test("an explicit membership wins", () => {
+		expect(effectiveLayerRole(user, layer, "viewer")).toBe("viewer");
+	});
+	test("the creator is an editor without a membership", () => {
+		expect(effectiveLayerRole(user, layer, null)).toBe("editor");
+		expect(canViewLayer("editor", layer, "editor")).toBe(true);
+	});
+	test("others and anonymous visitors get nothing", () => {
+		expect(effectiveLayerRole({ id: "u2" }, layer, null)).toBeNull();
+		expect(effectiveLayerRole(null, layer, null)).toBeNull();
+	});
 });

@@ -89,6 +89,7 @@ export const updateDimensionSchema = z
 
 /** Roles stored for a member. Everyone logged in is an editor and everyone else a viewer without one. */
 export const memberRoleSchema = z.enum(["moderator", "owner"]);
+export type MemberRole = z.infer<typeof memberRoleSchema>;
 
 export const setMemberSchema = z.object({
 	userId: z.string().min(1),

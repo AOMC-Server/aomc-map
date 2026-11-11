@@ -3,17 +3,18 @@ import { desc, eq, isNull, type SQL } from "drizzle-orm";
 import { Hono } from "hono";
 import { validator } from "hono-openapi";
 import { requireUser, userOf } from "../auth/session";
-import { sha256Hex } from "../auth/tokens";
 import type { Db } from "../db/client";
-import { invites, layers, users } from "../db/schema";
+import { invites, users } from "../db/schema";
 import {
 	acceptInvite,
+	coveredBy,
 	createInvite,
 	inviteStatus,
 	looksLikeInviteToken,
+	resolveInvite,
 } from "../invites";
 import { doc } from "../openapi";
-import { atLeast, canManage, canManageLayer } from "../permissions";
+import { canManage, canManageLayer } from "../permissions";
 import type { AppEnv } from "../types";
 import { layerFor, parseId } from "./util";
 
@@ -142,7 +143,6 @@ export const inviteRoutes = new Hono<AppEnv>()
 			const { row, token } = createInvite(c.var.db, {
 				...c.req.valid("json"),
 				layerId: null,
-				role: "moderator",
 				createdBy: user.id,
 			});
 			return c.json(
@@ -163,33 +163,19 @@ export const inviteRoutes = new Hono<AppEnv>()
 			fails: [404, 410],
 		}),
 		async (c) => {
-			const { db, map, role } = c.var;
+			const { db, map, user } = c.var;
 			const token = c.req.param("token");
 			if (!looksLikeInviteToken(token))
 				return c.json({ error: "invite not found" }, 404);
 
-			const [row] = await db
-				.select()
-				.from(invites)
-				.where(eq(invites.tokenHash, sha256Hex(token)));
-			if (!row) return c.json({ error: "invite not found" }, 404);
-			const status = inviteStatus(row);
-			if (status !== "active") {
+			const found = resolveInvite(db, token);
+			if (!found.ok) {
 				return c.json(
-					{ error: `this invite is ${status}`, reason: status },
-					410,
+					{ error: found.error, reason: found.reason },
+					found.status,
 				);
 			}
-
-			const [layer] = row.layerId
-				? await db.select().from(layers).where(eq(layers.id, row.layerId))
-				: [undefined];
-			if (row.layerId && (!layer || layer.deletedAt !== null)) {
-				return c.json(
-					{ error: "this invite is no longer valid", reason: "gone" },
-					410,
-				);
-			}
+			const { inv: row, layer } = found;
 			const [inviter] = await db
 				.select({ name: users.username })
 				.from(users)
@@ -202,7 +188,8 @@ export const inviteRoutes = new Hono<AppEnv>()
 					mapName: map.name,
 					layerName: layer?.name ?? null,
 					inviterName: inviter?.name ?? "someone",
-					alreadyMember: row.layerId === null && atLeast(role, "moderator"),
+					alreadyMember:
+						user !== null && coveredBy(db, user.id, found) !== null,
 				},
 			});
 		},
@@ -212,8 +199,9 @@ export const inviteRoutes = new Hono<AppEnv>()
 		doc({
 			tag: "Sharing",
 			summary: "Accept an invite",
-			description: "Never lowers anyone's role.",
-			fails: [404, 410],
+			description:
+				"Never lowers anyone's role. Map invites need a browser session or a token with the `manage` scope. Answers 410 when the invite is no longer valid, including when its creator lost the right to make it.",
+			fails: [403, 404, 410],
 			login: true,
 		}),
 		requireUser,
@@ -221,7 +209,10 @@ export const inviteRoutes = new Hono<AppEnv>()
 			const token = c.req.param("token");
 			if (!looksLikeInviteToken(token))
 				return c.json({ error: "invite not found" }, 404);
-			const result = acceptInvite(c.var.db, userOf(c).id, token);
+			const { authVia, scopes } = c.var;
+			const allowMap =
+				authVia !== "token" || (scopes?.includes("manage") ?? false);
+			const result = acceptInvite(c.var.db, userOf(c).id, token, allowMap);
 			if (!result.ok) return c.json({ error: result.error }, result.status);
 			const { ok: _ok, ...rest } = result;
 			return c.json(rest);

@@ -16,17 +16,21 @@ export function sha256Hex(value: string): string {
 }
 
 const DAY_MS = 24 * 60 * 60 * 1000;
+const LAST_USED_GRANULARITY_MS = 60_000;
 
-/** Returns the plaintext token once; only its hash is stored. `expiresInDays` null = never. */
-export async function createApiToken(
-	db: Db,
-	userId: string,
-	name: string,
-	expiresInDays: number | null = null,
-	scopes: TokenScope[] = [...TOKEN_SCOPES],
+type NewToken = {
+	userId: string;
+	name: string;
+	expiresInDays: number | null;
+	scopes: TokenScope[];
+};
+
+function insertApiToken(
+	db: Pick<Db, "insert">,
+	{ userId, name, expiresInDays, scopes }: NewToken,
 ) {
 	const token = TOKEN_PREFIX + randomToken(24);
-	const [row] = await db
+	const row = db
 		.insert(apiTokens)
 		.values({
 			userId,
@@ -42,17 +46,36 @@ export async function createApiToken(
 			createdAt: apiTokens.createdAt,
 			expiresAt: apiTokens.expiresAt,
 			scopes: apiTokens.scopes,
-		});
+		})
+		.get();
 	if (!row) throw new Error("token insert returned no row");
 	return { ...row, token };
 }
 
-export async function countApiTokens(db: Db, userId: string): Promise<number> {
-	const [row] = await db
-		.select({ n: count() })
-		.from(apiTokens)
-		.where(eq(apiTokens.userId, userId));
-	return row?.n ?? 0;
+/** Returns the plaintext token once; only its hash is stored. `expiresInDays` null = never. */
+export async function createApiToken(
+	db: Db,
+	userId: string,
+	name: string,
+	expiresInDays: number | null = null,
+	scopes: TokenScope[] = [...TOKEN_SCOPES],
+) {
+	return insertApiToken(db, { userId, name, expiresInDays, scopes });
+}
+
+/** Like createApiToken, but counts and inserts in one transaction; null if the user is at `max`. */
+export function createApiTokenWithLimit(db: Db, max: number, token: NewToken) {
+	return db.transaction(
+		(tx) => {
+			const [row] = tx
+				.select({ n: count() })
+				.from(apiTokens)
+				.where(eq(apiTokens.userId, token.userId))
+				.all();
+			return (row?.n ?? 0) >= max ? null : insertApiToken(tx, token);
+		},
+		{ behavior: "immediate" },
+	);
 }
 
 export function listApiTokens(db: Db, userId: string) {
@@ -91,6 +114,7 @@ export async function verifyApiToken(
 		.select({
 			tokenId: apiTokens.id,
 			expiresAt: apiTokens.expiresAt,
+			lastUsedAt: apiTokens.lastUsedAt,
 			scopes: apiTokens.scopes,
 			id: users.id,
 			username: users.username,
@@ -100,11 +124,18 @@ export async function verifyApiToken(
 		.innerJoin(users, eq(users.id, apiTokens.userId))
 		.where(eq(apiTokens.tokenHash, sha256Hex(token)));
 	if (!row) return null;
-	if (row.expiresAt !== null && row.expiresAt <= Date.now()) return null;
-	await db
-		.update(apiTokens)
-		.set({ lastUsedAt: Date.now() })
-		.where(eq(apiTokens.id, row.tokenId));
+	const now = Date.now();
+	if (row.expiresAt !== null && row.expiresAt <= now) return null;
+	// A write per request would make every API call a write; a minute is fine for "last used".
+	if (
+		row.lastUsedAt === null ||
+		now - row.lastUsedAt >= LAST_USED_GRANULARITY_MS
+	) {
+		await db
+			.update(apiTokens)
+			.set({ lastUsedAt: now })
+			.where(eq(apiTokens.id, row.tokenId));
+	}
 	return {
 		user: { id: row.id, username: row.username, avatarUrl: row.avatarUrl },
 		scopes: row.scopes,

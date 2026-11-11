@@ -7,7 +7,9 @@ import { layerMembers, users } from "../db/schema";
 import { doc } from "../openapi";
 import { canManageLayer } from "../permissions";
 import type { AppEnv } from "../types";
-import { layerFor } from "./util";
+import { findUser, layerFor, mayRemove, UNKNOWN_USER_ERROR } from "./util";
+
+const CREATOR_ERROR = "the layer's creator always has editor access";
 
 /** /api/layers/:id/members: who may see and edit a private layer. */
 export const layerMemberRoutes = new Hono<AppEnv>()
@@ -43,9 +45,10 @@ export const layerMemberRoutes = new Hono<AppEnv>()
 		doc({
 			tag: "Sharing",
 			summary: "Add a layer member or change their role",
-			description: "The user must have logged in once.",
+			description:
+				"The user must have logged in once. The layer's creator always has editor access and cannot be changed (409).",
 			ok: { 201: "Role set" },
-			fails: [403, 404],
+			fails: [403, 404, 409],
 			login: true,
 		}),
 		validator("json", layerMemberSchema),
@@ -57,15 +60,10 @@ export const layerMemberRoutes = new Hono<AppEnv>()
 				return c.json({ error: "forbidden" }, 403);
 
 			const body = c.req.valid("json");
-			const [target] = await db
-				.select({ id: users.id })
-				.from(users)
-				.where(eq(users.id, body.userId));
-			if (!target)
-				return c.json(
-					{ error: "user not found (they must log in once first)" },
-					404,
-				);
+			const target = findUser(db, body.userId);
+			if (!target) return c.json({ error: UNKNOWN_USER_ERROR }, 404);
+			if (target.id === found.layer.createdBy)
+				return c.json({ error: CREATOR_ERROR }, 409);
 
 			await db
 				.insert(layerMembers)
@@ -82,7 +80,7 @@ export const layerMemberRoutes = new Hono<AppEnv>()
 		doc({
 			tag: "Sharing",
 			summary: "Change a layer member's role",
-			fails: [403, 404],
+			fails: [403, 404, 409],
 			login: true,
 		}),
 		validator("json", layerMemberRoleSchema),
@@ -92,13 +90,17 @@ export const layerMemberRoutes = new Hono<AppEnv>()
 			if (!canManageLayer(c.var.user, c.var.role, found.layer))
 				return c.json({ error: "forbidden" }, 403);
 
+			const userId = c.req.param("userId") ?? "";
+			if (userId === found.layer.createdBy)
+				return c.json({ error: CREATOR_ERROR }, 409);
+
 			const rows = await c.var.db
 				.update(layerMembers)
 				.set({ role: c.req.valid("json").role })
 				.where(
 					and(
 						eq(layerMembers.layerId, found.layer.id),
-						eq(layerMembers.userId, c.req.param("userId") ?? ""),
+						eq(layerMembers.userId, userId),
 					),
 				)
 				.returning({ userId: layerMembers.userId });
@@ -112,21 +114,26 @@ export const layerMemberRoutes = new Hono<AppEnv>()
 		doc({
 			tag: "Sharing",
 			summary: "Remove a layer member",
-			description: "Members may always remove themselves.",
-			fails: [403, 404],
+			description:
+				"Members may always remove themselves, except the layer's creator (409).",
+			fails: [403, 404, 409],
 			login: true,
 		}),
 		async (c) => {
 			const found = await layerFor(c, c.req.param("id"));
 			if (!found) return c.json({ error: "not found" }, 404);
 			const userId = c.req.param("userId") ?? "";
-			// Members may always leave a layer themselves.
 			if (
-				userId !== userOf(c).id &&
-				!canManageLayer(c.var.user, c.var.role, found.layer)
+				!mayRemove(
+					userOf(c),
+					userId,
+					canManageLayer(c.var.user, c.var.role, found.layer),
+				)
 			) {
 				return c.json({ error: "forbidden" }, 403);
 			}
+			if (userId === found.layer.createdBy)
+				return c.json({ error: CREATOR_ERROR }, 409);
 			const rows = await c.var.db
 				.delete(layerMembers)
 				.where(

@@ -20,14 +20,12 @@ export const createMapInviteSchema = z.object({
 	expiresInHours: expiry,
 	maxUses,
 });
-export type CreateMapInvite = z.infer<typeof createMapInviteSchema>;
 
 export const createLayerInviteSchema = z.object({
 	role: layerRoleSchema,
 	expiresInHours: expiry,
 	maxUses,
 });
-export type CreateLayerInvite = z.infer<typeof createLayerInviteSchema>;
 
 export const layerMemberSchema = z.object({
 	userId: z.string().min(1),
