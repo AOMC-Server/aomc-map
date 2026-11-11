@@ -3,7 +3,8 @@ services:
     build: .
     restart: unless-stopped
     ports:
-      - "3000:3000"
+      # The container listens on PORT from .env (3000 if unset); publish the same port.
+      - "${PORT:-3000}:${PORT:-3000}"
     env_file: .env
     environment:
       DATA_DIR: /data

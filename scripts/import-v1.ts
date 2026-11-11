@@ -2,12 +2,16 @@ import { existsSync } from "node:fs";
 import { readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
+import { orExit, positiveNumber } from "./args";
 
 /**
  * Imports the zoom 0 tiles of the old (v1) map through the public API only.
  *
  * v1 wrote `<src>/<dimension>/0/<x>_<z>.png`, where x and z are the block coordinates of the
  * tile's top-left corner and black pixels mean "no data" (the same convention as uploads).
+ *
+ * Every tile is sent with an export date (see `date`), so the server layers the import under
+ * newer exports instead of treating the tiles as made now.
  */
 
 export type ImportOptions = {
@@ -17,6 +21,11 @@ export type ImportOptions = {
 	src: string;
 	batch?: number;
 	maxBatchBytes?: number;
+	/**
+	 * Export date (ms since the epoch) for every tile. Default: each file's modified time, cut
+	 * back to the start of its UTC day so the history gets one revision per day, not per second.
+	 */
+	date?: number;
 	/** JSON file that remembers finished files so an interrupted run can resume. */
 	statePath?: string;
 	/** Only import these v1 dimension folders. */
@@ -40,6 +49,17 @@ type State = { done: Record<string, string[]> };
 
 const TILE_NAME = /^(-?\d+)_(-?\d+)\.png$/;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+const DAY_MS = 86_400_000;
+/** The server only reads export dates from the year 2000 on. */
+const EARLIEST = Date.UTC(2000, 0, 1);
+/** Room left for the multipart framing, `coords` and `paths` within the server's size limit. */
+const LIMIT_HEADROOM = 0.9;
+
+/** `YYYY-MM-DD_HH.MM.SS` in UTC, the way Xaero names exports (the server reads it as UTC). */
+export function xaeroStamp(ms: number): string {
+	const iso = new Date(Math.max(ms, EARLIEST)).toISOString();
+	return `${iso.slice(0, 10)}_${iso.slice(11, 19).replaceAll(":", ".")}`;
+}
 
 async function loadState(path: string | undefined): Promise<State> {
 	if (!path || !existsSync(path)) return { done: {} };
@@ -57,8 +77,11 @@ export async function runImport(opts: ImportOptions): Promise<ImportResult> {
 	const log = opts.log ?? console.log;
 	const base = opts.url.replace(/\/+$/, "");
 	const auth = { Authorization: `Bearer ${opts.token}` };
-	const batchSize = opts.batch ?? 200;
-	const maxBytes = opts.maxBatchBytes ?? 100 * 1024 * 1024;
+	let batchSize = positiveNumber("batch", opts.batch ?? 200, { integer: true });
+	let maxBytes = positiveNumber(
+		"max-batch-bytes",
+		opts.maxBatchBytes ?? 100 * 1024 * 1024,
+	);
 	const pollMs = opts.pollMs ?? 1500;
 	const maxPolls = Math.ceil((30 * 60_000) / pollMs);
 
@@ -68,7 +91,15 @@ export async function runImport(opts: ImportOptions): Promise<ImportResult> {
 	const map = (await mapRes.json()) as {
 		role: string;
 		dimensions: { slug: string }[];
+		limits?: { maxUploadBytes?: number; maxFilesPerUpload?: number };
 	};
+	if (map.limits?.maxUploadBytes)
+		maxBytes = Math.min(
+			maxBytes,
+			Math.floor(map.limits.maxUploadBytes * LIMIT_HEADROOM),
+		);
+	if (map.limits?.maxFilesPerUpload)
+		batchSize = Math.min(batchSize, map.limits.maxFilesPerUpload);
 	const known = new Set(map.dimensions.map((d) => d.slug));
 
 	const folders = (await readdir(opts.src, { withFileTypes: true }))
@@ -106,8 +137,13 @@ export async function runImport(opts: ImportOptions): Promise<ImportResult> {
 		);
 
 		// Batches are bounded by file count and by total size (read from disk only when uploading).
-		const sizes = await Promise.all(
-			todo.map(async (name) => (await stat(join(dir, name))).size),
+		const infos = await Promise.all(todo.map((name) => stat(join(dir, name))));
+		const sizes = infos.map((info) => info.size);
+		const exportedAt = new Map(
+			todo.map((name, i) => {
+				const mtime = (infos[i] as { mtimeMs: number }).mtimeMs;
+				return [name, opts.date ?? Math.floor(mtime / DAY_MS) * DAY_MS];
+			}),
 		);
 		const batches: string[][] = [];
 		let current: string[] = [];
@@ -152,8 +188,17 @@ export async function runImport(opts: ImportOptions): Promise<ImportResult> {
 					}),
 				),
 			);
+			// Where each file "came from"; the server reads the export date off the folder name.
+			form.append(
+				"paths",
+				JSON.stringify(
+					batch.map(
+						(name) => `${xaeroStamp(exportedAt.get(name) as number)}/${name}`,
+					),
+				),
+			);
 
-			let revisionId = 0;
+			let revisionIds: number[] = [];
 			for (let attempt = 0; ; attempt++) {
 				const res = await f(
 					`${base}/api/dimensions/${encodeURIComponent(slug)}/uploads`,
@@ -164,8 +209,11 @@ export async function runImport(opts: ImportOptions): Promise<ImportResult> {
 					},
 				);
 				if (res.status === 202) {
-					revisionId = ((await res.json()) as { revisionId: number })
-						.revisionId;
+					const body = (await res.json()) as {
+						revisionId: number;
+						revisionIds?: number[];
+					};
+					revisionIds = body.revisionIds ?? [body.revisionId];
 					break;
 				}
 				if (res.status === 429 && attempt < 20) {
@@ -186,6 +234,13 @@ export async function runImport(opts: ImportOptions): Promise<ImportResult> {
 				);
 			}
 
+			// One revision per export date; the batch is empty only if all of them are.
+			const outcomes: ("done" | "empty")[] = [];
+			for (const id of revisionIds) outcomes.push(await waitFor(id));
+			return outcomes.every((o) => o === "empty") ? "empty" : "done";
+		}
+
+		async function waitFor(revisionId: number): Promise<"done" | "empty"> {
 			for (let polls = 0; ; polls++) {
 				if (polls >= maxPolls)
 					throw new Error(`revision ${revisionId} did not finish in time`);
@@ -222,6 +277,7 @@ if (import.meta.main) {
 			token: { type: "string", default: process.env.AOMC_TOKEN },
 			src: { type: "string" },
 			batch: { type: "string", default: "200" },
+			date: { type: "string" },
 			state: { type: "string" },
 			dims: { type: "string" },
 			"dim-map": { type: "string", multiple: true },
@@ -230,7 +286,8 @@ if (import.meta.main) {
 	if (!values.url || !values.token || !values.src) {
 		console.error(
 			"usage: bun scripts/import-v1.ts --url https://map.example.com --token aomc_... --src /path/to/v1/data/output\n" +
-				"       [--batch 200] [--state import-state.json] [--dims overworld,nether] [--dim-map v1name=slug]\n" +
+				"       [--batch 200] [--date 2026-01-31] [--state import-state.json] [--dims overworld,nether] [--dim-map v1name=slug]\n" +
+				"       (--date: export date for every tile, UTC; default is each file's modified time)\n" +
 				"       (the token can also come from the AOMC_TOKEN environment variable)",
 		);
 		process.exit(2);
@@ -240,12 +297,25 @@ if (import.meta.main) {
 			(pair) => pair.split("=", 2) as [string, string],
 		),
 	);
+	const batch = orExit(() =>
+		positiveNumber("batch", values.batch as string, { integer: true }),
+	);
+	const date = orExit(() => {
+		if (values.date === undefined) return undefined;
+		const ms = Date.parse(values.date);
+		if (Number.isNaN(ms))
+			throw new Error(
+				`--date must be a date like 2026-01-31, got "${values.date}"`,
+			);
+		return ms;
+	});
 	try {
 		const r = await runImport({
 			url: values.url,
 			token: values.token,
 			src: values.src,
-			batch: Number(values.batch),
+			batch,
+			date,
 			statePath: values.state ?? "import-state.json",
 			dims: values.dims?.split(","),
 			dimMap,

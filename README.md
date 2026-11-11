@@ -21,7 +21,8 @@ scripts/   backup, blob garbage collection, v1 importer
 
    ```bash
    cp .env.example .env
-   # fill in DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, PUBLIC_URL, a random SESSION_SECRET,
+   # fill in DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, PUBLIC_URL, a random SESSION_SECRET
+   # (required: the container refuses to start with the dev default),
    # and SETUP_OWNER_DISCORD_IDS (your own Discord user id)
    mkdir -p data && chown 1000:1000 data   # the container runs as uid 1000
    ```
@@ -41,7 +42,7 @@ The first start creates the map with the dimensions Overworld, Nether and The En
 
 ### Behind a reverse proxy
 
-Terminate TLS in front of the container and set `PUBLIC_URL` to the public `https://` address (cookies are only marked `Secure` for https, and the CSRF check compares the `Origin` header to `PUBLIC_URL`). Two proxy settings matter:
+Set a long random `SESSION_SECRET` (the container runs with `NODE_ENV=production`, so the server refuses to start with the built-in dev value). Terminate TLS in front of the container and set `PUBLIC_URL` to the public `https://` address (cookies are only marked `Secure` for https, and the CSRF check compares the `Origin` header to `PUBLIC_URL`). Two proxy settings matter:
 
 - Allow request bodies of at least `MAX_UPLOAD_BYTES` (200 MB by default). For nginx: `client_max_body_size 200m;`.
 - Do not buffer server-sent events (`/api/revisions/<id>/events`). For nginx: `proxy_buffering off;` on that location (or the whole server).
@@ -52,7 +53,7 @@ Terminate TLS in front of the container and set `PUBLIC_URL` to the public `http
 bun install
 cp .env.example .env      # Discord credentials are only needed to log in
 bun run dev               # API on :3000, restarts on change
-bun run dev:web           # Vite dev server with hot reload; proxies /api, /auth, /blobs to :3000
+bun run dev:web           # Vite dev server with hot reload; proxies /api, /auth, /blobs and /scalar to :3000 (set `BACKEND_URL` to proxy elsewhere)
 ```
 
 | Command               | What it does                                                 |
@@ -69,24 +70,26 @@ Coming from Node: `npm install` is `bun install`, `npm run x` is `bun run x`, `n
 
 All settings are environment variables (see `.env.example`).
 
-| Variable                                     | Default                       | Meaning                                                                                    |
-| -------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------ |
-| `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` |                               | Discord OAuth credentials                                                                  |
-| `SESSION_SECRET`                             | dev value                     | signs the OAuth state cookie; required when `PUBLIC_URL` is https                          |
-| `PUBLIC_URL`                                 | `http://localhost:3000`       | public address; used for cookies, the Origin check, invite links and previews              |
-| `SETUP_MAP_NAME`                             | `AOMC`                        | name of the map created on first boot                                                      |
-| `SETUP_OWNER_DISCORD_IDS`                    |                               | comma-separated Discord ids that become owners when they first log in                      |
-| `PORT`                                       | `3000`                        | listen port                                                                                |
-| `DATA_DIR`                                   | `./data`                      | database, blobs, preview cache (`/data` in Docker)                                         |
-| `DEFAULT_TILE_SIZE`                          | `512`                         | blocks per tile edge; fixed when the map is created on first boot                          |
-| `MAX_ZOOM`                                   | `8`                           | zoom-out levels above 1:1                                                                  |
-| `MAX_UPLOAD_BYTES`                           | 200 MB                        | per upload request                                                                         |
-| `MAX_IMAGE_DIM`                              | `4096`                        | longest edge of one uploaded image                                                         |
-| `MAX_FILES_PER_UPLOAD`                       | `2000`                        | files per request                                                                          |
-| `UPLOAD_RATE_LIMIT`                          | `30`                          | upload requests per user per minute                                                        |
-| `SELF_DELETE_WINDOW_HOURS`                   | `24`                          | hours after uploading that the uploader may delete their own upload (`0`: moderators only) |
-| `PREVIEW_CACHE_MAX`                          | `500`                         | link-preview images kept on disk                                                           |
-| `MOD_USER_AGENTS`                            | `AOMC Webmapper,AOMC Visited` | User-Agents (comma separated, `*` wildcard) that mark an upload as sent by the in-game mod |
+| Variable                                     | Default                       | Meaning                                                                                                                                                          |
+| -------------------------------------------- | ----------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` |                               | Discord OAuth credentials                                                                                                                                        |
+| `SESSION_SECRET`                             | dev value                     | signs the OAuth state cookie (at least 16 characters); required when `PUBLIC_URL` is https and in Docker (`NODE_ENV=production`), where the dev value is refused |
+| `PUBLIC_URL`                                 | `http://localhost:3000`       | public address; used for cookies, the Origin check, invite links and previews                                                                                    |
+| `SETUP_MAP_NAME`                             | `AOMC`                        | name of the map created on first boot                                                                                                                            |
+| `SETUP_OWNER_DISCORD_IDS`                    |                               | comma-separated Discord ids that become owners when they first log in; only read on the first boot, when the map is created (use _Manage → Members_ later)       |
+| `PORT`                                       | `3000`                        | listen port; `docker-compose.yml` publishes the same port on the host                                                                                            |
+| `DATA_DIR`                                   | `./data`                      | database, blobs, preview cache (`/data` in Docker)                                                                                                               |
+| `WEB_DIST`                                   | `web/dist`                    | built web app the server serves                                                                                                                                  |
+| `BACKEND_URL`                                | `http://localhost:3000`       | only for `bun run dev:web`: where the Vite dev server proxies to                                                                                                 |
+| `DEFAULT_TILE_SIZE`                          | `512`                         | blocks per tile edge; fixed when the map is created on first boot                                                                                                |
+| `MAX_ZOOM`                                   | `8`                           | zoom-out levels above 1:1; set it before the first upload and keep it, as existing tiles' zoom-out levels are not rebuilt when it changes                        |
+| `MAX_UPLOAD_BYTES`                           | 200 MB                        | per upload request                                                                                                                                               |
+| `MAX_IMAGE_DIM`                              | `4096`                        | longest edge of one uploaded image                                                                                                                               |
+| `MAX_FILES_PER_UPLOAD`                       | `2000`                        | files per request                                                                                                                                                |
+| `UPLOAD_RATE_LIMIT`                          | `30`                          | upload requests per user per minute                                                                                                                              |
+| `SELF_DELETE_WINDOW_HOURS`                   | `24`                          | hours after uploading that the uploader may delete their own upload (`0`: moderators only)                                                                       |
+| `PREVIEW_CACHE_MAX`                          | `500`                         | link-preview images kept on disk                                                                                                                                 |
+| `MOD_USER_AGENTS`                            | `AOMC Webmapper,AOMC Visited` | User-Agents (comma separated, `*` wildcard) that mark an upload as sent by the in-game mod                                                                       |
 
 ## Using the map
 
@@ -134,18 +137,18 @@ curl -H "Authorization: Bearer aomc_…" \
 
 The in-game mod is recognised by its `User-Agent` header (`MOD_USER_AGENTS`; by default `AOMC Webmapper`, and `AOMC Visited` for older versions). Such uploads are flagged `viaMod` on their revision and counted together in one statistic (`modUploads`), besides the normal ones. An upload may also carry `coords`, a JSON array of `{x, z}` aligned with the files (after ZIP expansion), which overrides the file names. ZIP entries are read by base name only for coordinates. The export date comes from the file name, from the path of an entry inside a ZIP, or from `paths`, a JSON array of strings aligned with the uploaded files (before ZIP expansion) naming where each came from, e.g. `"2026-02-10_15.06.41/0_0_x-1248_z-1472.png"`. Xaero names exports by the local time of the player's computer, so send `timeZone`, its IANA name (e.g. `Europe/Berlin`); the web client does this automatically, and without it the dates are read as UTC. An upload with several export dates creates one revision per date, oldest first (`revisionIds`, in order; `revisionId` is the last).
 
-| Area      | Endpoints                                                                                                                                                                                                                          |
-| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Session   | `GET /auth/discord`, `GET /auth/discord/callback`, `POST /auth/logout`, `GET /api/me`, `GET/POST/DELETE /api/tokens`                                                                                                               |
-| Map       | `GET/PATCH /api/map`, `POST /api/dimensions`, `PATCH /api/dimensions/:dim`, `/api/members`                                                                                                                                         |
+| Area      | Endpoints                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                          |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Session   | `GET /auth/discord`, `GET /auth/discord/callback`, `POST /auth/logout`, `GET /api/me`, `GET/POST/DELETE /api/tokens`                                                                                                                                                                                                                                                                                                                                                                                                               |
+| Map       | `GET/PATCH /api/map`, `POST /api/dimensions`, `PATCH /api/dimensions/:dim`, `/api/members`                                                                                                                                                                                                                                                                                                                                                                                                                                         |
 | Tiles     | `GET /api/dimensions/:dim/tiles/:zoom/:x/:y?rev=R` → 302 to the tile image, or 204 if empty (`?only=<upload revision id>` gives that upload's own tile instead; `?format=` picks the image format, see [Tile formats](#tile-formats)); zoom 0 is 1:1 and a tile index is `floor(block / tileSize)`. `GET /api/dimensions/:dim/tiles/:zoom/hashes?minX=&minY=&maxX=&maxY=&rev=R` → `{ tiles: [{ x, y, hash }] }` for up to 4096 tiles at once (unlisted = empty), to load `/blobs/<hash>.webp` directly without a redirect per tile |
-| Revisions | `GET /api/revisions?dimension=&before=&limit=`, `GET /api/revisions/:id`, `…/events` (SSE), `DELETE /api/revisions/:id` (moderators, or the author within `SELF_DELETE_WINDOW_HOURS`; 202, erased in the background)               |
-| Layers    | `GET /api/layers?dim=&at=<rev>`, `POST /api/layers`, `PATCH/DELETE /api/layers/:id`, `POST /api/layers/:id/features`, `GET /export`, `POST /import[?replace=1]`                                                                    |
-| Features  | `PATCH/DELETE /api/features/:id`, `GET …/history`, `POST …/restore/:revisionId`                                                                                                                                                    |
-| Sharing   | `GET/POST /api/invites` (map), `/api/layers/:id/invites`, `GET /api/invites/:token`, `POST …/accept`, `DELETE /api/invites/:id`, `…/layers/:id/members`                                                                            |
-| Stats     | `GET /api/stats?range=all\|30d\|7d` (public): your stats, everyone's combined, the leaderboard and the mapped area over time, including what the in-game mod sent (`modUploads`, `modUploadedBlocks`, `modAreaBlocks`)             |
-| Admin     | `GET /api/admin/stats?range=1h\|6h\|24h\|7d\|30d\|90d\|all` (owners): storage over time, network traffic by kind and by requesting domain, and a server overview                                                                   |
-| Images    | `GET /blobs/<hash>.webp` and the other [tile formats](#tile-formats), `GET /api/preview.png` |
+| Revisions | `GET /api/revisions?dimension=&before=&limit=`, `GET /api/revisions/:id`, `…/events` (SSE), `DELETE /api/revisions/:id` (moderators, or the author within `SELF_DELETE_WINDOW_HOURS`; 202, erased in the background)                                                                                                                                                                                                                                                                                                               |
+| Layers    | `GET /api/layers?dim=&at=<rev>`, `POST /api/layers`, `PATCH/DELETE /api/layers/:id`, `POST /api/layers/:id/features`, `GET /export`, `POST /import[?replace=1]`                                                                                                                                                                                                                                                                                                                                                                    |
+| Features  | `PATCH/DELETE /api/features/:id`, `GET …/history`, `POST …/restore/:revisionId`                                                                                                                                                                                                                                                                                                                                                                                                                                                    |
+| Sharing   | `GET/POST /api/invites` (map), `/api/layers/:id/invites`, `GET /api/invites/:token`, `POST …/accept`, `DELETE /api/invites/:id`, `…/layers/:id/members`                                                                                                                                                                                                                                                                                                                                                                            |
+| Stats     | `GET /api/stats?range=all\|30d\|7d` (public): your stats, everyone's combined, the leaderboard and the mapped area over time, including what the in-game mod sent (`modUploads`, `modUploadedBlocks`, `modAreaBlocks`)                                                                                                                                                                                                                                                                                                             |
+| Admin     | `GET /api/admin/stats?range=1h\|6h\|24h\|7d\|30d\|90d\|all` (owners): storage over time, network traffic by kind and by requesting domain, and a server overview                                                                                                                                                                                                                                                                                                                                                                   |
+| Images    | `GET /blobs/<hash>.webp` and the other [tile formats](#tile-formats), `GET /api/preview.png`                                                                                                                                                                                                                                                                                                                                                                                                                                       |
 
 ### Tile formats
 
@@ -188,6 +191,7 @@ data/blobs/ab/cd/<sha256>.png     the same tile in other formats (also .95.jpg, 
                                   made on first request; not backed up, as they can be made again
 data/incoming/     uploads waiting to be processed (deleted when the job finishes)
 data/preview-cache/
+data/gc-quarantine/  only while gc-blobs --delete runs (see below)
 ```
 
 ### Backups
@@ -209,7 +213,7 @@ docker compose exec aomc-map bun scripts/gc-blobs.ts            # report only
 docker compose exec aomc-map bun scripts/gc-blobs.ts --delete
 ```
 
-Copies in other [tile formats](#tile-formats) are removed together with their WebP. It keeps everything referenced by a tile version or an upload patch, keeps files younger than an hour (`--min-age-minutes`; the blob store refreshes a file's age whenever an upload reuses it), and refuses to delete while jobs are pending, because a running job writes blobs before the database row that points to them.
+Copies in other [tile formats](#tile-formats) are removed together with their WebP. It keeps everything referenced by a tile version or an upload patch, keeps files younger than an hour (`--min-age-minutes`, a positive number; the blob store refreshes a file's age whenever an upload reuses it), and refuses to delete while jobs are pending, because a running job writes blobs before the database row that points to them. A scan can outlast a job starting, so `--delete` first moves the candidates into `data/gc-quarantine/`, reads the database again, puts back whatever became referenced or young (all of it, with an error, if a job has appeared) and only then deletes. A run that was killed halfway leaves files there; the next `--delete` run puts them back and judges them again.
 
 ### Importing the old (v1) map
 
@@ -221,7 +225,7 @@ bun scripts/import-v1.ts --url https://map.example.com \
     --src /path/to/v1/data/output --state import-state.json
 ```
 
-It uploads in batches (`--batch`, default 200) with explicit coordinates, waits for each batch to finish, and records finished files in the state file, so an interrupted run resumes where it stopped (run the same command again). `--dims overworld,nether` limits the dimensions and `--dim-map old=slug` renames one. The dimensions must already exist on the map (all are checked before anything is uploaded). Tiles that are entirely black have nothing to import and are skipped. Check the result on a copy of your data first: a moderator can delete an import batch by batch from the upload log, but nothing deletes a whole import in one go.
+It uploads in batches (`--batch`, default 200; also capped by the server's `MAX_FILES_PER_UPLOAD` and `MAX_UPLOAD_BYTES`, which it reads from `/api/map`) with explicit coordinates, waits for each batch to finish, and records finished files in the state file, so an interrupted run resumes where it stopped (run the same command again). Each tile is sent with an export date, so the import layers under newer real exports like any [old export](#using-the-map): by default the file's modified time, cut back to its UTC day (one revision per day), or `--date 2026-01-31` for all tiles. `--dims overworld,nether` limits the dimensions and `--dim-map old=slug` renames one. The dimensions must already exist on the map (all are checked before anything is uploaded). Tiles that are entirely black have nothing to import and are skipped. Check the result on a copy of your data first: a moderator can delete an import batch by batch from the upload log, but nothing deletes a whole import in one go.
 
 ### Rate limits and quotas
 

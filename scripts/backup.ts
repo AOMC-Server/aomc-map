@@ -3,7 +3,8 @@ import { existsSync } from "node:fs";
 import { copyFile, mkdir, readdir, rename, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { parseArgs } from "node:util";
-import { isBlobHash } from "../server/src/tiles/blobstore";
+import { orExit, positiveNumber } from "./args";
+import { webpBlobHash } from "./blobs";
 
 /** UTC, millisecond precision, so names sort by time and runs never collide. */
 const stamp = (d: Date) => d.toISOString().replace(/[-:.]/g, "");
@@ -31,6 +32,8 @@ export async function backup(opts: {
 }): Promise<BackupResult> {
 	const dbFile = join(opts.dataDir, "db.sqlite");
 	if (!existsSync(dbFile)) throw new Error(`no database at ${dbFile}`);
+	if (opts.keep !== undefined)
+		positiveNumber("keep", opts.keep, { integer: true });
 	await mkdir(opts.dest, { recursive: true });
 
 	const snapshot = join(
@@ -49,8 +52,7 @@ export async function backup(opts: {
 	const blobsDir = join(opts.dataDir, "blobs");
 	if (existsSync(blobsDir)) {
 		for (const rel of await readdir(blobsDir, { recursive: true })) {
-			if (!rel.endsWith(".webp") || !isBlobHash(basename(rel, ".webp")))
-				continue; // skips in-progress .tmp files
+			if (!webpBlobHash(basename(rel))) continue; // skips copies and in-progress .tmp files
 			const target = join(opts.dest, "blobs", rel);
 			if (existsSync(target)) {
 				blobsSkipped++;
@@ -96,11 +98,9 @@ if (import.meta.main) {
 		);
 		process.exit(2);
 	}
-	const keep = Number(values.keep);
-	if (!Number.isInteger(keep) || keep < 1) {
-		console.error("--keep must be a whole number of at least 1");
-		process.exit(2);
-	}
+	const keep = orExit(() =>
+		positiveNumber("keep", values.keep as string, { integer: true }),
+	);
 	const result = await backup({ dataDir: values.data as string, dest, keep });
 	console.log(`database: ${result.snapshot}`);
 	console.log(

@@ -4,11 +4,17 @@ import {
 	existsSync,
 	mkdirSync,
 	readdirSync,
+	statSync,
 	utimesSync,
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
-import { blobFiles, jobs, storageHistory } from "../server/src/db/schema";
+import {
+	blobFiles,
+	jobs,
+	storageHistory,
+	uploadPatches,
+} from "../server/src/db/schema";
 import {
 	bootTiles,
 	cleanupTempDirs,
@@ -21,21 +27,72 @@ import {
 	solid,
 	upload,
 } from "../server/test/helpers";
+import { positiveNumber } from "./args";
 import { backup } from "./backup";
+import { classifyBlobFile } from "./blobs";
 import { gcBlobs } from "./gc-blobs";
-import { runImport } from "./import-v1";
+import { runImport, xaeroStamp } from "./import-v1";
 
 afterAll(cleanupTempDirs);
 
 const tmp = (name: string) => makeTempDir(`aomc-${name}-`);
 
-describe("backup", () => {
-	async function withData() {
-		const t = await bootTiles();
-		await upload(t, await solid(16, 16, RED), 0, 0);
-		return t;
-	}
+async function withData() {
+	const t = await bootTiles();
+	await upload(t, await solid(16, 16, RED), 0, 0);
+	return t;
+}
 
+/** Runs a script as the command line would. */
+async function runScript(script: string, ...args: string[]) {
+	const proc = Bun.spawn(["bun", join(import.meta.dir, script), ...args], {
+		stdout: "pipe",
+		stderr: "pipe",
+	});
+	const [stderr, code] = await Promise.all([
+		new Response(proc.stderr).text(),
+		proc.exited,
+	]);
+	return { code, stderr };
+}
+
+describe("positiveNumber", () => {
+	test("accepts positive numbers, in strings too", () => {
+		expect(positiveNumber("x", "60")).toBe(60);
+		expect(positiveNumber("x", 0.5)).toBe(0.5);
+		expect(positiveNumber("x", " 7 ", { integer: true })).toBe(7);
+	});
+
+	test("rejects everything else instead of letting NaN through", () => {
+		for (const bad of ["1h", "", " ", "abc", "0", "-5", "Infinity", "NaN"])
+			expect(() => positiveNumber("min-age-minutes", bad)).toThrow(
+				"--min-age-minutes must be a positive number",
+			);
+		expect(() => positiveNumber("batch", "1.5", { integer: true })).toThrow(
+			"whole number",
+		);
+	});
+});
+
+describe("blob file names", () => {
+	const h = "a".repeat(64);
+	test("tell stored tiles, copies and temp files apart", () => {
+		expect(classifyBlobFile(`${h}.webp`)).toEqual({ kind: "blob", hash: h });
+		expect(classifyBlobFile(`${h}.80.jpg`)).toEqual({ kind: "copy", hash: h });
+		expect(classifyBlobFile(`${h}.lossy.webp`)).toEqual({
+			kind: "copy",
+			hash: h,
+		});
+		expect(classifyBlobFile(`${h}.webp.abc123.tmp`)).toEqual({
+			kind: "temp",
+			hash: null,
+		});
+		expect(classifyBlobFile("notes.txt")).toBeNull();
+		expect(classifyBlobFile("short.webp")).toBeNull();
+	});
+});
+
+describe("backup", () => {
 	test("snapshots the database and copies blobs; running again only adds what is new", async () => {
 		const t = await withData();
 		const dest = tmp("backup");
@@ -145,6 +202,18 @@ describe("backup", () => {
 		]);
 	});
 
+	test("--keep must be a positive whole number", async () => {
+		for (const keep of ["0", "x", "1.5"]) {
+			const r = await runScript("backup.ts", tmp("dest"), "--keep", keep);
+			expect(r.code).toBe(2);
+			expect(r.stderr).toContain("--keep must be a positive whole number");
+		}
+		const t = await withData();
+		await expect(
+			backup({ dataDir: t.env.DATA_DIR, dest: tmp("dest"), keep: Number.NaN }),
+		).rejects.toThrow("--keep must be");
+	});
+
 	test("complains clearly when there is nothing to back up", async () => {
 		await expect(
 			backup({ dataDir: tmp("empty"), dest: tmp("dest") }),
@@ -185,6 +254,135 @@ describe("gc-blobs", () => {
 		// Everything still referenced survives, so the map still renders.
 		const check = await gcBlobs({ dataDir: dir, deleteFiles: false });
 		expect(check.referenced).toBe(report.referenced);
+	});
+
+	test("--min-age-minutes must be a positive number: 1h would disable the age check", async () => {
+		const t = await withData();
+		const young = plant(t.env.DATA_DIR, hash("a"), Date.now());
+		for (const bad of ["1h", "", "0", "-1"]) {
+			const r = await runScript(
+				"gc-blobs.ts",
+				"--data",
+				t.env.DATA_DIR,
+				"--delete",
+				`--min-age-minutes=${bad}`,
+			);
+			expect(r.code).toBe(2);
+			expect(r.stderr).toContain("--min-age-minutes must be a positive number");
+		}
+		expect(existsSync(young)).toBe(true);
+		await expect(
+			gcBlobs({
+				dataDir: t.env.DATA_DIR,
+				deleteFiles: true,
+				minAgeMs: Number.NaN,
+			}),
+		).rejects.toThrow("minAgeMs");
+		expect(existsSync(young)).toBe(true);
+	});
+
+	test("a blob a job reuses while the scan runs is not deleted", async () => {
+		const t = await withData();
+		const dir = t.env.DATA_DIR;
+		const reused = plant(dir, hash("a"));
+		const orphan = plant(dir, hash("b"));
+		const r = await gcBlobs({
+			dataDir: dir,
+			deleteFiles: true,
+			// The blob store's put() of an existing blob only refreshes its age.
+			onStage: (stage) => {
+				if (stage === "scanned") utimesSync(reused, new Date(), new Date());
+			},
+		});
+		expect(existsSync(reused)).toBe(true);
+		expect(existsSync(orphan)).toBe(false);
+		expect(r.deleted).toBe(1);
+		expect(r.unreferenced).toEqual([orphan]);
+		expect(r.skippedYoung).toBe(1);
+	});
+
+	test("a blob that gets referenced after the scan is put back", async () => {
+		const t = await withData();
+		const dir = t.env.DATA_DIR;
+		const claimed = plant(dir, hash("a"));
+		const orphan = plant(dir, hash("b"));
+		const copy = claimed.replace(/\.webp$/, ".png");
+		writeFileSync(copy, "copy");
+		utimesSync(copy, new Date(old), new Date(old));
+		const r = await gcBlobs({
+			dataDir: dir,
+			deleteFiles: true,
+			onStage: async (stage) => {
+				if (stage !== "quarantined") return;
+				expect(existsSync(claimed)).toBe(false); // waiting in quarantine
+				await t.db
+					.insert(uploadPatches)
+					.values({ revisionId: 1, tileX: 99, tileY: 99, blobHash: hash("a") });
+			},
+		});
+		expect(existsSync(claimed)).toBe(true);
+		expect(existsSync(copy)).toBe(true);
+		expect(existsSync(orphan)).toBe(false);
+		expect(r.deleted).toBe(1);
+		expect(existsSync(join(dir, "gc-quarantine"))).toBe(false);
+	});
+
+	test("a job that appears after the scan stops the deletion and nothing is lost", async () => {
+		const t = await withData();
+		const dir = t.env.DATA_DIR;
+		const orphan = plant(dir, hash("a"));
+		await expect(
+			gcBlobs({
+				dataDir: dir,
+				deleteFiles: true,
+				onStage: async (stage) => {
+					if (stage === "quarantined")
+						await t.db.insert(jobs).values({
+							type: "process_upload",
+							payload: {},
+							status: "processing",
+						});
+				},
+			}),
+		).rejects.toThrow("started while");
+		expect(existsSync(orphan)).toBe(true);
+		expect(existsSync(join(dir, "gc-quarantine"))).toBe(false);
+	});
+
+	test("a blob rewritten by a job while its old file is in quarantine is kept", async () => {
+		const t = await withData();
+		const dir = t.env.DATA_DIR;
+		const orphan = plant(dir, hash("a"));
+		const r = await gcBlobs({
+			dataDir: dir,
+			deleteFiles: true,
+			onStage: (stage) => {
+				if (stage === "quarantined") writeFileSync(orphan, "data");
+			},
+		});
+		expect(existsSync(orphan)).toBe(true);
+		expect(r.deleted).toBe(0);
+	});
+
+	test("files left in quarantine by a killed run are judged again, not lost", async () => {
+		const t = await withData();
+		const dir = t.env.DATA_DIR;
+		const live = new Database(join(dir, "db.sqlite"), { readonly: true });
+		const h = (
+			live
+				.query(
+					"SELECT blob_hash AS h FROM tile_versions WHERE blob_hash IS NOT NULL LIMIT 1",
+				)
+				.get() as { h: string }
+		).h;
+		live.close();
+		const rel = join(h.slice(0, 2), h.slice(2, 4), `${h}.webp`);
+		const held = join(dir, "gc-quarantine", rel);
+		mkdirSync(join(held, ".."), { recursive: true });
+		writeFileSync(held, "x");
+		await gcBlobs({ dataDir: dir, deleteFiles: true });
+		expect(existsSync(blobPath(dir, h))).toBe(true);
+		expect(existsSync(join(dir, "gc-quarantine"))).toBe(false);
 	});
 
 	test("forgets the sizes of deleted blobs and records the new storage", async () => {
@@ -279,12 +477,6 @@ describe("gc-blobs", () => {
 		for (const f of kept) expect(existsSync(f)).toBe(true);
 	});
 });
-
-async function withData() {
-	const t = await bootTiles();
-	await upload(t, await solid(16, 16, RED), 0, 0);
-	return t;
-}
 
 describe("import-v1", () => {
 	/** A v1 output tree: <dimension>/<zoom>/<x>_<z>.png with black meaning "no data". */
@@ -524,6 +716,134 @@ describe("import-v1", () => {
 		await expect(run({ src: tmp("empty-src") })).rejects.toThrow(
 			"no <dimension>/0 folders",
 		);
+	});
+
+	const revisionDates = async (t: {
+		app: ReturnType<typeof makeTestApp>["app"];
+	}) => {
+		const dates: (number | null)[] = [];
+		for (let id = 1; ; id++) {
+			const res = await t.app.request(`/api/revisions/${id}`);
+			if (res.status !== 200) return dates;
+			const { revision } = (await res.json()) as {
+				revision: { exportedAt: number | null };
+			};
+			dates.push(revision.exportedAt);
+		}
+	};
+
+	test("xaeroStamp writes the UTC time the way Xaero names exports", () => {
+		expect(xaeroStamp(Date.UTC(2026, 1, 10, 15, 6, 41))).toBe(
+			"2026-02-10_15.06.41",
+		);
+		// The server ignores dates before 2000, which would make the tile count as new.
+		expect(xaeroStamp(0)).toBe("2000-01-01_00.00.00");
+	});
+
+	test("tiles get the export date of their file's modified time, so they sit under newer exports", async () => {
+		const src = await makeV1();
+		const touch = (name: string, at: number) =>
+			utimesSync(join(src, "overworld", "0", name), new Date(at), new Date(at));
+		const day10 = Date.UTC(2026, 0, 10);
+		const day12 = Date.UTC(2026, 0, 12);
+		touch("0_0.png", day10 + 5 * 3600_000);
+		touch("0_512.png", day12 + 7 * 3600_000);
+		touch("-512_0.png", day12 + 1000);
+		touch("1024_0.png", day10);
+		const t = await server();
+		const r = await runImport({
+			url: "http://map.test",
+			token: t.token,
+			src,
+			dims: ["overworld"],
+			pollMs: 5,
+			fetch: inProcess(t.app),
+			log: () => {},
+		});
+		expect(r.uploaded).toBe(4);
+		// One batch, one revision per export date, oldest first.
+		expect(await revisionDates(t)).toEqual([day10, day12]);
+	});
+
+	test("--date gives every tile the same export date", async () => {
+		const src = await makeV1();
+		const t = await server();
+		const date = Date.UTC(2025, 5, 1, 12, 30, 0);
+		await runImport({
+			url: "http://map.test",
+			token: t.token,
+			src,
+			date,
+			pollMs: 5,
+			fetch: inProcess(t.app),
+			log: () => {},
+		});
+		expect(await revisionDates(t)).toEqual([date, date]); // one revision per dimension
+	});
+
+	test("batches respect the server's upload size and file count limits", async () => {
+		const src = await makeV1();
+		const dir = join(src, "overworld", "0");
+		const biggest = Math.max(
+			...["-512_0", "0_0", "0_512", "1024_0"].map(
+				(n) => statSync(join(dir, `${n}.png`)).size,
+			),
+		);
+		const run = async (env: Record<string, string>) => {
+			const t = makeTestApp({
+				DEFAULT_TILE_SIZE: "512",
+				MAX_ZOOM: "2",
+				...env,
+			});
+			const user = await makeUser(t.db, "importer");
+			return runImport({
+				url: "http://map.test",
+				token: user.token,
+				src,
+				dims: ["overworld"],
+				batch: 200,
+				pollMs: 5,
+				fetch: inProcess(t.app),
+				log: () => {},
+			});
+		};
+		// Room for two files per request (the importer keeps some headroom below the limit).
+		const sized = await run({
+			MAX_UPLOAD_BYTES: String(Math.ceil((2.5 * biggest) / 0.9)),
+		});
+		expect(sized.uploaded + sized.skipped).toBe(4);
+		expect(sized.batches).toBe(2);
+		const counted = await run({ MAX_FILES_PER_UPLOAD: "1" });
+		expect(counted.uploaded + counted.skipped).toBe(4);
+		expect(counted.batches).toBe(4);
+	});
+
+	test("--batch must be a positive whole number", async () => {
+		const src = await makeV1();
+		const t = await server();
+		await expect(
+			runImport({
+				url: "http://map.test",
+				token: t.token,
+				src,
+				batch: Number.NaN,
+				fetch: inProcess(t.app),
+				log: () => {},
+			}),
+		).rejects.toThrow("--batch must be a positive whole number");
+		const r = await runScript(
+			"import-v1.ts",
+			"--url",
+			"http://map.test",
+			"--token",
+			"x",
+			"--src",
+			src,
+			"--batch",
+			"lots",
+		);
+		expect(r.code).toBe(2);
+		expect(r.stderr).toContain("--batch must be a positive whole number");
 	});
 
 	test("rate limiting by the server is retried instead of failing", async () => {
