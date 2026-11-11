@@ -62,7 +62,7 @@ async function loginRedirect(
 }
 
 describe("setup", () => {
-	test("creates the map with four dimensions and is idempotent", async () => {
+	test("creates the map with three dimensions and is idempotent", async () => {
 		const { app, db, env } = boot();
 		runSetup(db, env);
 		runSetup(db, env);
@@ -74,7 +74,6 @@ describe("setup", () => {
 		expect(body.map.tileSize).toBe(512);
 		expect(body.dimensions.map((d: { slug: string }) => d.slug)).toEqual([
 			"overworld",
-			"overworld_caves",
 			"nether",
 			"the_end",
 		]);
@@ -86,7 +85,7 @@ describe("setup", () => {
 					d.scale,
 				]),
 			),
-		).toEqual({ overworld: 1, overworld_caves: 1, nether: 8, the_end: null });
+		).toEqual({ overworld: 1, nether: 8, the_end: null });
 		expect(body.role).toBe("viewer");
 		expect(body.limits).toEqual({
 			maxUploadBytes: 200 * 1024 * 1024,

@@ -224,97 +224,26 @@ export function PixelIcon(props: {
 	return <Pixels cells={cells} size={props.size} class={props.class} />;
 }
 
-/* Block textures for the dimension buttons, generated from a seeded noise so they never change. */
+type BlockKind = "grass" | "netherrack" | "endstone";
 
-type BlockKind = "grass" | "deepslate" | "netherrack" | "end_stone" | "stone";
-
-const BLOCK_PALETTES: Record<BlockKind, [string, number][]> = {
-	grass: [
-		["#866043", 50],
-		["#79553a", 25],
-		["#966c4a", 15],
-		["#593d29", 10],
-	],
-	deepslate: [
-		["#4d4d50", 45],
-		["#3d3d40", 30],
-		["#5e5e62", 15],
-		["#2c2c2f", 10],
-	],
-	netherrack: [
-		["#723232", 45],
-		["#612828", 25],
-		["#854040", 15],
-		["#4b1d1d", 10],
-		["#a05252", 5],
-	],
-	end_stone: [
-		["#dbde9e", 45],
-		["#c9cc8c", 25],
-		["#e8eab4", 15],
-		["#b5b77a", 15],
-	],
-	stone: [
-		["#7f7f7f", 45],
-		["#737373", 25],
-		["#8f8f8f", 20],
-		["#686868", 10],
-	],
-};
-
-const GRASS: [string, number][] = [
-	["#6aaa40", 45],
-	["#5b9435", 30],
-	["#7fbf4f", 25],
-];
-
-function blockCells(kind: BlockKind) {
-	let seed = kind.length * 7919 + kind.charCodeAt(0);
-	const rand = () => {
-		seed = (seed * 1103515245 + 12345) & 0x7fffffff;
-		return seed / 0x7fffffff;
-	};
-	const pick = (palette: [string, number][]) => {
-		const total = palette.reduce((sum, [, w]) => sum + w, 0);
-		let r = rand() * total;
-		for (const [c, w] of palette) {
-			r -= w;
-			if (r < 0) return c;
-		}
-		return (palette[0] as [string, number])[0];
-	};
-	const out: ReturnType<typeof rects> = [];
-	for (let y = 0; y < 16; y++) {
-		for (let x = 0; x < 16; x++) {
-			// Grass hangs over the dirt by a ragged 3 to 5 pixels.
-			const grassDepth = 3 + ((x * 5 + 3) % 3);
-			const palette =
-				kind === "grass" && y < grassDepth ? GRASS : BLOCK_PALETTES[kind];
-			out.push({ x, y, w: 1, fill: pick(palette) });
-		}
-	}
-	return out;
-}
-
-/** Guesses a block for a dimension from its slug; anything unknown is stone. */
+/** Guesses a block for a dimension from its slug; anything unknown is grass. */
 export function blockFor(slug: string): BlockKind {
 	if (slug.includes("nether")) return "netherrack";
-	if (slug.includes("end")) return "end_stone";
-	if (slug.includes("cave")) return "deepslate";
-	if (slug.includes("overworld")) return "grass";
-	return "stone";
+	if (slug.includes("end")) return "endstone";
+	return "grass";
 }
 
-const blockCache = new Map<BlockKind, ReturnType<typeof rects>>();
-
 export function BlockIcon(props: { slug: string; size?: number }) {
-	const kind = blockFor(props.slug);
-	let cells = blockCache.get(kind);
-	if (!cells) {
-		cells = blockCells(kind);
-		blockCache.set(kind, cells);
-	}
-	return <Pixels cells={cells} size={props.size ?? 20} class="block-icon" />;
+	const size = props.size ?? 20;
+	return (
+		<img
+			class="block-icon"
+			src={`/static/blocks/${blockFor(props.slug)}.png`}
+			alt=""
+			width={size}
+			height={size}
+		/>
+	);
 }
 
 /** The banner marker of a dye colour, as drawn on the map. */

@@ -633,6 +633,7 @@ input[type="range"]:disabled {
 }
 
 .btn.dim .block-icon {
+	image-rendering: pixelated;
 	outline: 2px solid var(--ink);
 }
 
