@@ -2076,3 +2076,8 @@ input[type="range"]:disabled {
 	box-shadow: var(--lift);
 	transition: none;
 }
+
+/* A layer being dragged folds up, so it moves as one short row however much it holds. */
+.layer.dragging .layer-body {
+	display: none;
+}

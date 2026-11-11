@@ -61,25 +61,38 @@ export function startReorder(
 	e.preventDefault();
 	handle.setPointerCapture(e.pointerId);
 	const scroller = scrollParent(item);
-	const startScroll = scroller?.scrollTop ?? 0;
-	const startY = e.clientY;
-	const rects = items.map((el) => el.getBoundingClientRect());
-	const mids = rects.map((r) => r.top + r.height / 2);
-	const second = rects[1];
-	const first = rects[0];
-	const gap = second && first ? Math.max(second.top - first.bottom, 0) : 0;
-	const slide = (rects[from]?.height ?? 0) + gap;
-
+	let startY = e.clientY;
+	let startScroll = scroller?.scrollTop ?? 0;
+	let mids: number[] = [];
+	let slide = 0;
 	let pointerY = startY;
 	let to = from;
 	let frame = 0;
 	let moved = false;
 
-	const apply = () => {
-		const dy = pointerY - startY + ((scroller?.scrollTop ?? 0) - startScroll);
-		if (!moved && Math.abs(dy) < 4) return;
-		moved = true;
+	/** Once the pointer has moved: fold the item up, so it is short and the same size as a closed one, then measure. */
+	const begin = () => {
+		const before = item.getBoundingClientRect().top;
 		item.classList.add("dragging");
+		const after = item.getBoundingClientRect().top;
+		// A shorter list can scroll the item along; keep the pointer on the same spot of it.
+		startY += after - before;
+		startScroll = scroller?.scrollTop ?? 0;
+		const rects = items.map((el) => el.getBoundingClientRect());
+		mids = rects.map((r) => r.top + r.height / 2);
+		const first = rects[0];
+		const second = rects[1];
+		const gap = first && second ? Math.max(second.top - first.bottom, 0) : 0;
+		slide = (rects[from]?.height ?? 0) + gap;
+	};
+
+	const apply = () => {
+		if (!moved) {
+			if (Math.abs(pointerY - startY) < 4) return;
+			moved = true;
+			begin();
+		}
+		const dy = pointerY - startY + ((scroller?.scrollTop ?? 0) - startScroll);
 		item.style.transform = `translateY(${dy}px)`;
 		to = dropIndex(mids, from, (mids[from] ?? 0) + dy);
 		items.forEach((el, i) => {
