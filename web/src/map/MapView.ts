@@ -124,7 +124,10 @@ export class MapView {
 		this.renderer.invalidate();
 	}
 
-	/** Debugging: stop loading new tiles; panning and zooming keep working with what is loaded. */
+	/**
+	 * Debugging: freeze the tiles. Only what was on screen keeps being drawn (panning and zooming
+	 * still work); nothing new is loaded or swapped in until resumed.
+	 */
 	setTilesPaused(paused: boolean) {
 		this.tiles.setPaused(paused);
 	}

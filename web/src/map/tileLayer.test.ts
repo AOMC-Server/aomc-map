@@ -335,7 +335,7 @@ describe("TileLayer with a lookup", () => {
 });
 
 describe("TileLayer pause", () => {
-	test("requests nothing while paused but keeps drawing what is loaded", async () => {
+	test("requests nothing while paused but keeps drawing what was on screen", async () => {
 		const { layer, frame } = makeLayer();
 		layer.setSource(rev(1));
 		frame();
@@ -343,7 +343,7 @@ describe("TileLayer pause", () => {
 		expect(level0(frame())).toEqual(["r1:0/0/0", "r1:0/1/0"]);
 
 		layer.setPaused(true);
-		// Pan one tile to the right: tile 2 is new, tile 1 is still loaded.
+		// Pan one tile to the right: tile 2 is new, tile 1 is still shown.
 		const panned = frame({ ...view, centerX: 32 });
 		expect(pending).toHaveLength(0);
 		expect(level0(panned)).toEqual(["r1:0/1/0"]);
@@ -351,5 +351,33 @@ describe("TileLayer pause", () => {
 		layer.setPaused(false);
 		frame({ ...view, centerX: 32 });
 		expect(pending.some((p) => p.url.includes("/0/2/0"))).toBe(true);
+	});
+
+	test("tiles cached earlier but not on screen stay hidden while paused", async () => {
+		const { layer, frame } = makeLayer();
+		layer.setSource(rev(1));
+		frame();
+		await answerAll(labelOf);
+		// Move away so tile 0 is cached but no longer drawn.
+		const away = { ...view, centerX: 32 };
+		frame(away);
+		await answerAll(labelOf);
+		frame(away);
+
+		layer.setPaused(true);
+		expect(level0(frame())).toEqual(["r1:0/1/0"]);
+		layer.setPaused(false);
+		expect(level0(frame())).toEqual(["r1:0/0/0", "r1:0/1/0"]);
+	});
+
+	test("loads that finish while paused appear only on resume", async () => {
+		const { layer, frame } = makeLayer();
+		layer.setSource(rev(1));
+		frame();
+		layer.setPaused(true);
+		await answerAll(labelOf);
+		expect(level0(frame())).toEqual([]);
+		layer.setPaused(false);
+		expect(level0(frame())).toEqual(["r1:0/0/0", "r1:0/1/0"]);
 	});
 });

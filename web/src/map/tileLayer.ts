@@ -38,6 +38,8 @@ type Entry = {
 	url?: string | null;
 	loading?: { version: number; abort: AbortController };
 	failed?: { version: number; at: number };
+	/** A load that finished while paused, swapped in on resume. */
+	held?: { bitmap: ImageBitmap | null; url: string; version: number };
 };
 
 type Wanted = { zoom: number; x: number; y: number; priority: number };
@@ -107,8 +109,14 @@ export class TileLayer {
 	/** Record what each tile drew, for the debug view (`debugInfo`). */
 	collectDebug = false;
 	debugInfo: TileDebugInfo | null = null;
-	/** Debugging: start no new lookups or loads, and keep drawing what is already there. */
+	/**
+	 * Debugging: while paused nothing new is requested, loads that finish are held back, and only
+	 * the cache entries the last frame before pausing used are drawn (`frozen`).
+	 */
 	private paused = false;
+	private frozen: Set<string> | null = null;
+	/** Cache entries the last unpaused frame drew from. */
+	private used = new Set<string>();
 
 	constructor(
 		private opts: {
@@ -139,6 +147,19 @@ export class TileLayer {
 	setPaused(paused: boolean) {
 		if (this.paused === paused) return;
 		this.paused = paused;
+		this.frozen = paused ? new Set(this.used) : null;
+		if (!paused) {
+			for (const entry of this.cache.values()) {
+				const held = entry.held;
+				if (!held) continue;
+				entry.held = undefined;
+				entry.bitmap?.close();
+				entry.bitmap = held.bitmap;
+				entry.url = held.url;
+				entry.version = held.version;
+				entry.failed = undefined;
+			}
+		}
 		// Redraw, which also requests whatever is now missing.
 		this.opts.onChange();
 	}
@@ -148,6 +169,7 @@ export class TileLayer {
 			entry.loading?.abort.abort();
 			entry.loading = undefined; // so a response that is already on its way is ignored
 			entry.bitmap?.close();
+			entry.held?.bitmap?.close();
 		}
 		this.cache.clear();
 		this.inFlight = 0;
@@ -163,6 +185,14 @@ export class TileLayer {
 		return entry;
 	}
 
+	/** An entry to draw from: none while paused unless the frame before pausing used it. */
+	private use(k: string): Entry | undefined {
+		if (this.frozen && !this.frozen.has(k)) return undefined;
+		const entry = this.touch(k);
+		if (!this.paused && this.known(entry)) this.used.add(k);
+		return entry;
+	}
+
 	/** An image (possibly of an older revision) or a known-empty marker is available. */
 	private known(entry: Entry | undefined): entry is Entry {
 		return entry !== undefined && entry.bitmap !== undefined;
@@ -174,6 +204,7 @@ export class TileLayer {
 
 	draw(ctx: CanvasRenderingContext2D, view: View, size: Size, dpr: number) {
 		this.debugInfo = null;
+		if (!this.paused) this.used.clear();
 		if (!this.source) return;
 		const { tileSize: T, maxZoom } = this.opts;
 		ctx.imageSmoothingQuality = "high";
@@ -255,7 +286,7 @@ export class TileLayer {
 		const T = this.opts.tileSize;
 		const dw = d.x1 - d.x0;
 		const dh = d.y1 - d.y0;
-		const exact = this.touch(key(level, tx, ty));
+		const exact = this.use(key(level, tx, ty));
 
 		if (this.known(exact)) {
 			if (exact.bitmap) {
@@ -272,7 +303,7 @@ export class TileLayer {
 			const n = 2 ** up;
 			const ax = floorDiv(tx, n);
 			const ay = floorDiv(ty, n);
-			const entry = this.touch(key(level + up, ax, ay));
+			const entry = this.use(key(level + up, ax, ay));
 			if (!this.known(entry)) continue;
 			if (!entry.bitmap) {
 				if (this.fresh(entry)) return "empty";
@@ -299,7 +330,7 @@ export class TileLayer {
 		if (level > 0) {
 			for (let j = 0; j < 2; j++) {
 				for (let i = 0; i < 2; i++) {
-					const child = this.touch(key(level - 1, tx * 2 + i, ty * 2 + j));
+					const child = this.use(key(level - 1, tx * 2 + i, ty * 2 + j));
 					if (!this.known(child) || !child.bitmap) continue;
 					const hx0 = d.x0 + Math.round((dw * i) / 2);
 					const hx1 = d.x0 + Math.round((dw * (i + 1)) / 2);
@@ -481,6 +512,10 @@ export class TileLayer {
 				}
 				target.loading = undefined;
 				this.inFlight--;
+				if (this.paused) {
+					target.held = { bitmap, url, version };
+					return;
+				}
 				// Swap in place: the old image stays visible right up to this moment.
 				target.bitmap?.close();
 				target.bitmap = bitmap;
@@ -504,6 +539,7 @@ export class TileLayer {
 			if (this.cache.size <= MAX_CACHE) break;
 			if (entry.loading) continue;
 			entry.bitmap?.close();
+			entry.held?.bitmap?.close();
 			this.cache.delete(k);
 		}
 	}

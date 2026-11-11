@@ -49,7 +49,7 @@ export function StatusBar() {
 					type="button"
 					class={`btn small tile-pause ${tilesPaused.value ? "active" : ""}`}
 					aria-pressed={tilesPaused.value}
-					title="Stop loading new tiles; panning and zooming keep working with what is already loaded"
+					title="Freeze the tiles: only what is on screen now stays drawn and nothing new loads in. Panning and zooming keep working."
 					onClick={() => {
 						tilesPaused.value = !tilesPaused.value;
 					}}
