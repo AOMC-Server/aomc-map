@@ -519,7 +519,7 @@ describe("import-v1", () => {
 
 		await expect(run({ token: "aomc_wrong" })).rejects.toThrow("HTTP 401");
 		await expect(run({ dimMap: { overworld: "atlantis" } })).rejects.toThrow(
-			'dimension "atlantis" does not exist',
+			'dimension "atlantis" not on the map',
 		);
 		await expect(run({ src: tmp("empty-src") })).rejects.toThrow(
 			"no <dimension>/0 folders",

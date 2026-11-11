@@ -79,16 +79,22 @@ export async function runImport(opts: ImportOptions): Promise<ImportResult> {
 	if (folders.length === 0)
 		throw new Error(`no <dimension>/0 folders found in ${opts.src}`);
 
+	// Check every dimension up front so a missing one does not stop the run halfway through.
+	const missing = folders
+		.map((folder) => opts.dimMap?.[folder] ?? folder)
+		.filter((slug) => !known.has(slug));
+	if (missing.length > 0) {
+		throw new Error(
+			`dimension${missing.length > 1 ? "s" : ""} ${missing.map((s) => `"${s}"`).join(", ")} ` +
+				"not on the map; add them in Manage > Dimensions first, or skip them with --dims",
+		);
+	}
+
 	const state = await loadState(opts.statePath);
 	const result: ImportResult = { uploaded: 0, skipped: 0, batches: 0 };
 
 	for (const folder of folders) {
 		const slug = opts.dimMap?.[folder] ?? folder;
-		if (!known.has(slug)) {
-			throw new Error(
-				`dimension "${slug}" does not exist on the map; add it in Manage > Dimensions first`,
-			);
-		}
 		const dir = join(opts.src, folder, "0");
 		const finished = new Set(state.done[folder] ?? []);
 		const files = (await readdir(dir))

@@ -221,7 +221,7 @@ bun scripts/import-v1.ts --url https://map.example.com \
     --src /path/to/v1/data/output --state import-state.json
 ```
 
-It uploads in batches (`--batch`, default 200) with explicit coordinates, waits for each batch to finish, and records finished files in the state file, so an interrupted run resumes where it stopped (run the same command again). `--dims overworld,nether` limits the dimensions and `--dim-map old=slug` renames one. The dimensions must already exist on the map. Tiles that are entirely black have nothing to import and are skipped. Check the result on a copy of your data first: a moderator can delete an import batch by batch from the upload log, but nothing deletes a whole import in one go.
+It uploads in batches (`--batch`, default 200) with explicit coordinates, waits for each batch to finish, and records finished files in the state file, so an interrupted run resumes where it stopped (run the same command again). `--dims overworld,nether` limits the dimensions and `--dim-map old=slug` renames one. The dimensions must already exist on the map (all are checked before anything is uploaded). Tiles that are entirely black have nothing to import and are skipped. Check the result on a copy of your data first: a moderator can delete an import batch by batch from the upload log, but nothing deletes a whole import in one go.
 
 ### Rate limits and quotas
 
