@@ -1,16 +1,12 @@
-import type { Role } from "@aomc/shared";
+import { HOUR, type Role } from "@aomc/shared";
 import { and, desc, eq, inArray, lt, or, type SQL, sql } from "drizzle-orm";
 import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { requireUser, userOf } from "../auth/session";
 import type { Db } from "../db/client";
-import {
-	dimensions,
-	jobs,
-	revisions,
-	uploadPatches,
-	users,
-} from "../db/schema";
+import { jobs, revisions, uploadPatches, users } from "../db/schema";
+import { dimensionBySlug } from "../dimensionLookup";
+import { jobRevisionId } from "../jobs/target";
 import { doc } from "../openapi";
 import { canDeleteUpload, canModerate, loadMap } from "../permissions";
 import type { ProgressEvent } from "../progress";
@@ -52,23 +48,22 @@ function deleteAccess(c: Context<AppEnv>): DeleteAccess {
 	return {
 		actor: c.var.user,
 		role: c.var.role,
-		windowMs: c.var.env.SELF_DELETE_WINDOW_HOURS * 3_600_000,
+		windowMs: c.var.env.SELF_DELETE_WINDOW_HOURS * HOUR,
 		now: Date.now(),
 	};
 }
 
 /** Ids of the uploads that have an erase queued or running. */
 function erasing(db: Db, ids?: number[]): Set<number> {
-	const target = sql<number>`json_extract(${jobs.payload}, '$.revisionId')`;
 	return new Set(
 		db
-			.select({ id: target })
+			.select({ id: jobRevisionId })
 			.from(jobs)
 			.where(
 				and(
 					eq(jobs.type, "erase_upload"),
 					inArray(jobs.status, ["pending", "processing"]),
-					ids ? inArray(target, ids) : undefined,
+					ids ? inArray(jobRevisionId, ids) : undefined,
 				),
 			)
 			.all()
@@ -137,11 +132,7 @@ export const revisionRoutes = new Hono<AppEnv>()
 				filters.push(lt(revisions.id, before));
 			const slug = c.req.query("dimension");
 			if (slug) {
-				const dim = await db
-					.select({ id: dimensions.id })
-					.from(dimensions)
-					.where(eq(dimensions.slug, slug))
-					.get();
+				const dim = dimensionBySlug(db, slug);
 				if (!dim) return c.json({ error: "not found" }, 404);
 				filters.push(
 					or(
@@ -230,7 +221,7 @@ export const revisionRoutes = new Hono<AppEnv>()
 			tag: "Revisions",
 			summary: "Stream a revision's progress",
 			description:
-				"Server-sent events named after the status (`pending`, `processing`, `done`, `failed`); the stream ends when the revision is done or failed.",
+				"Server-sent events named after the status (`pending`, `processing`, `done`, `failed`); the stream ends when the revision is done or failed. The first event is the current status; for an upload whose delete is waiting in the queue it is `processing` with message `queued`.",
 			ok: { 200: "text/event-stream" },
 			fails: [404],
 		}),
@@ -326,9 +317,7 @@ export const revisionRoutes = new Hono<AppEnv>()
 
 			if (target.status === "failed") {
 				db.transaction((tx) => {
-					tx.delete(jobs)
-						.where(sql`json_extract(${jobs.payload}, '$.revisionId') = ${id}`)
-						.run();
+					tx.delete(jobs).where(eq(jobRevisionId, id)).run();
 					tx.delete(revisions).where(eq(revisions.id, id)).run();
 				});
 				return c.json({ ok: true });

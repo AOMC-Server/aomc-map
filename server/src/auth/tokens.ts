@@ -1,5 +1,5 @@
 import { createHash, randomBytes } from "node:crypto";
-import { TOKEN_SCOPES, type TokenScope } from "@aomc/shared";
+import { DAY, MINUTE, TOKEN_SCOPES, type TokenScope } from "@aomc/shared";
 import { and, count, eq } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { apiTokens, users } from "../db/schema";
@@ -15,8 +15,7 @@ export function sha256Hex(value: string): string {
 	return createHash("sha256").update(value).digest("hex");
 }
 
-const DAY_MS = 24 * 60 * 60 * 1000;
-const LAST_USED_GRANULARITY_MS = 60_000;
+const LAST_USED_GRANULARITY_MS = MINUTE;
 
 type NewToken = {
 	userId: string;
@@ -37,7 +36,7 @@ function insertApiToken(
 			name,
 			tokenHash: sha256Hex(token),
 			expiresAt:
-				expiresInDays === null ? null : Date.now() + expiresInDays * DAY_MS,
+				expiresInDays === null ? null : Date.now() + expiresInDays * DAY,
 			scopes,
 		})
 		.returning({

@@ -1,3 +1,4 @@
+import { DAY, SECOND } from "@aomc/shared";
 import { Hono } from "hono";
 import { doc } from "../openapi";
 import { PreviewBusyError, PreviewLimitError } from "../preview";
@@ -41,7 +42,7 @@ export const previewRoutes = new Hono<AppEnv>().get(
 		}
 		// A revision that exists never changes; "latest" and revisions still to come may.
 		const pinned = q.rev !== undefined && q.rev <= map.headRev;
-		c.header("Cache-Control", `public, max-age=${pinned ? 86400 : 300}`);
+		c.header("Cache-Control", `public, max-age=${pinned ? DAY / SECOND : 300}`);
 		c.header("Content-Type", "image/png");
 		return c.body(png as unknown as ArrayBuffer);
 	},

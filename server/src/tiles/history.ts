@@ -205,21 +205,6 @@ export function commitRevision(
 	});
 }
 
-export async function failRevision(
-	db: Db,
-	revisionId: number,
-	message: string,
-) {
-	await db
-		.update(revisions)
-		.set({
-			status: "failed",
-			error: message.slice(0, 500),
-			completedAt: Date.now(),
-		})
-		.where(eq(revisions.id, revisionId));
-}
-
 /** Whether a revision was already published: done, with its revision number. */
 export function isPublished(db: Db, revisionId: number): boolean {
 	const row = db

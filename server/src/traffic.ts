@@ -1,3 +1,4 @@
+import { DAY, HOUR, MINUTE } from "@aomc/shared";
 import { sql } from "drizzle-orm";
 import { createMiddleware } from "hono/factory";
 import type { Db } from "./db/client";
@@ -5,15 +6,11 @@ import { trafficHourly } from "./db/schema";
 import type { Env } from "./env";
 import type { AppEnv } from "./types";
 
-export const MINUTE = 60_000;
-export const FIVE_MINUTES = 5 * MINUTE;
-export const HOUR = 60 * MINUTE;
-export const DAY = 24 * HOUR;
 /** Per-minute rows older than this are folded into one row per hour. */
 export const MINUTE_RETENTION_HOURS = 24;
 /** Hourly rows older than this are folded into one row per day. */
 export const HOURLY_RETENTION_DAYS = 90;
-const FLUSH_EVERY = 60_000;
+const FLUSH_EVERY = MINUTE;
 const MAX_DOMAINS_PER_HOUR = 200;
 
 export const SELF_DOMAIN = "This site";

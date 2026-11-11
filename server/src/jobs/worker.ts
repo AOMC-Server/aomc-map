@@ -3,7 +3,7 @@ import { rm } from "node:fs/promises";
 import { asc, eq } from "drizzle-orm";
 import { jobs, revisions } from "../db/schema";
 import { recordStorage } from "../storage";
-import { failRevision, isPublished } from "../tiles/history";
+import { isPublished } from "../tiles/history";
 import { eraseUpload } from "./eraseUpload";
 import { processUpload } from "./processUpload";
 import {
@@ -24,6 +24,33 @@ export function createWorker(ctx: JobContext) {
 
 	const markJob = (id: number, status: "pending" | "done" | "failed") =>
 		db.update(jobs).set({ status }).where(eq(jobs.id, id)).run();
+
+	/**
+	 * Fails a job and its revision. A failed erase leaves the upload as it was, with the reason
+	 * in `error`.
+	 */
+	const failJob = (
+		job: typeof jobs.$inferSelect,
+		revisionId: number,
+		message: string,
+	) => {
+		markJob(job.id, "failed");
+		db.update(revisions)
+			.set(
+				job.type === "erase_upload"
+					? {
+							status: "done",
+							error: `delete failed: ${message}`.slice(0, 500),
+						}
+					: {
+							status: "failed",
+							error: message.slice(0, 500),
+							completedAt: Date.now(),
+						},
+			)
+			.where(eq(revisions.id, revisionId))
+			.run();
+	};
 
 	/** An upload whose revision was already published has nothing left to do; running it again would fail. */
 	const alreadyPublished = (job: typeof jobs.$inferSelect) =>
@@ -79,19 +106,7 @@ export function createWorker(ctx: JobContext) {
 						: isErase
 							? "internal error"
 							: "processing failed";
-				markJob(job.id, "failed");
-				if (isErase) {
-					// The upload is still there, as it was.
-					await db
-						.update(revisions)
-						.set({
-							status: "done",
-							error: `delete failed: ${message}`.slice(0, 500),
-						})
-						.where(eq(revisions.id, payload.revisionId));
-				} else {
-					await failRevision(db, payload.revisionId, message);
-				}
+				failJob(job, payload.revisionId, message);
 				progress.emit(payload.revisionId, {
 					status: "failed",
 					error: message,
@@ -172,18 +187,7 @@ export function createWorker(ctx: JobContext) {
 						force: true,
 					});
 				} else if (job.attempts >= MAX_ATTEMPTS) {
-					markJob(job.id, "failed");
-					db.update(revisions)
-						.set(
-							isErase
-								? {
-										status: "done",
-										error: "delete failed: interrupted too many times",
-									}
-								: { status: "failed", error: "interrupted too many times" },
-						)
-						.where(eq(revisions.id, revisionId))
-						.run();
+					failJob(job, revisionId, "interrupted too many times");
 					rmSync(incomingDir(env, revisionId), {
 						recursive: true,
 						force: true,

@@ -1,8 +1,8 @@
 import { z } from "zod";
 import { DYES } from "./colors";
-import { blockCoord, nonEmpty } from "./schemas";
+import { blockCoord, MAX_NAME, nonEmpty } from "./schemas";
 
-export const MAX_NAME = 100;
+export { MAX_NAME };
 export const MAX_POPUP = 2000;
 export const MAX_VERTICES = 2000;
 export const MAX_FEATURES_PER_LAYER = 5000;

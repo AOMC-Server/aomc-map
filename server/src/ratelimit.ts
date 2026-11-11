@@ -1,10 +1,11 @@
+import { MINUTE } from "@aomc/shared";
 import type { Context } from "hono";
 import { createMiddleware } from "hono/factory";
 import { isRead } from "./auth/scopes";
 import type { AppEnv } from "./types";
 
 /** Fixed-window in-memory limiter. `hit` returns false once the key is over its limit. */
-export function createRateLimiter(limit: number, windowMs = 60_000) {
+export function createRateLimiter(limit: number, windowMs = MINUTE) {
 	const windows = new Map<string, { start: number; count: number }>();
 	return {
 		hit(key: string, now = Date.now()): boolean {

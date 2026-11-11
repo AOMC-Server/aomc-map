@@ -1,6 +1,9 @@
 import {
+	DAY,
 	FEATURE_TYPES,
 	type FeatureType,
+	HOUR,
+	MINUTE,
 	type StatsRange,
 	statsQuerySchema,
 } from "@aomc/shared";
@@ -9,12 +12,11 @@ import { Hono } from "hono";
 import type { Db } from "../db/client";
 import { users } from "../db/schema";
 import { doc } from "../openapi";
-import { DAY, HOUR } from "../traffic";
 import type { AppEnv } from "../types";
 import { validate } from "../validate";
 
 /** How long the figures that are the same for everyone are reused. */
-const CACHE_MS = 60_000;
+const CACHE_MS = MINUTE;
 const RANGE_DAYS: Record<StatsRange, number | null> = {
 	all: null,
 	"30d": 30,

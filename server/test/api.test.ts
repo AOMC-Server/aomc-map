@@ -295,7 +295,11 @@ describe("api tokens", () => {
 		expect((week.expiresAt - Date.now()) / 86_400_000).toBeCloseTo(7, 1);
 		const never = await (await post({ name: "b", expiresInDays: null })).json();
 		expect(never.expiresAt).toBeNull();
-		expect((await post({ name: "c", expiresInDays: 0 })).status).toBe(400);
+		const invalid = await post({ name: "c", expiresInDays: 0 });
+		expect(invalid.status).toBe(400);
+		expect(((await invalid.json()) as { error: string }).error).toBe(
+			"invalid request",
+		);
 	});
 
 	test("an expired token is rejected", async () => {

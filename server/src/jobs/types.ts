@@ -1,5 +1,7 @@
+import { join } from "node:path";
 import type { Db } from "../db/client";
 import type { Env } from "../env";
+import { incomingRoot } from "../paths";
 import type { ProgressBus } from "../progress";
 import type { BlobStore } from "../tiles/blobstore";
 
@@ -25,4 +27,4 @@ export type EraseUploadPayload = { revisionId: number };
 
 /** Uploaded source files are stored as incoming/<revisionId>/<index>.png until processed. */
 export const incomingDir = (env: Env, revisionId: number) =>
-	`${env.DATA_DIR}/incoming/${revisionId}`;
+	join(incomingRoot(env.DATA_DIR), String(revisionId));

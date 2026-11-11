@@ -1,21 +1,21 @@
-import { type AdminStatsRange, adminStatsQuerySchema } from "@aomc/shared";
+import {
+	type AdminStatsRange,
+	adminStatsQuerySchema,
+	DAY,
+	FIVE_MINUTES,
+	HOUR,
+	MINUTE,
+} from "@aomc/shared";
 import { sql } from "drizzle-orm";
 import { Hono } from "hono";
-import { validator } from "hono-openapi";
 import { requireUser } from "../auth/session";
 import type { Db } from "../db/client";
 import { doc } from "../openapi";
 import { canManage } from "../permissions";
 import { measureStorage } from "../storage";
-import {
-	DAY,
-	FIVE_MINUTES,
-	HOUR,
-	MINUTE,
-	TRAFFIC_CATEGORIES,
-	type TrafficCategory,
-} from "../traffic";
+import { TRAFFIC_CATEGORIES, type TrafficCategory } from "../traffic";
 import type { AppEnv } from "../types";
+import { validate } from "../validate";
 
 const RANGE_MS: Record<AdminStatsRange, number | null> = {
 	"1h": HOUR,
@@ -34,6 +34,7 @@ type Counts = {
 	s2xx: number;
 	s3xx: number;
 	s4xx: number;
+	s5xx: number;
 };
 const emptyCounts = (): Counts => ({
 	requests: 0,
@@ -41,6 +42,7 @@ const emptyCounts = (): Counts => ({
 	s2xx: 0,
 	s3xx: 0,
 	s4xx: 0,
+	s5xx: 0,
 });
 
 const one = <T>(db: Db, query: ReturnType<typeof sql>) =>
@@ -132,7 +134,7 @@ function trafficSeries(db: Db, since: number, now: number) {
 function trafficTotals(db: Db, since: number) {
 	const rows = db.all<Counts & { category: TrafficCategory }>(sql`
 		SELECT category, SUM(requests) AS requests, SUM(bytes) AS bytes, SUM(s2xx) AS s2xx,
-			SUM(s3xx) AS s3xx, SUM(s4xx) AS s4xx
+			SUM(s3xx) AS s3xx, SUM(s4xx) AS s4xx, SUM(s5xx) AS s5xx
 		FROM traffic_hourly WHERE hour >= ${since} GROUP BY category`);
 	const byCategory = Object.fromEntries(
 		TRAFFIC_CATEGORIES.map((c) => [c, emptyCounts()]),
@@ -251,7 +253,7 @@ export const adminRoutes = new Hono<AppEnv>().use(requireUser).get(
 		fails: [400, 403],
 		login: true,
 	}),
-	validator("query", adminStatsQuerySchema),
+	validate("query", adminStatsQuerySchema),
 	(c) => {
 		if (!canManage(c.var.role)) return c.json({ error: "forbidden" }, 403);
 		const { db, svc } = c.var;

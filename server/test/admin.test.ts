@@ -1,17 +1,14 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
+import { DAY, FIVE_MINUTES, HOUR, MINUTE } from "@aomc/shared";
 import { eq } from "drizzle-orm";
 import { blobFiles, storageHistory, trafficHourly } from "../src/db/schema";
 import { recordMissingBlobSizes } from "../src/storage";
 import {
 	categoryOf,
 	createTraffic,
-	DAY,
 	domainOf,
-	FIVE_MINUTES,
-	HOUR,
-	MINUTE,
 	NO_REFERRER,
 	OTHER_DOMAIN,
 	SELF_DOMAIN,
@@ -216,9 +213,10 @@ describe("GET /api/admin/stats", () => {
 		expect((await call(t, t.mod, "GET", "/api/admin/stats")).status).toBe(403);
 		const editor = await makeUser(t.db, "someone");
 		expect((await call(t, editor, "GET", "/api/admin/stats")).status).toBe(403);
-		expect(
-			(await call(t, t.owner, "GET", "/api/admin/stats?range=1y")).status,
-		).toBe(400);
+		const invalid = await call(t, t.owner, "GET", "/api/admin/stats?range=1y");
+		expect(invalid.status).toBe(400);
+		expect(invalid.body.error).toBe("invalid request");
+		expect(invalid.body.issues.length).toBeGreaterThan(0);
 		expect((await call(t, t.owner, "GET", "/api/admin/stats")).status).toBe(
 			200,
 		);
@@ -266,6 +264,21 @@ describe("GET /api/admin/stats", () => {
 		expect(overview.tiles.images).toBe(storage.current.blobCount);
 		expect(overview.jobs).toMatchObject({ pending: 0, failed: 0 });
 		expect(overview.process.uptimeSeconds).toBeGreaterThanOrEqual(0);
+	});
+
+	test("server errors are counted apart from client errors", async () => {
+		const t = await boot();
+		const now = Date.now();
+		t.services.traffic.record("api", "", 10, 404, now);
+		t.services.traffic.record("api", "", 10, 500, now);
+		t.services.traffic.record("api", "", 10, 503, now);
+		const res = await call(t, t.owner, "GET", "/api/admin/stats?range=24h");
+		const { total, byCategory } = res.body.traffic.range;
+		expect(total.s4xx).toBe(1);
+		expect(total.s5xx).toBe(2);
+		expect(byCategory.api.s5xx).toBe(2);
+		expect(byCategory.tiles.s5xx).toBe(0);
+		expect(res.body.traffic.allTime.total.s5xx).toBe(2);
 	});
 
 	test("the all-time range with no traffic yields a short series", async () => {

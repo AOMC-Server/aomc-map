@@ -1,13 +1,25 @@
+import type { Database } from "bun:sqlite";
 import { readdir, stat } from "node:fs/promises";
 import { basename, join } from "node:path";
 import { sql } from "drizzle-orm";
 import type { Db } from "./db/client";
 import { blobFiles, storageHistory } from "./db/schema";
-import { isBlobHash } from "./tiles/blobstore";
+import { webpBlobHash } from "./tiles/blobstore";
 
 export type StorageReason = (typeof storageHistory.$inferInsert)["reason"];
 
-const REFERENCED = sql`SELECT blob_hash FROM tile_versions WHERE blob_hash IS NOT NULL UNION SELECT blob_hash FROM upload_patches`;
+const REFERENCED_BLOBS_SQL =
+	"SELECT blob_hash FROM tile_versions WHERE blob_hash IS NOT NULL UNION SELECT blob_hash FROM upload_patches";
+const REFERENCED = sql.raw(REFERENCED_BLOBS_SQL);
+
+/** Hashes that a tile version or an upload patch points to. */
+export function referencedBlobs(db: Pick<Database, "query">): Set<string> {
+	return new Set(
+		(db.query(REFERENCED_BLOBS_SQL).all() as { blob_hash: string }[]).map(
+			(r) => r.blob_hash,
+		),
+	);
+}
 
 /** Storage as recorded in the database: summed from the blob sizes, nothing is read from disk. */
 export function measureStorage(db: Db) {
@@ -58,10 +70,8 @@ export async function recordMissingBlobSizes(
 	}
 	let added = 0;
 	for (const rel of names) {
-		const name = basename(rel);
-		if (!name.endsWith(".webp")) continue;
-		const hash = name.slice(0, -5);
-		if (!isBlobHash(hash) || known.has(hash)) continue;
+		const hash = webpBlobHash(basename(rel));
+		if (!hash || known.has(hash)) continue;
 		const info = await stat(join(blobsDir, rel));
 		db.insert(blobFiles)
 			.values({ hash, bytes: info.size, createdAt: Math.round(info.mtimeMs) })

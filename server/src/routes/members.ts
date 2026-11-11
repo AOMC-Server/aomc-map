@@ -5,13 +5,13 @@ import {
 } from "@aomc/shared";
 import { count, eq } from "drizzle-orm";
 import { Hono } from "hono";
-import { validator } from "hono-openapi";
 import { requireUser, userOf } from "../auth/session";
 import type { Db } from "../db/client";
 import { members, users } from "../db/schema";
 import { doc } from "../openapi";
 import { canManage, leavesNoOwner } from "../permissions";
 import type { AppEnv } from "../types";
+import { validate } from "../validate";
 import { findUser, mayRemove, UNKNOWN_USER_ERROR } from "./util";
 
 type Reader = Pick<Db, "select">;
@@ -75,10 +75,10 @@ export const memberRoutes = new Hono<AppEnv>()
 			summary: "Add a member or change their role",
 			description: "Owners. The user must have logged in once.",
 			ok: { 201: "Role set" },
-			fails: [403, 404, 409],
+			fails: [400, 403, 404, 409],
 			login: true,
 		}),
-		validator("json", setMemberSchema),
+		validate("json", setMemberSchema),
 		async (c) => {
 			const { db } = c.var;
 			if (!canManage(c.var.role)) return c.json({ error: "forbidden" }, 403);
@@ -108,10 +108,10 @@ export const memberRoutes = new Hono<AppEnv>()
 			tag: "Map",
 			summary: "Change a member's role",
 			description: "Owners. The last owner cannot be demoted.",
-			fails: [403, 404, 409],
+			fails: [400, 403, 404, 409],
 			login: true,
 		}),
-		validator("json", updateMemberSchema),
+		validate("json", updateMemberSchema),
 		async (c) => {
 			const { db } = c.var;
 			if (!canManage(c.var.role)) return c.json({ error: "forbidden" }, 403);

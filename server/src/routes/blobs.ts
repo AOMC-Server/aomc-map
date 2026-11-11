@@ -1,11 +1,9 @@
 import { Hono } from "hono";
+import { IMMUTABLE } from "../cache";
 import { doc } from "../openapi";
-import { isBlobHash } from "../tiles/blobstore";
-import { formatOfSuffix, TILE_FORMATS } from "../tiles/formats";
+import { parseBlobName } from "../tiles/blobstore";
+import { TILE_FORMATS } from "../tiles/formats";
 import type { AppEnv } from "../types";
-
-/** For anything that can never change under its URL. */
-export const IMMUTABLE = "public, max-age=31536000, immutable";
 
 /** Unauthenticated: hashes are unguessable, but a shared hash of a private map's tile is readable. */
 export const blobRoutes = new Hono<AppEnv>().get(
@@ -30,12 +28,9 @@ export const blobRoutes = new Hono<AppEnv>().get(
 		fails: [404],
 	}),
 	async (c) => {
-		const file = c.req.param("file");
-		const hash = file.slice(0, 64);
-		const format = formatOfSuffix(file.slice(65));
-		if (!isBlobHash(hash) || file[64] !== "." || !format) {
-			return c.json({ error: "not found" }, 404);
-		}
+		const parsed = parseBlobName(c.req.param("file"));
+		if (!parsed) return c.json({ error: "not found" }, 404);
+		const { hash, format } = parsed;
 		const blobs = c.var.svc.blobs;
 		if (!(await blobs.file(hash).exists())) {
 			return c.json({ error: "not found" }, 404);

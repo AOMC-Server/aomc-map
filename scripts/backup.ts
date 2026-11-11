@@ -3,8 +3,9 @@ import { existsSync } from "node:fs";
 import { copyFile, mkdir, readdir, rename, rm } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { parseArgs } from "node:util";
+import * as paths from "../server/src/paths";
+import { webpBlobHash } from "../server/src/tiles/blobstore";
 import { orExit, positiveNumber } from "./args";
-import { webpBlobHash } from "./blobs";
 
 /** UTC, millisecond precision, so names sort by time and runs never collide. */
 const stamp = (d: Date) => d.toISOString().replace(/[-:.]/g, "");
@@ -30,7 +31,7 @@ export async function backup(opts: {
 	keep?: number;
 	now?: Date;
 }): Promise<BackupResult> {
-	const dbFile = join(opts.dataDir, "db.sqlite");
+	const dbFile = paths.dbFile(opts.dataDir);
 	if (!existsSync(dbFile)) throw new Error(`no database at ${dbFile}`);
 	if (opts.keep !== undefined)
 		positiveNumber("keep", opts.keep, { integer: true });
@@ -49,7 +50,7 @@ export async function backup(opts: {
 
 	let blobsCopied = 0;
 	let blobsSkipped = 0;
-	const blobsDir = join(opts.dataDir, "blobs");
+	const blobsDir = paths.blobsDir(opts.dataDir);
 	if (existsSync(blobsDir)) {
 		for (const rel of await readdir(blobsDir, { recursive: true })) {
 			if (!webpBlobHash(basename(rel))) continue; // skips copies and in-progress .tmp files

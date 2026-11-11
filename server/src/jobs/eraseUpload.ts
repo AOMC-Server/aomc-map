@@ -22,6 +22,7 @@ import {
 	tilePatches,
 } from "../tiles/history";
 import { parseKey, tileKey } from "../tiles/pyramid";
+import { jobRevisionId } from "./target";
 import { type EraseUploadPayload, type JobContext, UserError } from "./types";
 
 type Row = { rev: number; hash: string | null };
@@ -279,9 +280,7 @@ export async function eraseUpload(
 		tx.delete(uploadPatches)
 			.where(inArray(uploadPatches.revisionId, ids))
 			.run();
-		tx.delete(jobs)
-			.where(inArray(sql`json_extract(${jobs.payload}, '$.revisionId')`, ids))
-			.run();
+		tx.delete(jobs).where(inArray(jobRevisionId, ids)).run();
 		tx.delete(revisions).where(inArray(revisions.id, ids)).run();
 
 		// If the deleted revisions were the newest, the head moves back to the newest one left.

@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
+import { DAY, MINUTE } from "../shared/src/time";
 import { orExit, positiveNumber } from "./args";
 
 /**
@@ -49,7 +50,6 @@ type State = { done: Record<string, string[]> };
 
 const TILE_NAME = /^(-?\d+)_(-?\d+)\.png$/;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-const DAY_MS = 86_400_000;
 /** The server only reads export dates from the year 2000 on. */
 const EARLIEST = Date.UTC(2000, 0, 1);
 /** Room left for the multipart framing, `coords` and `paths` within the server's size limit. */
@@ -83,7 +83,7 @@ export async function runImport(opts: ImportOptions): Promise<ImportResult> {
 		opts.maxBatchBytes ?? 100 * 1024 * 1024,
 	);
 	const pollMs = opts.pollMs ?? 1500;
-	const maxPolls = Math.ceil((30 * 60_000) / pollMs);
+	const maxPolls = Math.ceil((30 * MINUTE) / pollMs);
 
 	const mapRes = await f(`${base}/api/map`, { headers: auth });
 	if (!mapRes.ok)
@@ -142,7 +142,7 @@ export async function runImport(opts: ImportOptions): Promise<ImportResult> {
 		const exportedAt = new Map(
 			todo.map((name, i) => {
 				const mtime = (infos[i] as { mtimeMs: number }).mtimeMs;
-				return [name, opts.date ?? Math.floor(mtime / DAY_MS) * DAY_MS];
+				return [name, opts.date ?? Math.floor(mtime / DAY) * DAY];
 			}),
 		);
 		const batches: string[][] = [];

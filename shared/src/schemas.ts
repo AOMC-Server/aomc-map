@@ -5,6 +5,9 @@ export type Role = z.infer<typeof roleSchema>;
 
 export const nonEmpty = (o: object) => Object.keys(o).length > 0;
 
+/** Longest name of a map, dimension, layer, token or feature. */
+export const MAX_NAME = 100;
+
 export const MAX_COORD = 30_000_000;
 
 export const blockCoord = z.number().int().min(-MAX_COORD).max(MAX_COORD);
@@ -23,7 +26,7 @@ const slugSchema = z
 	.regex(/^[a-z0-9][a-z0-9_-]*$/, "lowercase letters, digits, - and _ only");
 
 export const updateMapSchema = z
-	.object({ name: z.string().trim().min(1).max(100).optional() })
+	.object({ name: z.string().trim().min(1).max(MAX_NAME).optional() })
 	.refine(nonEmpty, "nothing to update");
 
 /**
@@ -68,7 +71,7 @@ export const DEFAULT_PRELOAD: PreloadRing[] = [
 
 export const createDimensionSchema = z.object({
 	slug: slugSchema,
-	name: z.string().trim().min(1).max(100),
+	name: z.string().trim().min(1).max(MAX_NAME),
 	scale: dimensionScaleSchema.optional(),
 	/** Defaults to a guess from the slug. */
 	theme: dimensionThemeSchema.optional(),
@@ -78,7 +81,7 @@ export const createDimensionSchema = z.object({
 
 export const updateDimensionSchema = z
 	.object({
-		name: z.string().trim().min(1).max(100).optional(),
+		name: z.string().trim().min(1).max(MAX_NAME).optional(),
 		sortOrder: z.number().int().optional(),
 		archived: z.boolean().optional(),
 		scale: dimensionScaleSchema.optional(),
@@ -132,7 +135,7 @@ export function normalizeScopes(scopes: readonly TokenScope[]): TokenScope[] {
 }
 
 export const createTokenSchema = z.object({
-	name: z.string().trim().min(1).max(100),
+	name: z.string().trim().min(1).max(MAX_NAME),
 	/** null = never expires. */
 	expiresInDays: z
 		.number()

@@ -15,6 +15,7 @@ import {
 	storageHistory,
 	uploadPatches,
 } from "../server/src/db/schema";
+import { classifyBlobFile } from "../server/src/tiles/blobstore";
 import {
 	bootTiles,
 	cleanupTempDirs,
@@ -29,7 +30,6 @@ import {
 } from "../server/test/helpers";
 import { positiveNumber } from "./args";
 import { backup } from "./backup";
-import { classifyBlobFile } from "./blobs";
 import { gcBlobs } from "./gc-blobs";
 import { runImport, xaeroStamp } from "./import-v1";
 

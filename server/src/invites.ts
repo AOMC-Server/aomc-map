@@ -1,4 +1,4 @@
-import type { LayerRole, MemberRole, Role } from "@aomc/shared";
+import { HOUR, type LayerRole, type MemberRole, type Role } from "@aomc/shared";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { randomToken, sha256Hex } from "./auth/tokens";
 import type { Db } from "./db/client";
@@ -58,7 +58,7 @@ export function createInvite(
 			expiresAt:
 				opts.expiresInHours === null
 					? null
-					: Date.now() + opts.expiresInHours * 3_600_000,
+					: Date.now() + opts.expiresInHours * HOUR,
 			maxUses: opts.maxUses,
 		})
 		.returning()

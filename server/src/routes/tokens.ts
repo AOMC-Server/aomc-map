@@ -1,7 +1,6 @@
 import { createTokenSchema, MAX_TOKENS_PER_USER } from "@aomc/shared";
 import { Hono } from "hono";
 import { createMiddleware } from "hono/factory";
-import { validator } from "hono-openapi";
 import { requireUser } from "../auth/session";
 import {
 	createApiTokenWithLimit,
@@ -10,6 +9,7 @@ import {
 } from "../auth/tokens";
 import { doc } from "../openapi";
 import type { AppEnv } from "../types";
+import { validate } from "../validate";
 import { parseId } from "./util";
 
 /** A token must not be able to list, mint or revoke tokens, so a leaked one stays contained. */
@@ -43,10 +43,10 @@ export const tokenRoutes = new Hono<AppEnv>()
 			description:
 				"Needs a browser session; a token cannot create tokens. The secret is only in this response. `scopes` defaults to read, upload and features; `manage` implies `moderate`.",
 			ok: { 201: "Token created" },
-			fails: [403, 409],
+			fails: [400, 403, 409],
 			login: true,
 		}),
-		validator("json", createTokenSchema),
+		validate("json", createTokenSchema),
 		async (c) => {
 			const { name, expiresInDays, scopes } = c.req.valid("json");
 			const created = createApiTokenWithLimit(c.var.db, MAX_TOKENS_PER_USER, {

@@ -4,9 +4,14 @@ import { mkdir, readdir, rename, rm, stat } from "node:fs/promises";
 import { basename, dirname, join } from "node:path";
 import { parseArgs } from "node:util";
 import { createDb } from "../server/src/db/client";
-import { recordStorage } from "../server/src/storage";
+import * as paths from "../server/src/paths";
+import { recordStorage, referencedBlobs } from "../server/src/storage";
+import {
+	type BlobFileKind,
+	classifyBlobFile,
+} from "../server/src/tiles/blobstore";
+import { HOUR, MINUTE } from "../shared/src/time";
 import { orExit, positiveNumber } from "./args";
-import { type BlobFileKind, classifyBlobFile, referencedBlobs } from "./blobs";
 
 export type GcResult = {
 	total: number;
@@ -23,9 +28,6 @@ type Candidate = {
 	hash: string | null;
 	size: number;
 };
-
-/** Where condemned files wait, inside the data directory so moving them is a cheap rename. */
-const QUARANTINE = "gc-quarantine";
 
 function readState(dbFile: string) {
 	const db = new Database(dbFile, { readonly: true });
@@ -75,14 +77,14 @@ export async function gcBlobs(opts: {
 	/** Called between the steps of a deleting run; lets tests act as a job would. */
 	onStage?: (stage: "scanned" | "quarantined") => void | Promise<void>;
 }): Promise<GcResult> {
-	const dbFile = join(opts.dataDir, "db.sqlite");
+	const dbFile = paths.dbFile(opts.dataDir);
 	if (!existsSync(dbFile)) throw new Error(`no database at ${dbFile}`);
-	const minAge = opts.minAgeMs ?? 3_600_000;
+	const minAge = opts.minAgeMs ?? HOUR;
 	if (!Number.isFinite(minAge) || minAge < 0)
 		throw new Error("minAgeMs must be a number of at least 0");
 	const clock = () => opts.now ?? Date.now();
-	const blobsDir = join(opts.dataDir, "blobs");
-	const quarantine = join(opts.dataDir, QUARANTINE);
+	const blobsDir = paths.blobsDir(opts.dataDir);
+	const quarantine = paths.gcQuarantineDir(opts.dataDir);
 
 	// A run that was killed halfway left its files in quarantine; judge them afresh.
 	if (opts.deleteFiles && existsSync(quarantine)) {
@@ -239,7 +241,7 @@ if (import.meta.main) {
 	const minAgeMs =
 		orExit(() =>
 			positiveNumber("min-age-minutes", values["min-age-minutes"] as string),
-		) * 60_000;
+		) * MINUTE;
 	const r = await gcBlobs({
 		dataDir: values.data as string,
 		deleteFiles: values.delete as boolean,

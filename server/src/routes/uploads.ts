@@ -1,6 +1,6 @@
 import { renameSync, rmSync } from "node:fs";
 import { rm } from "node:fs/promises";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
 import {
 	isValidTimeZone,
 	parseXaeroCoords,
@@ -8,14 +8,15 @@ import {
 	uploadCoordsSchema,
 	uploadPathsSchema,
 } from "@aomc/shared";
-import { eq } from "drizzle-orm";
 import { unzipSync } from "fflate";
 import { Hono } from "hono";
 import sharp from "sharp";
 import { requireUser, userOf } from "../auth/session";
-import { dimensions, jobs, revisions } from "../db/schema";
+import { jobs, revisions } from "../db/schema";
+import { dimensionBySlug } from "../dimensionLookup";
 import { incomingDir, type UploadFile } from "../jobs/types";
 import { doc } from "../openapi";
+import { incomingRoot } from "../paths";
 import { canEdit } from "../permissions";
 import type { AppEnv } from "../types";
 import { isModClient } from "../uploadClient";
@@ -76,10 +77,7 @@ export const uploadRoutes = new Hono<AppEnv>().post(
 		const user = userOf(c);
 		if (!canEdit(c.var.role)) return c.json({ error: "forbidden" }, 403);
 
-		const [dim] = await db
-			.select()
-			.from(dimensions)
-			.where(eq(dimensions.slug, c.req.param("dim") ?? ""));
+		const dim = dimensionBySlug(db, c.req.param("dim") ?? "");
 		if (!dim) return c.json({ error: "not found" }, 404);
 		if (dim.archived) return c.json({ error: "dimension is archived" }, 400);
 
@@ -264,7 +262,10 @@ export const uploadRoutes = new Hono<AppEnv>().post(
 		// Revisions, jobs and the move to incoming/<id> then happen in one transaction (the move is
 		// synchronous, so the worker can't see a job before its files), and either all of it
 		// happens or none.
-		const staging = `${env.DATA_DIR}/incoming/.staging-${crypto.randomUUID()}`;
+		const staging = join(
+			incomingRoot(env.DATA_DIR),
+			`.staging-${crypto.randomUUID()}`,
+		);
 		const revisionIds: number[] = [];
 		try {
 			await Promise.all(

@@ -2,6 +2,7 @@ import {
 	DEFAULT_PRELOAD,
 	DIMENSION_THEMES,
 	FEATURE_TYPES,
+	inviteRoleSchema,
 	layerRoleSchema,
 	layerVisibilitySchema,
 	memberRoleSchema,
@@ -262,7 +263,7 @@ export const invites = sqliteTable("invites", {
 	layerId: integer("layer_id").references(() => layers.id, {
 		onDelete: "cascade",
 	}),
-	role: text("role").notNull(),
+	role: text("role", { enum: options(inviteRoleSchema) }).notNull(),
 	createdBy: text("created_by")
 		.notNull()
 		.references(() => users.id),

@@ -27,6 +27,30 @@ describe("request errors", () => {
 		expect(query.body.issues[0].path).toEqual(["range"]);
 	});
 
+	test("every route that validates its input answers in the same format", async () => {
+		const t = await bootTiles({}, { owner: true });
+		const layer = (
+			await call(t, t.editor, "POST", "/api/layers", {
+				dimension: "overworld",
+				name: "mine",
+			})
+		).body.layer;
+		const bad = [
+			["POST", `/api/layers/${layer.id}/invites`, { maxUses: 0 }],
+			["POST", "/api/invites", { maxUses: 0 }],
+			["POST", `/api/layers/${layer.id}/members`, { role: "x" }],
+			["PATCH", `/api/layers/${layer.id}/members/someone`, { role: "x" }],
+			["POST", "/api/members", { role: "x" }],
+			["PATCH", "/api/members/someone", { role: "x" }],
+		] as const;
+		for (const [method, path, body] of bad) {
+			const res = await call(t, t.owner, method, path, body);
+			expect(res.status, `${method} ${path}`).toBe(400);
+			expect(res.body.error).toBe("invalid request");
+			expect(res.body.issues.length).toBeGreaterThan(0);
+		}
+	});
+
 	test("malformed JSON is a 400 in the API's format", async () => {
 		const t = await bootTiles();
 		const res = await t.app.request("/api/layers", {

@@ -67,7 +67,7 @@ export function asyncApiDocument(env: Env) {
 					),
 					processing: message(
 						"processing",
-						"The job is running; `message`, `done` and `total` tell how far.",
+						"The job is running; `message`, `done` and `total` tell how far. With message `queued` (only as the first event) the upload is waiting for a queued delete to start and is otherwise unchanged.",
 						payloads.processing,
 					),
 					done: message(

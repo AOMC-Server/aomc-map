@@ -2,7 +2,13 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, rename, utimes } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomToken } from "../auth/tokens";
-import { type DerivedFormat, TILE_FORMATS, transcode } from "./formats";
+import {
+	type DerivedFormat,
+	formatOfSuffix,
+	TILE_FORMATS,
+	type TileFormat,
+	transcode,
+} from "./formats";
 
 export type BlobStore = ReturnType<typeof createBlobStore>;
 
@@ -10,6 +16,46 @@ const HASH_RE = /^[0-9a-f]{64}$/;
 
 export function isBlobHash(value: string): boolean {
 	return HASH_RE.test(value);
+}
+
+/** `<sha256>.<suffix>`, a stored tile or a copy of it in another format; null for any other name. */
+export function parseBlobName(
+	name: string,
+): { hash: string; format: TileFormat } | null {
+	const hash = name.slice(0, 64);
+	const format = formatOfSuffix(name.slice(65));
+	return isBlobHash(hash) && name[64] === "." && format
+		? { hash, format }
+		: null;
+}
+
+export type BlobFileKind =
+	/** `<hash>.webp`, the stored tile. */
+	| "blob"
+	/** `<hash>.<suffix>`, a copy in another format made for API clients. */
+	| "copy"
+	/** An unfinished write. */
+	| "temp";
+
+/** What a file in the blob directory is, by its base name; null for anything else. */
+export function classifyBlobFile(
+	name: string,
+): { kind: BlobFileKind; hash: string | null } | null {
+	const parsed = parseBlobName(name);
+	if (parsed) {
+		return {
+			kind: parsed.format === "webp" ? "blob" : "copy",
+			hash: parsed.hash,
+		};
+	}
+	if (name.endsWith(".tmp")) return { kind: "temp", hash: null };
+	return null;
+}
+
+/** The hash of a stored tile `<hash>.webp`, or null for any other file. */
+export function webpBlobHash(name: string): string | null {
+	const file = classifyBlobFile(name);
+	return file?.kind === "blob" ? file.hash : null;
 }
 
 /**
@@ -37,11 +83,16 @@ export function createBlobStore(
 			const hash = createHash("sha256").update(data).digest("hex");
 			const target = path(hash);
 			if (await Bun.file(target).exists()) {
-				// Reused: refresh the age so scripts/gc-blobs.ts treats it as new.
+				// Reused: refresh the age so scripts/gc-blobs.ts treats it as new. If the file was
+				// moved away since the check (gc quarantine), it is written anew below.
 				const now = new Date();
-				await utimes(target, now, now);
-				onPut?.(hash, data.byteLength);
-				return hash;
+				try {
+					await utimes(target, now, now);
+					onPut?.(hash, data.byteLength);
+					return hash;
+				} catch (err) {
+					if ((err as NodeJS.ErrnoException).code !== "ENOENT") throw err;
+				}
 			}
 			await mkdir(dirname(target), { recursive: true });
 			const tmp = `${target}.${randomToken(6)}.tmp`;

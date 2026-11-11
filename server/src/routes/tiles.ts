@@ -1,6 +1,9 @@
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
-import { dimensions, revisions } from "../db/schema";
+import { z } from "zod";
+import { IMMUTABLE } from "../cache";
+import { revisions } from "../db/schema";
+import { dimensionBySlug } from "../dimensionLookup";
 import { doc } from "../openapi";
 import {
 	isTileFormat,
@@ -11,7 +14,7 @@ import {
 import { tileHashesIn, tileVersionAt } from "../tiles/history";
 import { isolatedTile, patchHash } from "../tiles/isolated";
 import type { AppEnv } from "../types";
-import { IMMUTABLE } from "./blobs";
+import { validate } from "../validate";
 
 /** Most tiles one hash lookup may cover. */
 export const MAX_HASH_AREA = 4096;
@@ -22,6 +25,24 @@ export const MAX_HASH_AREA = 4096;
  */
 const pinnedCache = (vParam: string | undefined, epoch: number) =>
 	vParam === String(epoch) ? IMMUTABLE : "public, max-age=60";
+
+/** Read as strings: the handler answers each malformed value with its own message. */
+const hashesQuerySchema = z.object({
+	minX: z.string().optional().describe("Leftmost tile index"),
+	minY: z.string().optional().describe("Topmost tile index"),
+	maxX: z.string().optional().describe("Rightmost tile index"),
+	maxY: z.string().optional().describe("Bottommost tile index"),
+	rev: z
+		.string()
+		.optional()
+		.describe("Show the map as of this revision (default: latest)"),
+	v: z
+		.string()
+		.optional()
+		.describe(
+			"The map epoch (`epoch` of `GET /api/map`); makes `rev` cacheable for good",
+		),
+});
 
 export const tileRoutes = new Hono<AppEnv>()
 	.get(
@@ -54,7 +75,8 @@ export const tileRoutes = new Hono<AppEnv>()
 			fails: [400, 404],
 			query: {
 				rev: "Show the map as of this revision (default: latest)",
-				only: "Upload revision id: show only what that upload added",
+				v: "The map epoch (`epoch` of `GET /api/map`). `rev` and `only` responses are cached for good only when it matches",
+				only: "Upload revision id: show only what that upload added (finished uploads only)",
 				format:
 					"`webp` (default), `png`, `jpg-95`, `jpg-80` or `webp-lossy`; see the table above",
 			},
@@ -91,10 +113,7 @@ export const tileRoutes = new Hono<AppEnv>()
 			const rev = revParam === undefined ? map.headRev : Number(revParam);
 			if (rev > map.headRev) return c.json({ error: "unknown rev" }, 400);
 
-			const [dim] = await db
-				.select({ id: dimensions.id })
-				.from(dimensions)
-				.where(eq(dimensions.slug, c.req.param("dim") ?? ""));
+			const dim = dimensionBySlug(db, c.req.param("dim") ?? "");
 			if (!dim) return c.json({ error: "not found" }, 404);
 
 			// One upload on its own, as it was uploaded: no other upload, no later revert or edit.
@@ -163,23 +182,18 @@ export const tileRoutes = new Hono<AppEnv>()
 			].join("\n"),
 			ok: { 200: "`{ tiles: [{ x, y, hash }] }`" },
 			fails: [400, 404],
-			query: {
-				minX: "Leftmost tile index",
-				minY: "Topmost tile index",
-				maxX: "Rightmost tile index",
-				maxY: "Bottommost tile index",
-				rev: "Show the map as of this revision (default: latest)",
-			},
 		}),
+		validate("query", hashesQuerySchema),
 		async (c) => {
 			const { db, env, map } = c.var;
+			const q = c.req.valid("query");
 
 			const zoom = Number(c.req.param("zoom"));
 			if (!Number.isInteger(zoom) || zoom < 0 || zoom > env.MAX_ZOOM) {
 				return c.json({ error: "zoom out of range" }, 400);
 			}
-			const [minX, minY, maxX, maxY] = ["minX", "minY", "maxX", "maxY"].map(
-				(name) => Number(c.req.query(name) ?? Number.NaN),
+			const [minX, minY, maxX, maxY] = [q.minX, q.minY, q.maxX, q.maxY].map(
+				(value) => Number(value ?? Number.NaN),
 			) as [number, number, number, number];
 			if (
 				![minX, minY, maxX, maxY].every(Number.isSafeInteger) ||
@@ -192,24 +206,21 @@ export const tileRoutes = new Hono<AppEnv>()
 				return c.json({ error: "area too large" }, 400);
 			}
 
-			const revParam = c.req.query("rev");
+			const revParam = q.rev;
 			if (revParam !== undefined && !/^\d+$/.test(revParam)) {
 				return c.json({ error: "bad rev" }, 400);
 			}
 			const rev = revParam === undefined ? map.headRev : Number(revParam);
 			if (rev > map.headRev) return c.json({ error: "unknown rev" }, 400);
 
-			const [dim] = await db
-				.select({ id: dimensions.id })
-				.from(dimensions)
-				.where(eq(dimensions.slug, c.req.param("dim") ?? ""));
+			const dim = dimensionBySlug(db, c.req.param("dim") ?? "");
 			if (!dim) return c.json({ error: "not found" }, 404);
 
 			c.header(
 				"Cache-Control",
 				revParam === undefined
 					? "public, max-age=10"
-					: pinnedCache(c.req.query("v"), map.epoch),
+					: pinnedCache(q.v, map.epoch),
 			);
 			const tiles = await tileHashesIn(
 				db,

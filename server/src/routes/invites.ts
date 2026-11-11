@@ -1,7 +1,6 @@
 import { createLayerInviteSchema, createMapInviteSchema } from "@aomc/shared";
 import { desc, eq, isNull, type SQL } from "drizzle-orm";
 import { Hono } from "hono";
-import { validator } from "hono-openapi";
 import { requireUser, userOf } from "../auth/session";
 import type { Db } from "../db/client";
 import { invites, users } from "../db/schema";
@@ -16,6 +15,7 @@ import {
 import { doc } from "../openapi";
 import { canManage, canManageLayer } from "../permissions";
 import type { AppEnv } from "../types";
+import { validate } from "../validate";
 import { layerFor, parseId } from "./util";
 
 type InviteRow = typeof invites.$inferSelect;
@@ -77,11 +77,11 @@ export const layerInviteRoutes = new Hono<AppEnv>()
 			summary: "Create a layer invite",
 			description: "The link is in `url` and shown once.",
 			ok: { 201: "Invite created" },
-			fails: [403, 404],
+			fails: [400, 403, 404, 429],
 			login: true,
 		}),
 		requireUser,
-		validator("json", createLayerInviteSchema),
+		validate("json", createLayerInviteSchema),
 		async (c) => {
 			const user = userOf(c);
 			const found = await layerFor(c, c.req.param("id"));
@@ -131,11 +131,11 @@ export const inviteRoutes = new Hono<AppEnv>()
 			description:
 				"Owners. The invite makes the person a moderator. The link is in `url` and shown once.",
 			ok: { 201: "Invite created" },
-			fails: [403],
+			fails: [400, 403],
 			login: true,
 		}),
 		requireUser,
-		validator("json", createMapInviteSchema),
+		validate("json", createMapInviteSchema),
 		async (c) => {
 			const user = userOf(c);
 			if (!canManage(c.var.role)) return c.json({ error: "forbidden" }, 403);

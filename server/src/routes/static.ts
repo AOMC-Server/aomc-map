@@ -2,6 +2,7 @@ import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
 import { type Context, Hono } from "hono";
 import { serveStatic } from "hono/bun";
+import { IMMUTABLE } from "../cache";
 import { injectMeta, type PageMeta } from "../html";
 import { loadMap } from "../permissions";
 import { resolvePreviewTarget, viewQuerySchema } from "../previewTarget";
@@ -68,7 +69,7 @@ export function staticRoutes(distDir: string) {
 				root,
 				onFound: (path, c) => {
 					if (path.includes("/assets/")) {
-						c.header("Cache-Control", "public, max-age=31536000, immutable");
+						c.header("Cache-Control", IMMUTABLE);
 					}
 				},
 			}),

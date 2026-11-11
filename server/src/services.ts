@@ -2,6 +2,7 @@ import type { Db } from "./db/client";
 import { blobFiles } from "./db/schema";
 import type { Env } from "./env";
 import { createWorker } from "./jobs/worker";
+import { blobsDir, previewCacheDir } from "./paths";
 import { createPreviewService } from "./preview";
 import { createProgressBus } from "./progress";
 import {
@@ -15,7 +16,7 @@ import { createTraffic } from "./traffic";
 export type Services = ReturnType<typeof createServices>;
 
 export function createServices(db: Db, env: Env) {
-	const blobs = createBlobStore(`${env.DATA_DIR}/blobs`, (hash, bytes) => {
+	const blobs = createBlobStore(blobsDir(env.DATA_DIR), (hash, bytes) => {
 		db.insert(blobFiles).values({ hash, bytes }).onConflictDoNothing().run();
 	});
 	const progress = createProgressBus();
@@ -24,7 +25,7 @@ export function createServices(db: Db, env: Env) {
 	const writeLimiter = createRateLimiter(WRITE_RATE_LIMIT);
 	const previewLimiter = createRateLimiter(PREVIEW_RATE_LIMIT);
 	const preview = createPreviewService({
-		cacheDir: `${env.DATA_DIR}/preview-cache`,
+		cacheDir: previewCacheDir(env.DATA_DIR),
 		maxCached: env.PREVIEW_CACHE_MAX,
 	});
 	const traffic = createTraffic(db, env);

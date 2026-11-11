@@ -68,7 +68,7 @@ export const featureRoutes = new Hono<AppEnv>()
 			summary: "Update a feature",
 			description:
 				"Send `baseRevisionId` (the `revisionId` you last saw) to avoid overwriting someone else's change: if the feature has a newer revision the answer is 409 with `{ error, feature }`, the current state.",
-			fails: [400, 403, 404, 409],
+			fails: [400, 403, 404, 409, 429],
 			login: true,
 		}),
 		requireUser,
@@ -130,7 +130,7 @@ export const featureRoutes = new Hono<AppEnv>()
 			tag: "Features",
 			summary: "Delete a feature",
 			description: "Recorded as a new revision, so it can be restored.",
-			fails: [403, 404],
+			fails: [403, 404, 429],
 			login: true,
 		}),
 		requireUser,
@@ -209,7 +209,7 @@ export const featureRoutes = new Hono<AppEnv>()
 			description:
 				"Moderators. Also brings back a deleted feature. Restoring the current version changes nothing (200).",
 			ok: { 201: "Restored" },
-			fails: [403, 404, 409],
+			fails: [403, 404, 409, 429],
 			login: true,
 		}),
 		requireUser,

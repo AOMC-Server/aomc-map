@@ -1,12 +1,12 @@
 import { layerMemberRoleSchema, layerMemberSchema } from "@aomc/shared";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
-import { validator } from "hono-openapi";
 import { requireUser, userOf } from "../auth/session";
 import { layerMembers, users } from "../db/schema";
 import { doc } from "../openapi";
 import { canManageLayer } from "../permissions";
 import type { AppEnv } from "../types";
+import { validate } from "../validate";
 import { findUser, layerFor, mayRemove, UNKNOWN_USER_ERROR } from "./util";
 
 const CREATOR_ERROR = "the layer's creator always has editor access";
@@ -48,10 +48,10 @@ export const layerMemberRoutes = new Hono<AppEnv>()
 			description:
 				"The user must have logged in once. The layer's creator always has editor access and cannot be changed (409).",
 			ok: { 201: "Role set" },
-			fails: [403, 404, 409],
+			fails: [400, 403, 404, 409, 429],
 			login: true,
 		}),
-		validator("json", layerMemberSchema),
+		validate("json", layerMemberSchema),
 		async (c) => {
 			const { db } = c.var;
 			const found = await layerFor(c, c.req.param("id"));
@@ -80,10 +80,10 @@ export const layerMemberRoutes = new Hono<AppEnv>()
 		doc({
 			tag: "Sharing",
 			summary: "Change a layer member's role",
-			fails: [403, 404, 409],
+			fails: [400, 403, 404, 409, 429],
 			login: true,
 		}),
-		validator("json", layerMemberRoleSchema),
+		validate("json", layerMemberRoleSchema),
 		async (c) => {
 			const found = await layerFor(c, c.req.param("id"));
 			if (!found) return c.json({ error: "not found" }, 404);
@@ -116,7 +116,7 @@ export const layerMemberRoutes = new Hono<AppEnv>()
 			summary: "Remove a layer member",
 			description:
 				"Members may always remove themselves, except the layer's creator (409).",
-			fails: [403, 404, 409],
+			fails: [403, 404, 409, 429],
 			login: true,
 		}),
 		async (c) => {
