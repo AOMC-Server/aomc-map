@@ -1,7 +1,13 @@
 import { effect } from "@preact/signals";
 import { isUiKeyTarget } from "../map/input";
 import type { MapView } from "../map/MapView";
-import { activeTool, cursor, highlightedUpload } from "../state";
+import {
+	activeTool,
+	centerBlock,
+	cursor,
+	highlightedUpload,
+	noHover,
+} from "../state";
 import { areasLoaded, type Edge, type Rect, uploadArea } from "../uploadArea";
 import {
 	drawGeometry,
@@ -103,11 +109,19 @@ export function initTools(map: MapView) {
 		const block = e ? floorBlock(e) : null;
 		// A new object would repaint the map on every pointer move, even within one block.
 		if (!samePoint(block, cursor.value)) cursor.value = block;
-		if (activeTool.value === "measure") hoverMeasure(cursor.value);
+		if (activeTool.value === "measure" && !noHover.value)
+			hoverMeasure(cursor.value);
 	});
 	map.on("click", (e) => {
 		if (drawing.value) return;
-		if (activeTool.value === "measure") clickMeasure(floorBlock(e));
+		// On touch screens points go at the crosshair (the measure card's Add point) instead.
+		if (activeTool.value === "measure" && !noHover.value)
+			clickMeasure(floorBlock(e));
+	});
+	// On touch screens the measure tool aims at the crosshair in the middle of the screen.
+	effect(() => {
+		if (activeTool.value === "measure" && noHover.value)
+			hoverMeasure(centerBlock.value);
 	});
 
 	// Double-click zoom would fight with two quick tool clicks.

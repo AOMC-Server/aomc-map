@@ -1,7 +1,10 @@
 import { settings } from "../settings";
 import {
+	activeTool,
+	centerBlock,
 	currentScale,
 	cursor,
+	noHover,
 	preloadProgress,
 	tilesPaused,
 	view,
@@ -49,9 +52,24 @@ const preloading = () => {
 	return settings.value.preloadSpawn && done < total;
 };
 
-/** Cursor position and zoom scale, in a corner of the map. */
+/**
+ * A small cross in the middle of the map on touch screens: the block the readout shows, and
+ * where the measure tool places its next point.
+ */
+export function CenterCrosshair() {
+	const measuring = activeTool.value === "measure";
+	if (!noHover.value || !(settings.value.showCoordinates || measuring))
+		return null;
+	return <div class="crosshair" aria-hidden="true" />;
+}
+
+/**
+ * Position and zoom scale, in a corner of the map. The position is the block under the pointer,
+ * or on touch screens the one in the middle of the screen.
+ */
 export function StatusBar() {
-	const c = cursor.value;
+	const atCenter = noHover.value;
+	const c = atCenter ? centerBlock.value : cursor.value;
 	const scale = currentScale.value;
 	// In a scaled dimension (the Nether) also show where the cursor is in overworld coordinates.
 	const prefs = settings.value;
@@ -71,7 +89,10 @@ export function StatusBar() {
 		<footer class="debug">
 			<PreloadBar />
 			{prefs.showCoordinates && (
-				<span class="line readout">Position: {c ? `${c.x}, ${c.z}` : "–"}</span>
+				<span class="line readout">
+					{atCenter ? "Center" : "Position"}:{" "}
+					<span class="coords">{c ? `${c.x}, ${c.z}` : "–"}</span>
+				</span>
 			)}
 			{equivalent && (
 				<span class="line equivalent" title="The same place in the overworld">

@@ -1,7 +1,15 @@
 import { showNotice } from "../api";
-import { activeTool, currentScale, dimSlug, visibleDimensions } from "../state";
+import {
+	activeTool,
+	centerBlock,
+	currentScale,
+	dimSlug,
+	noHover,
+	visibleDimensions,
+} from "../state";
 import {
 	clearMeasure,
+	clickMeasure,
 	formatBlocks,
 	measurePoints,
 	measureStats,
@@ -9,6 +17,7 @@ import {
 } from "../tools/measure";
 import {
 	formatDuration,
+	samePoint,
 	segmentLengths,
 	TRAVEL_SPEEDS,
 } from "../tools/measureMath";
@@ -58,6 +67,7 @@ export function MeasureCard() {
 				)
 			: [];
 	const placed = measurePoints.value.length;
+	const touch = noHover.value;
 
 	return (
 		<aside class="measure-card" aria-label="Measure">
@@ -77,8 +87,9 @@ export function MeasureCard() {
 			<div class="measure-body">
 				{!stats ? (
 					<p class="muted">
-						Click the map to place a point, then keep clicking to measure a
-						path.
+						{touch
+							? "Move the map to put the crosshair on a spot, then tap Add point. Keep adding points to measure a path."
+							: "Click the map to place a point, then keep clicking to measure a path."}
 					</p>
 				) : (
 					<>
@@ -86,7 +97,11 @@ export function MeasureCard() {
 							{formatBlocks(stats.total)} <small>blocks</small>
 						</div>
 						{stats.segments.length === 0 && (
-							<p class="muted">Click to place the next point.</p>
+							<p class="muted">
+								{touch
+									? "Move the crosshair to the next spot and add a point."
+									: "Click to place the next point."}
+							</p>
 						)}
 						{stats.segments.length > 0 && (
 							<>
@@ -132,6 +147,20 @@ export function MeasureCard() {
 					</>
 				)}
 				<div class="group measure-actions">
+					{touch && (
+						<button
+							type="button"
+							class="btn small primary"
+							// The crosshair is still on the last point: another would add nothing.
+							disabled={samePoint(
+								measurePoints.value.at(-1) ?? null,
+								centerBlock.value,
+							)}
+							onClick={() => clickMeasure(centerBlock.value)}
+						>
+							Add point
+						</button>
+					)}
 					<button
 						type="button"
 						class="btn small"
@@ -158,7 +187,9 @@ export function MeasureCard() {
 					</button>
 				</div>
 				<p class="hint">
-					Hold Shift to snap to straight lines. Drag a point to move it.
+					{touch
+						? "Drag a point to move it."
+						: "Hold Shift to snap to straight lines. Drag a point to move it."}
 				</p>
 			</div>
 		</aside>

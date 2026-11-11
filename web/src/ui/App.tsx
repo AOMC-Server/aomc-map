@@ -14,7 +14,7 @@ import { LayerSharing, layerSharingFor } from "./LayerSharing";
 import { MeasureCard } from "./MeasureCard";
 import { Popup } from "./Popup";
 import { ShareDialog, shareOpen } from "./ShareDialog";
-import { StatusBar } from "./StatusBar";
+import { CenterCrosshair, StatusBar } from "./StatusBar";
 import { Toast } from "./Toast";
 import { Toolbar } from "./Toolbar";
 import { Tooltip } from "./Tooltip";
@@ -73,6 +73,7 @@ export function App() {
 					<MeasureCard />
 					<HistoryBanner />
 					<StatusBar />
+					<CenterCrosshair />
 					<Hotbar />
 					<Tooltip />
 					{uploadOpen.value && <UploadDialog />}

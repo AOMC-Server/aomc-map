@@ -1202,6 +1202,47 @@ input[type="range"]:disabled {
 	white-space: pre;
 }
 
+/* Marks the middle of the map, whose position the readout shows on touch screens. */
+.crosshair {
+	position: absolute;
+	top: 50%;
+	left: 50%;
+	z-index: 2;
+	width: 0;
+	height: 0;
+	pointer-events: none;
+	/* One dark outline around the whole cross, so it shows on bright and dark terrain alike. */
+	filter: drop-shadow(1px 0 0 rgba(0, 0, 0, 0.7))
+		drop-shadow(-1px 0 0 rgba(0, 0, 0, 0.7))
+		drop-shadow(0 1px 0 rgba(0, 0, 0, 0.7))
+		drop-shadow(0 -1px 0 rgba(0, 0, 0, 0.7));
+}
+
+.crosshair::before,
+.crosshair::after {
+	content: "";
+	position: absolute;
+	background: #fff;
+}
+
+.crosshair::before {
+	left: -7px;
+	top: -1px;
+	width: 14px;
+	height: 2px;
+}
+
+.crosshair::after {
+	left: -1px;
+	top: -7px;
+	width: 2px;
+	height: 14px;
+}
+
+.debug .coords {
+	white-space: nowrap;
+}
+
 .debug .readout {
 	min-width: 11em;
 }
@@ -3085,7 +3126,19 @@ body.resizing {
 		right: 8px;
 		width: auto;
 		bottom: var(--above-hotbar);
-		max-height: 45vh;
+		/* Stays below the middle of the screen, where the crosshair is on touch screens. */
+		max-height: min(45vh, calc(50% - var(--above-hotbar) - 20px));
+	}
+
+	/* The buttons come first, so Add point is in reach without scrolling the card. */
+	.measure-body {
+		display: flex;
+		flex-direction: column;
+	}
+
+	.measure-actions {
+		order: -1;
+		margin: 0 0 10px;
 	}
 }
 

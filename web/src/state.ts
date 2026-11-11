@@ -45,6 +45,21 @@ export const rev = signal<number | null>(null);
 export const embed = signal(false);
 export const view = signal<View>({ centerX: 0, centerZ: 0, zoom: 2 });
 export const cursor = signal<{ x: number; z: number } | null>(null);
+/** The block in the middle of the screen. */
+export const centerBlock = computed(() => ({
+	x: Math.floor(view.value.centerX),
+	z: Math.floor(view.value.centerZ),
+}));
+
+/**
+ * Touch screens have no pointer hovering over the map: positions are read, and measure points
+ * placed, at the crosshair in the middle of the screen instead.
+ */
+const hoverQuery = globalThis.matchMedia?.("(hover: none)");
+export const noHover = signal(hoverQuery?.matches ?? false);
+hoverQuery?.addEventListener("change", (e) => {
+	noHover.value = e.matches;
+});
 export const activeTool = signal<Tool>("none");
 export const loadError = signal<string | null>(null);
 /** Debug render mode: no new tiles are loaded while set. Not saved. */
