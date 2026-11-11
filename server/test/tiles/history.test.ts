@@ -1,20 +1,26 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
+import { rm } from "node:fs/promises";
 import { eq } from "drizzle-orm";
-import { jobs, maps, revisions } from "../../src/db/schema";
+import { dimensions, jobs, mapInfo, revisions } from "../../src/db/schema";
 import { incomingDir } from "../../src/jobs/types";
+
+afterAll(cleanupTempDirs);
+
 import {
 	BLACK,
 	BLUE,
 	bootTiles,
+	cleanupTempDirs,
+	erase,
 	GREEN,
 	png,
 	px,
 	RED,
 	readTile,
-	revert,
 	revisionOf,
 	solid,
 	T,
+	type TileApp,
 	upload,
 	uploadMany,
 } from "../helpers";
@@ -33,7 +39,7 @@ describe("upload", () => {
 		expect(rev.status).toBe("done");
 		expect(rev.rev).toBe(1);
 		expect(rev.bbox).toEqual({ minX: -10, minZ: -10, maxX: 9, maxZ: 9 });
-		const [map] = await t.db.select().from(maps).where(eq(maps.id, t.mapId));
+		const map = await t.db.select().from(mapInfo).get();
 		expect(map?.headRev).toBe(1);
 
 		// Tile -1 covers blocks -16..-1: image starts at local 6.
@@ -96,7 +102,7 @@ describe("upload", () => {
 		// Zoom 3 tile (-1,-1) covers zoom-2 tiles (-2..-1): only the bottom-right quadrant has data.
 		const z3 = (await readTile(t, 3, -1, -1)) as Buffer;
 		expect(px(z3, 0, 0)).toEqual(NONE);
-		expect(z3[(15 * T + 15) * 4 + 3]).toBeGreaterThan(0);
+		expect(px(z3, 15, 15)).toEqual(RED_PX);
 	});
 
 	test("an unchanged re-upload adds a revision but no tile writes", async () => {
@@ -122,7 +128,7 @@ describe("history lookup", () => {
 		);
 		expect(px((await readTile(t, 0, 0, 0)) as Buffer, 3, 3)).toEqual(BLUE_PX);
 
-		const base = "/api/maps/aomc/dimensions/overworld/tiles/0/0/0";
+		const base = "/api/dimensions/overworld/tiles/0/0/0";
 		expect((await t.app.request(`${base}?rev=3`)).status).toBe(400);
 		expect((await t.app.request(`${base}?rev=abc`)).status).toBe(400);
 
@@ -142,122 +148,247 @@ describe("history lookup", () => {
 	});
 });
 
-describe("revert and unrevert", () => {
-	// A: red over the whole tile (0,0). B: blue over its right half.
-	async function setup() {
+describe("deleting an upload", () => {
+	/** Uploads that overlap on two tiles; `skip` leaves one out, as if it was never made. */
+	async function history(skip?: number) {
 		const t = await bootTiles();
-		const a = await upload(t, await solid(T, T, RED), 0, 0);
-		const b = await upload(t, await solid(8, T, BLUE), 8, 0);
-		return { t, a, b };
+		const steps = [
+			async () => upload(t, await solid(2 * T, T, RED), 0, 0),
+			async () => upload(t, await solid(T, 2 * T, BLUE), 8, -8),
+			async () => upload(t, await solid(T, T, GREEN), 4, 0),
+			async () => upload(t, await solid(2 * T, 2 * T, RED), 16, 16),
+		];
+		const ids: number[] = [];
+		for (const [i, step] of steps.entries()) {
+			if (i !== skip) ids.push(await step());
+		}
+		return { t, ids };
 	}
 
-	test("a later overlapping upload survives reverting an earlier one", async () => {
-		const { t, a } = await setup();
-		await revert(t, a);
-		const tile = (await readTile(t, 0, 0, 0)) as Buffer;
-		expect(px(tile, 2, 2)).toEqual(NONE);
-		expect(px(tile, 12, 2)).toEqual(BLUE_PX);
-		// History is not rewritten.
-		expect(px((await readTile(t, 0, 0, 0, 2)) as Buffer, 2, 2)).toEqual(RED_PX);
-		expect(await readTile(t, 3, 0, 0)).not.toBeNull();
+	/** Every tile at every zoom as of `rev`, for comparing two maps. */
+	async function snapshot(t: TileApp, rev?: number) {
+		const out: Record<string, number[] | null> = {};
+		for (let zoom = 0; zoom <= 3; zoom++) {
+			for (let y = -2; y <= 3; y++) {
+				for (let x = -2; x <= 3; x++) {
+					const tile = await readTile(t, zoom, x, y, rev);
+					out[`${zoom}/${x}/${y}`] = tile ? [...tile] : null;
+				}
+			}
+		}
+		return out;
+	}
+
+	test("it is as if the upload was never made, at every revision", async () => {
+		for (const skip of [0, 1, 2, 3]) {
+			const full = await history();
+			await erase(full.t, full.ids[skip] as number);
+			const without = await history(skip);
+
+			// Revisions after the deleted one keep their numbers, so there is a gap.
+			const gap = skip + 1;
+			const head = full.ids.length;
+			expect(await snapshot(full.t)).toEqual(await snapshot(without.t));
+			for (let rev = 0; rev <= head; rev++) {
+				if (rev === gap) continue;
+				const there = rev < gap ? rev : rev - 1;
+				expect(await snapshot(full.t, rev)).toEqual(
+					await snapshot(without.t, there),
+				);
+			}
+		}
 	});
 
-	test("unrevert restores the original result", async () => {
-		const { t, a } = await setup();
-		const before = (await readTile(t, 0, 0, 0)) as Buffer;
-		await revert(t, a);
-		await revert(t, a, "unrevert");
-		const after = (await readTile(t, 0, 0, 0)) as Buffer;
-		expect(after.equals(before)).toBe(true);
-		expect(px(after, 2, 2)).toEqual(RED_PX);
-		expect(px(after, 12, 2)).toEqual(BLUE_PX);
+	test("the upload leaves the log, its patches and the job history", async () => {
+		const { t, ids } = await history();
+		const gone = ids[1] as number;
+		await erase(t, gone);
+		expect((await t.app.request(`/api/revisions/${gone}`)).status).toBe(404);
+		const list = (await (await t.app.request("/api/revisions")).json()) as {
+			revisions: { id: number }[];
+		};
+		expect(list.revisions.map((r) => r.id)).not.toContain(gone);
+		const jobRows = await t.db.select().from(jobs);
+		expect(
+			jobRows.filter(
+				(j) => (j.payload as { revisionId: number }).revisionId === gone,
+			),
+		).toEqual([]);
+		const isolated = await t.app.request(
+			`/api/dimensions/overworld/tiles/0/0/0?only=${gone}`,
+		);
+		expect(isolated.status).toBe(404);
 	});
 
-	test("reverting the upload that created a tile makes it empty at every zoom", async () => {
+	test("deleting the newest upload moves the head back, and the next upload reuses the number", async () => {
+		const { t, ids } = await history();
+		await erase(t, ids.at(-1) as number);
+		expect((await t.db.select().from(mapInfo).get())?.headRev).toBe(3);
+		expect(await readTile(t, 0, 2, 2)).toBeNull();
+
+		const next = await upload(t, await solid(T, T, BLUE), 0, 0);
+		expect((await revisionOf(t, next)).rev).toBe(4);
+		expect(px((await readTile(t, 0, 0, 0)) as Buffer, 2, 2)).toEqual(BLUE_PX);
+	});
+
+	test("an erase reports its progress", async () => {
+		const { t, ids } = await history();
+		const events: { message?: string; done?: number; total?: number }[] = [];
+		const unsubscribe = t.services.progress.subscribe(ids[0] as number, (e) =>
+			events.push(e),
+		);
+		await erase(t, ids[0] as number);
+		unsubscribe();
+		const tiles = events.filter((e) => e.message === "rewriting tiles");
+		expect(tiles.length).toBeGreaterThan(0);
+		expect(tiles.at(-1)?.done).toBe(tiles.at(-1)?.total);
+		expect(events.map((e) => e.message)).toContain("publishing");
+		expect(events.at(-1)).toMatchObject({ status: "done" });
+	});
+
+	test("an erase bumps the map epoch, so cached tiles are not reused", async () => {
+		const { t, ids } = await history();
+		const epoch = async () =>
+			(
+				(await (await t.app.request("/api/map")).json()) as {
+					map: { epoch: number };
+				}
+			).map.epoch;
+		expect(await epoch()).toBe(0);
+		await erase(t, ids[0] as number);
+		expect(await epoch()).toBe(1);
+	});
+
+	test("uploads reverted in older versions of the server stay hidden", async () => {
 		const t = await bootTiles();
 		const a = await upload(t, await solid(T, T, RED), 0, 0);
-		await revert(t, a);
-		for (let zoom = 0; zoom <= 3; zoom++)
-			expect(await readTile(t, zoom, 0, 0)).toBeNull();
-		expect(await readTile(t, 0, 0, 0, 1)).not.toBeNull();
-	});
-
-	test("an earlier revert is not undone by reverting a later upload", async () => {
-		const { t, a, b } = await setup();
-		await revert(t, a);
-		await revert(t, b);
-		expect(await readTile(t, 0, 0, 0)).toBeNull();
-		await revert(t, a, "unrevert");
-		const tile = (await readTile(t, 0, 0, 0)) as Buffer;
-		expect(px(tile, 12, 2)).toEqual(RED_PX);
-	});
-
-	test("revert revisions get their own rev, copy the bbox and flag the target", async () => {
-		const { t, a } = await setup();
-		const op = await revert(t, a);
-		const opRev = await revisionOf(t, op);
-		expect(opRev).toMatchObject({
+		const b = await upload(t, await solid(T, T, BLUE), 0, 0);
+		// What the old revert did: a revision pointing at the upload, and the flag.
+		const dim = (await revisionOf(t, a)).dimensionId as number;
+		await t.db.insert(revisions).values({
 			kind: "revert",
+			dimensionId: dim,
+			authorId: "mod",
+			targetRevisionId: a,
 			status: "done",
 			rev: 3,
-			targetRevisionId: a,
 		});
-		expect(opRev.bbox).toEqual((await revisionOf(t, a)).bbox);
-		expect((await revisionOf(t, a)).reverted).toBe(true);
+		await t.db
+			.update(revisions)
+			.set({ reverted: true })
+			.where(eq(revisions.id, a));
+		await t.db.update(mapInfo).set({ headRev: 3 });
+
+		await erase(t, b);
+		expect(await readTile(t, 0, 0, 0)).toBeNull();
+		expect(px((await readTile(t, 0, 0, 0, 1)) as Buffer, 2, 2)).toEqual(RED_PX);
 	});
 
-	test("request validation: state, role, kind", async () => {
-		const { t, a } = await setup();
-		const post = (id: number, kind: string, user = t.mod) =>
-			t.app.request(`/api/revisions/${id}/${kind}`, {
-				method: "POST",
-				headers: user.auth,
-			});
+	test("a failed erase leaves the upload exactly as it was", async () => {
+		const { t, ids } = await history();
+		await rm(`${t.env.DATA_DIR}/blobs`, { recursive: true, force: true });
+		await erase(t, ids[1] as number);
+		const rev = await revisionOf(t, ids[1] as number);
+		expect(rev.status).toBe("done");
+		expect(rev.error).toContain("delete failed");
+		expect((await t.db.select().from(mapInfo).get())?.headRev).toBe(4);
+	});
 
-		expect((await post(a, "revert", t.editor)).status).toBe(403);
-		expect((await post(a, "unrevert")).status).toBe(409);
-		expect((await post(9999, "revert")).status).toBe(404);
-		await revert(t, a);
-		expect((await post(a, "revert")).status).toBe(409);
+	test("request validation: role, kind, state", async () => {
+		const { t, ids } = await history();
+		const del = (id: number, user: { auth: Record<string, string> } | null) =>
+			t.app.request(`/api/revisions/${id}`, {
+				method: "DELETE",
+				headers: user?.auth ?? {},
+			});
+		const a = ids[0] as number;
+
+		expect((await del(a, null)).status).toBe(401);
+		expect((await del(a, t.editor)).status).toBe(403);
+		expect((await del(9999, t.mod)).status).toBe(404);
+
+		await t.db.insert(revisions).values({
+			kind: "revert",
+			authorId: "mod",
+			targetRevisionId: a,
+			status: "done",
+		});
 		const op = (
 			await t.db.select().from(revisions).where(eq(revisions.kind, "revert"))
 		)[0];
-		expect((await post(op?.id as number, "revert")).status).toBe(400);
-		expect(
-			(await t.app.request(`/api/revisions/${a}/revert`, { method: "POST" }))
-				.status,
-		).toBe(401);
+		expect((await del(op?.id as number, t.mod)).status).toBe(404);
+
+		await t.db
+			.update(revisions)
+			.set({ status: "processing" })
+			.where(eq(revisions.id, a));
+		expect((await del(a, t.mod)).status).toBe(409);
+	});
+
+	test("a failed upload is simply removed", async () => {
+		const t = await bootTiles();
+		const id = await upload(t, await solid(T, T, BLACK), 0, 0);
+		expect((await revisionOf(t, id)).status).toBe("failed");
+		const res = await t.app.request(`/api/revisions/${id}`, {
+			method: "DELETE",
+			headers: t.mod.auth,
+		});
+		expect(res.status).toBe(200);
+		expect((await t.app.request(`/api/revisions/${id}`)).status).toBe(404);
 	});
 });
 
 describe("failures", () => {
-	test("a failed job leaves no visible tiles and does not move head", async () => {
-		const t = await bootTiles();
-		await upload(t, await solid(T, T, RED), 0, 0);
+	const FILES = [{ x: 0, z: 0, width: T, height: T }];
+
+	/** Queues an upload job directly, so tests control its state and whether its file exists. */
+	async function queueUpload(
+		t: Awaited<ReturnType<typeof bootTiles>>,
+		job: Partial<typeof jobs.$inferInsert> = {},
+		status: "pending" | "processing" = "pending",
+	) {
+		const dim = await t.db.query.dimensions.findFirst({
+			where: eq(dimensions.slug, "overworld"),
+		});
 		const [rev] = await t.db
 			.insert(revisions)
 			.values({
-				mapId: t.mapId,
 				kind: "upload",
-				dimensionId: 1,
+				dimensionId: (dim as { id: number }).id,
 				authorId: "editor",
 				fileCount: 1,
+				status,
 			})
 			.returning({ id: revisions.id });
 		const revisionId = (rev as { id: number }).id;
-		await t.db.insert(jobs).values({
-			type: "process_upload",
-			payload: { revisionId, files: [{ x: 0, z: 0, width: T, height: T }] }, // no incoming file
-		});
+		const [row] = await t.db
+			.insert(jobs)
+			.values({
+				type: "process_upload",
+				status,
+				payload: { revisionId, files: FILES },
+				...job,
+			})
+			.returning({ id: jobs.id });
+		return { revisionId, jobId: (row as { id: number }).id };
+	}
+
+	const jobStatus = async (
+		t: Awaited<ReturnType<typeof bootTiles>>,
+		jobId: number,
+	) => (await t.db.select().from(jobs).where(eq(jobs.id, jobId)))[0]?.status;
+
+	test("a failed job leaves no visible tiles and does not move head", async () => {
+		const t = await bootTiles();
+		await upload(t, await solid(T, T, RED), 0, 0);
+		const { revisionId, jobId } = await queueUpload(t); // no incoming file
 		await t.services.worker.run();
 
 		const failed = await revisionOf(t, revisionId);
 		expect(failed.status).toBe("failed");
 		expect(failed.rev).toBeNull();
-		const [map] = await t.db.select().from(maps).where(eq(maps.id, t.mapId));
-		expect(map?.headRev).toBe(1);
-		const [job] = await t.db.select().from(jobs).where(eq(jobs.id, 2));
-		expect(job?.status).toBe("failed");
+		expect((await t.db.select().from(mapInfo).get())?.headRev).toBe(1);
+		expect(await jobStatus(t, jobId)).toBe("failed");
 	});
 
 	test("an upload with no map data fails cleanly", async () => {
@@ -270,26 +401,11 @@ describe("failures", () => {
 
 	test("jobs interrupted mid-processing are retried on start", async () => {
 		const t = await bootTiles();
-		const [rev] = await t.db
-			.insert(revisions)
-			.values({
-				mapId: t.mapId,
-				kind: "upload",
-				dimensionId: 1,
-				authorId: "editor",
-				status: "processing",
-			})
-			.returning({ id: revisions.id });
-		const revisionId = (rev as { id: number }).id;
+		const { revisionId } = await queueUpload(t, { attempts: 1 }, "processing");
 		await Bun.write(
 			`${incomingDir(t.env, revisionId)}/0.png`,
 			await solid(T, T, RED),
 		);
-		await t.db.insert(jobs).values({
-			type: "process_upload",
-			status: "processing",
-			payload: { revisionId, files: [{ x: 0, z: 0, width: T, height: T }] },
-		});
 
 		t.services.worker.start();
 		t.services.worker.stop();
@@ -297,5 +413,30 @@ describe("failures", () => {
 
 		expect((await revisionOf(t, revisionId)).status).toBe("done");
 		expect(await readTile(t, 0, 0, 0)).not.toBeNull();
+	});
+
+	test("a job interrupted too many times is failed on start instead of retried", async () => {
+		const t = await bootTiles();
+		const { revisionId, jobId } = await queueUpload(
+			t,
+			{ attempts: 3 },
+			"processing",
+		);
+		await Bun.write(
+			`${incomingDir(t.env, revisionId)}/0.png`,
+			await solid(T, T, RED),
+		);
+
+		t.services.worker.start();
+		t.services.worker.stop();
+		await t.services.worker.run();
+
+		const rev = await revisionOf(t, revisionId);
+		expect(rev).toMatchObject({
+			status: "failed",
+			error: "interrupted too many times",
+		});
+		expect(await jobStatus(t, jobId)).toBe("failed");
+		expect(await readTile(t, 0, 0, 0)).toBeNull();
 	});
 });

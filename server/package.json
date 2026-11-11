@@ -3,8 +3,7 @@
 	"private": true,
 	"type": "module",
 	"scripts": {
-		"db:generate": "drizzle-kit generate",
-		"db:migrate": "bun src/db/migrate.ts"
+		"db:generate": "drizzle-kit generate"
 	},
 	"dependencies": {
 		"@aomc/shared": "workspace:*",

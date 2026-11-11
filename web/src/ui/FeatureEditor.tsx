@@ -1,11 +1,12 @@
 import { DYE_HEX, DYES, type Dye } from "@aomc/shared/colors";
 import {
+	type FeatureInput,
 	type FeatureType,
 	MAX_NAME,
 	MAX_POPUP,
-	type Point,
 } from "@aomc/shared/features";
 import { useEffect, useState } from "preact/hooks";
+import { dyeLabel, pointsOf, TYPE_LABEL } from "../featureInfo";
 import { createFeature, deleteFeature, updateFeature } from "../layers";
 import { editor, layersData, popup } from "../state";
 import {
@@ -18,12 +19,9 @@ import {
 	stopDraw,
 	undoPoint,
 } from "../tools/draw";
+import { Panel } from "./Panel";
 
-const TYPES: { type: FeatureType; label: string }[] = [
-	{ type: "pin", label: "Pin" },
-	{ type: "line", label: "Line" },
-	{ type: "polygon", label: "Area" },
-];
+const TYPES: FeatureType[] = ["pin", "line", "polygon"];
 
 const closeEditor = () => {
 	stopDraw();
@@ -62,17 +60,14 @@ export function FeatureEditor() {
 	const [saving, setSaving] = useState(false);
 
 	useEffect(() => {
-		const initial: Point[] = !existing
-			? []
-			: existing.type === "pin"
-				? [existing.geometry as Point]
-				: (existing.geometry as Point[]);
-		startDraw(existing?.type ?? "pin", initial, () => {
-			editor.value = null;
-		});
+		startDraw(
+			existing?.type ?? "pin",
+			existing ? pointsOf(existing) : [],
+			() => {
+				editor.value = null;
+			},
+		);
 		return () => stopDraw();
-		// The session is started once per open editor.
-		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
 	if (!target || !layer) return null;
@@ -87,14 +82,16 @@ export function FeatureEditor() {
 
 	const save = async () => {
 		if (!ready || saving) return;
+		const common = { name: name.trim(), popup: text, color };
+		const [first] = points;
+		const input: FeatureInput | null =
+			type !== "pin"
+				? { ...common, type, geometry: points }
+				: first
+					? { ...common, type, geometry: first }
+					: null;
+		if (!input) return;
 		setSaving(true);
-		const input = {
-			type,
-			name: name.trim(),
-			popup: text,
-			color,
-			geometry: type === "pin" ? (points[0] as Point) : points,
-		} as Parameters<typeof createFeature>[1];
 		const saved =
 			target.mode === "create"
 				? await createFeature(layer.id, input)
@@ -111,133 +108,130 @@ export function FeatureEditor() {
 	};
 
 	return (
-		<aside class="panel editor" aria-label="Feature editor">
-			<header class="panel-head">
-				<h2>{target.mode === "create" ? "New feature" : "Edit feature"}</h2>
-				<button type="button" class="btn" onClick={closeEditor}>
-					Cancel
-				</button>
-			</header>
-			<div class="panel-body">
-				<p class="muted">Layer: {layer.name}</p>
+		<Panel
+			title={target.mode === "create" ? "New feature" : "Edit feature"}
+			onClose={closeEditor}
+			closeText="Cancel"
+			class="editor"
+			footer={
+				<>
+					{target.mode === "edit" && (
+						<button type="button" class="btn danger" onClick={remove}>
+							Delete
+						</button>
+					)}
+					<span class="spacer" />
+					<button
+						type="button"
+						class="btn primary"
+						disabled={!ready || saving}
+						onClick={save}
+					>
+						{saving ? "Saving…" : "Save"}
+					</button>
+				</>
+			}
+		>
+			<p class="muted">Layer: {layer.name}</p>
 
-				<div class="field">
-					<span class="label">Type</span>
-					<div class="group">
-						{TYPES.map((t) => (
-							<button
-								key={t.type}
-								type="button"
-								class={`btn ${type === t.type ? "active" : ""}`}
-								aria-pressed={type === t.type}
-								onClick={() => changeType(t.type)}
-							>
-								{t.label}
-							</button>
-						))}
-					</div>
+			<div class="field">
+				<span class="label">Type</span>
+				<div class="group">
+					{TYPES.map((t) => (
+						<button
+							key={t}
+							type="button"
+							class={`btn ${type === t ? "active" : ""}`}
+							aria-pressed={type === t}
+							onClick={() => changeType(t)}
+						>
+							{TYPE_LABEL[t]}
+						</button>
+					))}
 				</div>
+			</div>
 
-				<div class="field draw-controls">
-					<span class="label">Location</span>
-					<p class="hint">{drawHint(type, points.length, d?.mode ?? "draw")}</p>
-					<div class="group">
-						{d?.mode === "draw" && type !== "pin" && (
-							<button
-								type="button"
-								class="btn"
-								disabled={!ready}
-								onClick={() => finishDraw()}
-							>
-								Finish
-							</button>
-						)}
-						{d?.mode === "placed" && (
-							<button type="button" class="btn" onClick={resumeDraw}>
-								{type === "pin" ? "Place again" : "Add points"}
-							</button>
-						)}
-						{type !== "pin" && points.length > 0 && (
-							<button type="button" class="btn" onClick={undoPoint}>
-								Undo last
-							</button>
-						)}
-					</div>
-					{type === "pin" && points[0] && (
-						<p class="hint">
-							x {points[0][0]}, z {points[0][1]}
-						</p>
+			<div class="field draw-controls">
+				<span class="label">Location</span>
+				<p class="hint">{drawHint(type, points.length, d?.mode ?? "draw")}</p>
+				<div class="group">
+					{d?.mode === "draw" && type !== "pin" && (
+						<button
+							type="button"
+							class="btn"
+							disabled={!ready}
+							onClick={() => finishDraw()}
+						>
+							Finish
+						</button>
+					)}
+					{d?.mode === "placed" && (
+						<button type="button" class="btn" onClick={resumeDraw}>
+							{type === "pin" ? "Place again" : "Add points"}
+						</button>
+					)}
+					{type !== "pin" && points.length > 0 && (
+						<button type="button" class="btn" onClick={undoPoint}>
+							Undo last
+						</button>
 					)}
 				</div>
-
-				<label class="field">
-					<span class="label">Name</span>
-					<input
-						type="text"
-						value={name}
-						maxLength={MAX_NAME}
-						onInput={(e) => setName(e.currentTarget.value)}
-						placeholder="Shown on hover"
-					/>
-				</label>
-
-				<label class="field">
-					<span class="label">
-						Popup{" "}
-						<small>
-							({text.length}/{MAX_POPUP})
-						</small>
-					</span>
-					<textarea
-						rows={4}
-						value={text}
-						maxLength={MAX_POPUP}
-						onInput={(e) => setText(e.currentTarget.value)}
-						placeholder="**bold**, [links](https://example.com) and line breaks"
-					/>
-				</label>
-
-				<label class="field">
-					<span class="label">Colour</span>
-					<span class="color-row">
-						<span
-							class="swatch"
-							style={{ background: DYE_HEX[color ?? layer.color] }}
-						/>
-						<select
-							value={color ?? ""}
-							onChange={(e) =>
-								setColor((e.currentTarget.value || null) as Dye | null)
-							}
-						>
-							<option value="">
-								Layer default ({layer.color.replace("_", " ")})
-							</option>
-							{DYES.map((dye) => (
-								<option key={dye} value={dye}>
-									{dye.replace("_", " ")}
-								</option>
-							))}
-						</select>
-					</span>
-				</label>
-			</div>
-			<footer class="panel-foot">
-				{target.mode === "edit" && (
-					<button type="button" class="btn danger" onClick={remove}>
-						Delete
-					</button>
+				{type === "pin" && points[0] && (
+					<p class="hint">
+						x {points[0][0]}, z {points[0][1]}
+					</p>
 				)}
-				<span class="spacer" />
-				<button
-					type="button"
-					class="btn primary"
-					disabled={!ready || saving}
-					onClick={save}
-				>
-					{saving ? "Saving…" : "Save"}
-				</button>
-			</footer>
-		</aside>
+			</div>
+
+			<label class="field">
+				<span class="label">Name</span>
+				<input
+					type="text"
+					value={name}
+					maxLength={MAX_NAME}
+					onInput={(e) => setName(e.currentTarget.value)}
+					placeholder="Shown on hover"
+				/>
+			</label>
+
+			<label class="field">
+				<span class="label">
+					Popup{" "}
+					<small>
+						({text.length}/{MAX_POPUP})
+					</small>
+				</span>
+				<textarea
+					rows={4}
+					value={text}
+					maxLength={MAX_POPUP}
+					onInput={(e) => setText(e.currentTarget.value)}
+					placeholder="**bold**, [links](https://example.com) and line breaks"
+				/>
+			</label>
+
+			<label class="field">
+				<span class="label">Colour</span>
+				<span class="color-row">
+					<span
+						class="swatch"
+						style={{ background: DYE_HEX[color ?? layer.color] }}
+					/>
+					<select
+						value={color ?? ""}
+						onChange={(e) =>
+							setColor((e.currentTarget.value || null) as Dye | null)
+						}
+					>
+						<option value="">Layer default ({dyeLabel(layer.color)})</option>
+						{DYES.map((dye) => (
+							<option key={dye} value={dye}>
+								{dyeLabel(dye)}
+							</option>
+						))}
+					</select>
+				</span>
+			</label>
+		</Panel>
 	);
 }

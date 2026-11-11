@@ -10,7 +10,7 @@ mkdirSync(env.DATA_DIR, { recursive: true });
 
 const db = createDb(`${env.DATA_DIR}/db.sqlite`);
 runMigrations(db);
-await runSetup(db, env);
+runSetup(db, env);
 
 const services = createServices(db, env);
 services.worker.start();

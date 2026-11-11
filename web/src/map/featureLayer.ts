@@ -5,7 +5,8 @@ import {
 	scaleOf,
 	screenToBlock,
 	type View,
-} from "./camera";
+} from "@aomc/shared/view";
+import { pointsOf } from "../featureInfo";
 import {
 	type Bounds,
 	boundsOf,
@@ -55,9 +56,6 @@ type DrawnCluster = {
 	count: number;
 	bounds: Bounds;
 };
-
-const pointsOf = (f: RenderFeature): Pt[] =>
-	f.type === "pin" ? [f.geometry as Pt] : (f.geometry as Pt[]);
 
 /** Draws pins (with grid clustering), lines and polygons, and answers hit-test queries. */
 export class FeatureLayer {
@@ -203,9 +201,8 @@ export class FeatureLayer {
 			const x = group.reduce((n, g) => n + g.x, 0) / group.length;
 			const y = group.reduce((n, g) => n + g.y, 0) / group.length;
 			const bounds = boundsOf(group.map((g) => g.item.points[0] as Pt));
-			const hovered = group.some((g) => g.item.feature.id === this.hoveredId);
 			this.drawnClusters.push({ x, y, r: 15, count: group.length, bounds });
-			this.drawCluster(ctx, x, y, group.length, hovered);
+			this.drawCluster(ctx, x, y, group.length);
 		}
 
 		for (const s of singles) {
@@ -241,10 +238,9 @@ export class FeatureLayer {
 		x: number,
 		y: number,
 		count: number,
-		hovered: boolean,
 	) {
 		ctx.beginPath();
-		ctx.arc(x, y, hovered ? 17 : 15, 0, Math.PI * 2);
+		ctx.arc(x, y, 15, 0, Math.PI * 2);
 		ctx.fillStyle = "rgba(88,101,242,0.92)";
 		ctx.fill();
 		ctx.lineWidth = 2;
@@ -307,10 +303,5 @@ export class FeatureLayer {
 		return polygon
 			? { kind: "feature", feature: polygon.feature, layer: polygon.layer }
 			: null;
-	}
-
-	/** Bounds of a feature in block coordinates, for "go to". */
-	boundsOfFeature(id: number): Bounds | null {
-		return this.prepared.find((p) => p.feature.id === id)?.bounds ?? null;
 	}
 }

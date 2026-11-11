@@ -1,8 +1,10 @@
 import { signal } from "@preact/signals";
-import { mapView, refreshHead } from "./controller";
-import { showNotice } from "./layers";
+import { showNotice } from "./api";
+import { mapView, refreshMap, selectDimension } from "./controller";
 import type { Bounds } from "./map/geometry";
 import { fetchRevision, loadRevisions, watchRevision } from "./revisions";
+import { currentMap } from "./state";
+import type { UploadItem } from "./upload-files";
 
 export type UploadState =
 	| { phase: "idle" }
@@ -19,6 +21,10 @@ export type UploadState =
 			revisionId: number;
 			rev: number | null;
 			bbox: Bounds | null;
+			dimSlug: string | null;
+			/** Exports that were added to the map, and how many of them could not be. */
+			exports: number;
+			failed: number;
 	  }
 	| {
 			phase: "failed";
@@ -45,10 +51,12 @@ export const uploadBusy = () =>
 type ErrorBody = { error?: string; errors?: { file: string; error: string }[] };
 
 /** Sends the files to the server (with upload progress), then follows the processing job. */
-export function startUpload(mapSlug: string, dimSlug: string, files: File[]) {
+export function startUpload(dimSlug: string, items: UploadItem[]) {
 	if (uploadBusy()) return;
+	const files = items.map((i) => i.file);
 	const form = new FormData();
 	for (const f of files) form.append("files[]", f, f.name);
+	form.append("paths", JSON.stringify(items.map((i) => i.path)));
 
 	uploadState.value = {
 		phase: "uploading",
@@ -56,10 +64,7 @@ export function startUpload(mapSlug: string, dimSlug: string, files: File[]) {
 		fileCount: files.length,
 	};
 	const xhr = new XMLHttpRequest();
-	xhr.open(
-		"POST",
-		`/api/maps/${encodeURIComponent(mapSlug)}/dimensions/${encodeURIComponent(dimSlug)}/uploads`,
-	);
+	xhr.open("POST", `/api/dimensions/${encodeURIComponent(dimSlug)}/uploads`);
 	xhr.upload.onprogress = (e) => {
 		if (e.lengthComputable && uploadState.value.phase === "uploading") {
 			uploadState.value = {
@@ -77,12 +82,12 @@ export function startUpload(mapSlug: string, dimSlug: string, files: File[]) {
 		};
 	};
 	xhr.onload = () => {
-		let body: (ErrorBody & { revisionId?: number }) | null = null;
+		let body: (ErrorBody & { revisionIds?: number[] }) | null = null;
 		try {
 			body = JSON.parse(xhr.responseText);
 		} catch {}
-		if (xhr.status === 202 && body?.revisionId) {
-			void follow(body.revisionId);
+		if (xhr.status === 202 && body?.revisionIds?.length) {
+			void follow(body.revisionIds);
 			return;
 		}
 		const reason =
@@ -98,40 +103,88 @@ export function startUpload(mapSlug: string, dimSlug: string, files: File[]) {
 	xhr.send(form);
 }
 
-async function follow(revisionId: number) {
-	uploadState.value = { phase: "processing", revisionId, message: "Queued" };
-	void loadRevisions();
-	const outcome = await watchRevision(revisionId, (p) => {
-		uploadState.value = {
-			phase: "processing",
-			revisionId,
-			message: p.message ?? "Processing",
-			done: p.done,
-			total: p.total,
-		};
-	});
+/** The area covered by all of them. */
+function union(boxes: Bounds[]): Bounds | null {
+	const [first, ...rest] = boxes;
+	if (!first) return null;
+	return rest.reduce(
+		(a, b) => ({
+			minX: Math.min(a.minX, b.minX),
+			minZ: Math.min(a.minZ, b.minZ),
+			maxX: Math.max(a.maxX, b.maxX),
+			maxZ: Math.max(a.maxZ, b.maxZ),
+		}),
+		first,
+	);
+}
 
-	if (outcome.status === "failed") {
-		const message = outcome.error || "Processing failed.";
+/** An upload makes one revision per export; they are processed in order, so follow them in order. */
+async function follow(revisionIds: number[]) {
+	const last = revisionIds.at(-1) as number;
+	uploadState.value = {
+		phase: "processing",
+		revisionId: revisionIds[0] as number,
+		message: "Queued",
+	};
+	void loadRevisions();
+
+	const succeeded: number[] = [];
+	let firstError: string | null = null;
+	for (const [i, id] of revisionIds.entries()) {
+		const prefix =
+			revisionIds.length > 1
+				? `Export ${i + 1} of ${revisionIds.length}: `
+				: "";
+		const outcome = await watchRevision(id, (p) => {
+			uploadState.value = {
+				phase: "processing",
+				revisionId: id,
+				message: prefix + (p.message ?? "Processing"),
+				done: p.done,
+				total: p.total,
+			};
+		});
+		if (outcome.status === "failed") {
+			firstError ??= outcome.error || "Processing failed.";
+		} else {
+			succeeded.push(id);
+		}
+	}
+
+	if (succeeded.length === 0) {
+		const message = firstError ?? "Processing failed.";
 		uploadState.value = { phase: "failed", error: message, fileErrors: [] };
 		showNotice(`Upload failed: ${message}`, "error");
 		void loadRevisions();
 		return;
 	}
-	const revision = await fetchRevision(revisionId);
+	const revisions = (await Promise.all(succeeded.map(fetchRevision))).filter(
+		(r) => r !== null,
+	);
+	const lastDone = revisions.at(-1);
 	uploadState.value = {
 		phase: "done",
-		revisionId,
-		rev: revision?.rev ?? null,
-		bbox: revision?.bbox ?? null,
+		revisionId: succeeded.at(-1) ?? last,
+		rev: lastDone?.rev ?? null,
+		bbox: union(revisions.flatMap((r) => (r.bbox ? [r.bbox] : []))),
+		dimSlug:
+			currentMap.value?.dimensions.find((d) => d.id === lastDone?.dimensionId)
+				?.slug ?? null,
+		exports: succeeded.length,
+		failed: revisionIds.length - succeeded.length,
 	};
-	showNotice("Upload finished. The map has been updated.");
-	await refreshHead();
+	if (firstError) {
+		showNotice(`Some exports failed: ${firstError}`, "error");
+	} else {
+		showNotice("Upload finished. The map has been updated.");
+	}
+	await refreshMap();
 	void loadRevisions();
 }
 
 /** Zooms the map to the area covered by a finished upload. */
-export function showUploadOnMap(bbox: Bounds) {
+export function showUploadOnMap(bbox: Bounds, dimSlug: string | null) {
+	if (dimSlug) selectDimension(dimSlug);
 	mapView.value?.fitBounds(bbox, { padding: 100, closestZoom: 0 });
 	uploadOpen.value = false;
 }

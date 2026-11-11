@@ -1,38 +1,25 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
+import { featureInputSchema } from "@aomc/shared";
 import { eq } from "drizzle-orm";
 import {
 	featureRevisions,
 	layerMembers,
 	layers,
-	mapMembers,
 	revisions,
 } from "../src/db/schema";
-import type { TileApp } from "./helpers";
-import { bootTiles, makeUser, RED, solid, T, upload } from "./helpers";
+import type { Auth, TileApp } from "./helpers";
+import {
+	bootTiles,
+	call,
+	cleanupTempDirs,
+	makeUser,
+	RED,
+	solid,
+	T,
+	upload,
+} from "./helpers";
 
-type Auth = { auth: Record<string, string> } | null;
-
-async function call(
-	t: TileApp,
-	user: Auth,
-	method: string,
-	path: string,
-	body?: unknown,
-) {
-	const headers: Record<string, string> = { ...(user?.auth ?? {}) };
-	if (body !== undefined) headers["Content-Type"] = "application/json";
-	const res = await t.app.request(path, {
-		method,
-		headers,
-		body: body === undefined ? undefined : JSON.stringify(body),
-	});
-	const text = await res.text();
-	return {
-		status: res.status,
-		body: text ? JSON.parse(text) : null,
-		headers: res.headers,
-	};
-}
+afterAll(cleanupTempDirs);
 
 const pin = (x = 10, z = 20, extra: object = {}) => ({
 	type: "pin",
@@ -42,7 +29,7 @@ const pin = (x = 10, z = 20, extra: object = {}) => ({
 });
 
 async function makeLayer(t: TileApp, user: Auth = t.editor, body: object = {}) {
-	const res = await call(t, user, "POST", "/api/maps/aomc/layers", {
+	const res = await call(t, user, "POST", "/api/layers", {
 		dimension: "overworld",
 		name: "Bases",
 		color: "red",
@@ -73,23 +60,18 @@ describe("layers", () => {
 			authorId: "editor",
 		});
 
-		const list = await call(
-			t,
-			null,
-			"GET",
-			"/api/maps/aomc/layers?dim=overworld",
-		);
+		const list = await call(t, null, "GET", "/api/layers?dim=overworld");
 		expect(list.status).toBe(200);
 		expect(list.body.layers).toHaveLength(1);
 		expect(list.body.layers[0]).toMatchObject({
 			name: "Bases",
 			color: "red",
 			hiddenByDefault: false,
-			visibility: "inherit",
+			visibility: "public",
 			canEdit: false,
 		});
 		expect(list.body.layers[0].features).toHaveLength(1);
-		const asEditor = await call(t, t.editor, "GET", "/api/maps/aomc/layers");
+		const asEditor = await call(t, t.editor, "GET", "/api/layers");
 		expect(asEditor.body.layers[0].canEdit).toBe(true);
 	});
 
@@ -97,43 +79,26 @@ describe("layers", () => {
 		const t = await bootTiles();
 		await makeLayer(t);
 		await makeLayer(t, t.editor, { dimension: "nether", name: "Hell" });
-		const nether = await call(
-			t,
-			null,
-			"GET",
-			"/api/maps/aomc/layers?dim=nether",
-		);
+		const nether = await call(t, null, "GET", "/api/layers?dim=nether");
 		expect(nether.body.layers.map((l: { name: string }) => l.name)).toEqual([
 			"Hell",
 		]);
-		const all = await call(t, null, "GET", "/api/maps/aomc/layers");
+		const all = await call(t, null, "GET", "/api/layers");
 		expect(all.body.layers).toHaveLength(2);
-		expect(
-			(await call(t, null, "GET", "/api/maps/aomc/layers?dim=nope")).status,
-		).toBe(404);
-		expect(
-			(await call(t, null, "GET", "/api/maps/aomc/layers?at=x")).status,
-		).toBe(400);
+		expect((await call(t, null, "GET", "/api/layers?dim=nope")).status).toBe(
+			404,
+		);
+		expect((await call(t, null, "GET", "/api/layers?at=x")).status).toBe(400);
 	});
 
-	test("requires login and the editor role; validates input", async () => {
+	test("requires login; validates input", async () => {
 		const t = await bootTiles();
 		const body = { dimension: "overworld", name: "L", color: "red" };
-		expect(
-			(await call(t, null, "POST", "/api/maps/aomc/layers", body)).status,
-		).toBe(401);
-
-		const viewer = await makeUser(t.db, "viewer");
-		await t.db
-			.insert(mapMembers)
-			.values({ mapId: t.mapId, userId: "viewer", role: "viewer" });
-		expect(
-			(await call(t, viewer, "POST", "/api/maps/aomc/layers", body)).status,
-		).toBe(403);
+		expect((await call(t, null, "POST", "/api/layers", body)).status).toBe(401);
 
 		expect(
 			(
-				await call(t, t.editor, "POST", "/api/maps/aomc/layers", {
+				await call(t, t.editor, "POST", "/api/layers", {
 					...body,
 					color: "teal",
 				})
@@ -141,7 +106,7 @@ describe("layers", () => {
 		).toBe(400);
 		expect(
 			(
-				await call(t, t.editor, "POST", "/api/maps/aomc/layers", {
+				await call(t, t.editor, "POST", "/api/layers", {
 					...body,
 					name: "",
 				})
@@ -149,7 +114,7 @@ describe("layers", () => {
 		).toBe(400);
 		expect(
 			(
-				await call(t, t.editor, "POST", "/api/maps/aomc/layers", {
+				await call(t, t.editor, "POST", "/api/layers", {
 					...body,
 					dimension: "nope",
 				})
@@ -206,7 +171,7 @@ describe("layers", () => {
 			(await call(t, t.mod, "DELETE", `/api/layers/${layer.id}`)).status,
 		).toBe(200);
 		expect(
-			(await call(t, null, "GET", "/api/maps/aomc/layers")).body.layers,
+			(await call(t, null, "GET", "/api/layers")).body.layers,
 		).toHaveLength(0);
 		expect(
 			(await call(t, t.editor, "DELETE", `/api/layers/${layer.id}`)).status,
@@ -225,91 +190,68 @@ describe("layers", () => {
 });
 
 describe("feature validation", () => {
-	const cases: [string, object, number][] = [
-		["pin", pin(), 201],
-		[
-			"pin with two points",
-			{
-				type: "pin",
-				name: "x",
-				geometry: [
-					[1, 2],
-					[3, 4],
-				],
-			},
-			400,
-		],
-		[
-			"line",
-			{
-				type: "line",
-				name: "x",
-				geometry: [
-					[0, 0],
-					[5, 5],
-				],
-			},
-			201,
-		],
+	const line = [
+		[0, 0],
+		[5, 5],
+	];
+	const triangle = [
+		[0, 0],
+		[5, 0],
+		[5, 5],
+	];
+	const cases: [string, object, boolean][] = [
+		["pin", pin(), true],
+		["pin with two points", { ...pin(), geometry: line }, false],
+		["line", { type: "line", name: "x", geometry: line }, true],
 		[
 			"line with one point",
 			{ type: "line", name: "x", geometry: [[0, 0]] },
-			400,
+			false,
 		],
-		[
-			"polygon",
-			{
-				type: "polygon",
-				name: "x",
-				geometry: [
-					[0, 0],
-					[5, 0],
-					[5, 5],
-				],
-			},
-			201,
-		],
+		["polygon", { type: "polygon", name: "x", geometry: triangle }, true],
 		[
 			"polygon with two points",
-			{
-				type: "polygon",
-				name: "x",
-				geometry: [
-					[0, 0],
-					[5, 0],
-				],
-			},
-			400,
+			{ type: "polygon", name: "x", geometry: line },
+			false,
 		],
-		["fractional coordinate", pin(1.5, 2), 400],
-		["coordinate out of range", pin(30_000_001, 0), 400],
-		["extreme valid coordinate", pin(-30_000_000, 30_000_000), 201],
-		["name too long", pin(1, 1, { name: "x".repeat(101) }), 400],
-		["name at the limit", pin(1, 1, { name: "x".repeat(100) }), 201],
-		["popup too long", pin(1, 1, { popup: "x".repeat(2001) }), 400],
-		["popup at the limit", pin(1, 1, { popup: "x".repeat(2000) }), 201],
-		["unknown colour", pin(1, 1, { color: "chartreuse" }), 400],
-		["colour override", pin(1, 1, { color: "lime" }), 201],
-		["unknown type", { type: "circle", name: "x", geometry: [0, 0] }, 400],
-		["missing geometry", { type: "pin", name: "x" }, 400],
+		["fractional coordinate", pin(1.5, 2), false],
+		["coordinate out of range", pin(30_000_001, 0), false],
+		["extreme valid coordinate", pin(-30_000_000, 30_000_000), true],
+		["name too long", pin(1, 1, { name: "x".repeat(101) }), false],
+		["name at the limit", pin(1, 1, { name: "x".repeat(100) }), true],
+		["popup too long", pin(1, 1, { popup: "x".repeat(2001) }), false],
+		["popup at the limit", pin(1, 1, { popup: "x".repeat(2000) }), true],
+		["unknown colour", pin(1, 1, { color: "chartreuse" }), false],
+		["colour override", pin(1, 1, { color: "lime" }), true],
+		["unknown type", { type: "circle", name: "x", geometry: [0, 0] }, false],
+		["missing geometry", { type: "pin", name: "x" }, false],
 	];
-	for (const [name, body, status] of cases) {
-		test(name, async () => {
-			const t = await bootTiles();
-			const layer = await makeLayer(t);
-			expect(
-				(
-					await call(
-						t,
-						t.editor,
-						"POST",
-						`/api/layers/${layer.id}/features`,
-						body,
-					)
-				).status,
-			).toBe(status);
+	for (const [name, body, valid] of cases) {
+		test(name, () => {
+			expect(featureInputSchema.safeParse(body).success).toBe(valid);
 		});
 	}
+
+	test("defaults are applied", () => {
+		expect(
+			featureInputSchema.parse({ type: "pin", name: "x", geometry: [1, 2] }),
+		).toEqual({
+			type: "pin",
+			name: "x",
+			geometry: [1, 2],
+			popup: "",
+			color: null,
+		});
+	});
+
+	test("the API answers 400 for an invalid body and 201 for a valid one", async () => {
+		const t = await bootTiles();
+		const layer = await makeLayer(t);
+		const post = (body: object) =>
+			call(t, t.editor, "POST", `/api/layers/${layer.id}/features`, body);
+		expect((await post({ ...pin(), geometry: [1.5, 2] })).status).toBe(400);
+		expect((await post(pin())).status).toBe(201);
+	});
 
 	test("popups are stored verbatim (rendering is the client's job) and never interpreted", async () => {
 		const t = await bootTiles();
@@ -400,11 +342,11 @@ describe("feature revisions", () => {
 	});
 
 	test("delete hides the feature but keeps its history", async () => {
-		const { t, layer, feature } = await setup();
+		const { t, feature } = await setup();
 		expect(
 			(await call(t, t.editor, "DELETE", `/api/features/${feature.id}`)).status,
 		).toBe(200);
-		const list = await call(t, null, "GET", "/api/maps/aomc/layers");
+		const list = await call(t, null, "GET", "/api/layers");
 		expect(list.body.layers[0].features).toHaveLength(0);
 		expect(
 			(await call(t, t.editor, "DELETE", `/api/features/${feature.id}`)).status,
@@ -427,7 +369,6 @@ describe("feature revisions", () => {
 			history.body.history.map((h: { deleted: boolean }) => h.deleted),
 		).toEqual([true, false]);
 		expect(history.body.history[0].authorName).toBe("editor");
-		expect(layer.id).toBeGreaterThan(0);
 	});
 
 	test("restore copies an old revision as a new one (moderator only)", async () => {
@@ -492,7 +433,7 @@ describe("feature revisions", () => {
 			"POST",
 			`/api/features/${feature.id}/restore/${before}`,
 		);
-		const list = await call(t, null, "GET", "/api/maps/aomc/layers");
+		const list = await call(t, null, "GET", "/api/layers");
 		expect(list.body.layers[0].features).toHaveLength(1);
 	});
 
@@ -555,20 +496,14 @@ describe("time travel", () => {
 			.where(eq(featureRevisions.id, edit.body.feature.revisionId));
 
 		const at = async (rev: number) =>
-			(
-				await call(
-					t,
-					null,
-					"GET",
-					`/api/maps/aomc/layers?dim=overworld&at=${rev}`,
-				)
-			).body.layers[0]?.features ?? [];
+			(await call(t, null, "GET", `/api/layers?dim=overworld&at=${rev}`)).body
+				.layers[0]?.features ?? [];
 		expect(await at(1)).toHaveLength(0);
 		expect((await at(2))[0].name).toBe("Base");
 		expect((await at(3))[0].name).toBe("Edited");
 		expect((await at(99))[0].name).toBe("Edited");
-		const head = (await call(t, null, "GET", "/api/maps/aomc/layers")).body
-			.layers[0].features;
+		const head = (await call(t, null, "GET", "/api/layers")).body.layers[0]
+			.features;
 		expect(head[0].name).toBe("Edited");
 
 		// Deleting the feature (at t=6000) leaves older revisions intact.
@@ -606,9 +541,9 @@ describe("time travel", () => {
 			.set({ createdAt: 100, deletedAt: 2000 })
 			.where(eq(layers.id, old.id));
 		const names = async (rev: number) =>
-			(
-				await call(t, null, "GET", `/api/maps/aomc/layers?at=${rev}`)
-			).body.layers.map((l: { name: string }) => l.name);
+			(await call(t, null, "GET", `/api/layers?at=${rev}`)).body.layers.map(
+				(l: { name: string }) => l.name,
+			);
 		expect(await names(1)).toEqual(["Old"]);
 		expect(await names(2)).toEqual([]);
 		expect(await names(3)).toEqual(["Young"]);
@@ -628,13 +563,10 @@ describe("private layers", () => {
 		await t.db
 			.insert(layerMembers)
 			.values({ layerId: layer.id, userId: "viewer", role: "viewer" });
-		await t.db
-			.insert(mapMembers)
-			.values({ mapId: t.mapId, userId: "viewer", role: "viewer" });
 		return { t, layer, stranger, viewer };
 	}
 	const names = async (t: TileApp, user: Auth) =>
-		(await call(t, user, "GET", "/api/maps/aomc/layers")).body.layers.map(
+		(await call(t, user, "GET", "/api/layers")).body.layers.map(
 			(l: { name: string }) => l.name,
 		);
 
@@ -694,7 +626,7 @@ describe("private layers", () => {
 
 	test("private layers hide their features from time travel reads too", async () => {
 		const { t, stranger } = await setup();
-		const res = await call(t, stranger, "GET", "/api/maps/aomc/layers?at=0");
+		const res = await call(t, stranger, "GET", "/api/layers?at=0");
 		expect(res.body.layers).toEqual([]);
 	});
 });
@@ -765,6 +697,8 @@ describe("export and import", () => {
 			(await call(t, null, "GET", `/api/layers/${layer.id}/export`)).body,
 		).toHaveLength(3);
 
+		const firstId = (await call(t, null, "GET", "/api/layers")).body.layers[0]
+			.features[0].id as number;
 		const replaced = await call(
 			t,
 			t.editor,
@@ -779,15 +713,15 @@ describe("export and import", () => {
 		expect(after[0].geometry).toEqual([9, 9]);
 
 		// Old data is still in history.
-		const [first] = (await call(t, null, "GET", "/api/maps/aomc/layers")).body
-			.layers[0].features;
 		const history = await call(
 			t,
 			null,
 			"GET",
-			`/api/features/${first.id}/history`,
+			`/api/features/${firstId}/history`,
 		);
-		expect(history.body.history.length).toBeGreaterThanOrEqual(1);
+		expect(
+			history.body.history.map((h: { deleted: boolean }) => h.deleted),
+		).toEqual([true, false]);
 	});
 
 	test("an invalid item rejects the whole import; permissions apply", async () => {
@@ -808,14 +742,6 @@ describe("export and import", () => {
 			(await call(t, null, "POST", `/api/layers/${layer.id}/import`, [pin()]))
 				.status,
 		).toBe(401);
-		const viewer = await makeUser(t.db, "viewer");
-		await t.db
-			.insert(mapMembers)
-			.values({ mapId: t.mapId, userId: "viewer", role: "viewer" });
-		expect(
-			(await call(t, viewer, "POST", `/api/layers/${layer.id}/import`, [pin()]))
-				.status,
-		).toBe(403);
 	});
 
 	test("a layer holds at most 5000 features", async () => {

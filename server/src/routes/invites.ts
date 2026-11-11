@@ -1,35 +1,20 @@
-import {
-	createLayerInviteSchema,
-	createMapInviteSchema,
-	type Role,
-} from "@aomc/shared";
+import { createLayerInviteSchema, createMapInviteSchema } from "@aomc/shared";
 import { zValidator } from "@hono/zod-validator";
-import { desc, eq } from "drizzle-orm";
+import { desc, eq, isNull, type SQL } from "drizzle-orm";
 import { Hono } from "hono";
-import { requireUser } from "../auth/session";
+import { requireUser, userOf } from "../auth/session";
 import { sha256Hex } from "../auth/tokens";
 import type { Db } from "../db/client";
-import { invites, layers, maps, users } from "../db/schema";
+import { invites, layers, users } from "../db/schema";
 import {
 	acceptInvite,
 	createInvite,
 	inviteStatus,
 	looksLikeInviteToken,
 } from "../invites";
-import {
-	atLeast,
-	canManageInvites,
-	canManageLayerMembers,
-	effectiveRole,
-	loadLayerAccess,
-	loadMapAccess,
-	loadMapAccessById,
-	loadMembership,
-} from "../permissions";
+import { atLeast, canManage, canManageLayer } from "../permissions";
 import type { AppEnv } from "../types";
-
-const parseId = (value: string | undefined) =>
-	/^\d+$/.test(value ?? "") ? Number(value) : Number.NaN;
+import { layerFor, parseId } from "./util";
 
 type InviteRow = typeof invites.$inferSelect;
 
@@ -52,7 +37,7 @@ const publicUrl = (
 	token: string,
 ) => new URL(`/invite/${token}`, c.var.env.PUBLIC_URL).toString();
 
-async function list(db: Db, where: ReturnType<typeof eq>) {
+async function list(db: Db, where: SQL) {
 	const rows = await db
 		.select({ invite: invites, creator: users.username })
 		.from(invites)
@@ -62,66 +47,12 @@ async function list(db: Db, where: ReturnType<typeof eq>) {
 	return rows.map((r) => serialize(r.invite, r.creator));
 }
 
-/** /api/maps/:slug/invites (map owners) */
-export const mapInviteRoutes = new Hono<AppEnv>()
-	.get("/", requireUser, async (c) => {
-		const access = await loadMapAccess(
-			c.var.db,
-			c.var.user,
-			c.req.param("slug") ?? "",
-		);
-		if (!access) return c.json({ error: "not found" }, 404);
-		if (!canManageInvites(access.role))
-			return c.json({ error: "forbidden" }, 403);
-		return c.json({
-			invites: await list(c.var.db, eq(invites.mapId, access.map.id)),
-		});
-	})
-	.post(
-		"/",
-		requireUser,
-		zValidator("json", createMapInviteSchema),
-		async (c) => {
-			const user = c.var.user as NonNullable<typeof c.var.user>;
-			const access = await loadMapAccess(
-				c.var.db,
-				user,
-				c.req.param("slug") ?? "",
-			);
-			if (!access) return c.json({ error: "not found" }, 404);
-			if (!canManageInvites(access.role))
-				return c.json({ error: "forbidden" }, 403);
-
-			const body = c.req.valid("json");
-			const { row, token } = createInvite(c.var.db, {
-				mapId: access.map.id,
-				role: body.role,
-				createdBy: user.id,
-				expiresInHours: body.expiresInHours,
-				maxUses: body.maxUses,
-			});
-			return c.json(
-				{
-					invite: serialize(row, user.username),
-					token,
-					url: publicUrl(c, token),
-				},
-				201,
-			);
-		},
-	);
-
 /** /api/layers/:id/invites (layer managers) */
 export const layerInviteRoutes = new Hono<AppEnv>()
 	.get("/", requireUser, async (c) => {
-		const user = c.var.user as NonNullable<typeof c.var.user>;
-		const found = await loadLayerAccess(
-			c.var.db,
-			user,
-			parseId(c.req.param("id")),
-		);
+		const found = await layerFor(c, c.req.param("id"));
 		if (!found) return c.json({ error: "not found" }, 404);
-		if (!canManageLayerMembers(user, found.role, found.layer))
+		if (!canManageLayer(c.var.user, c.var.role, found.layer))
 			return c.json({ error: "forbidden" }, 403);
 		return c.json({
 			invites: await list(c.var.db, eq(invites.layerId, found.layer.id)),
@@ -132,23 +63,17 @@ export const layerInviteRoutes = new Hono<AppEnv>()
 		requireUser,
 		zValidator("json", createLayerInviteSchema),
 		async (c) => {
-			const user = c.var.user as NonNullable<typeof c.var.user>;
-			const found = await loadLayerAccess(
-				c.var.db,
-				user,
-				parseId(c.req.param("id")),
-			);
+			const user = userOf(c);
+			const found = await layerFor(c, c.req.param("id"));
 			if (!found) return c.json({ error: "not found" }, 404);
-			if (!canManageLayerMembers(user, found.role, found.layer))
+			if (!canManageLayer(user, c.var.role, found.layer))
 				return c.json({ error: "forbidden" }, 403);
 
 			const body = c.req.valid("json");
 			const { row, token } = createInvite(c.var.db, {
+				...body,
 				layerId: found.layer.id,
-				role: body.role,
 				createdBy: user.id,
-				expiresInHours: body.expiresInHours,
-				maxUses: body.maxUses,
 			});
 			return c.json(
 				{
@@ -161,10 +86,38 @@ export const layerInviteRoutes = new Hono<AppEnv>()
 		},
 	);
 
-/** /api/invites: previewing and accepting by token, revoking by id */
+/** /api/invites: map invites (owners), previewing and accepting by token, revoking by id */
 export const inviteRoutes = new Hono<AppEnv>()
+	.get("/", requireUser, async (c) => {
+		if (!canManage(c.var.role)) return c.json({ error: "forbidden" }, 403);
+		return c.json({ invites: await list(c.var.db, isNull(invites.layerId)) });
+	})
+	.post(
+		"/",
+		requireUser,
+		zValidator("json", createMapInviteSchema),
+		async (c) => {
+			const user = userOf(c);
+			if (!canManage(c.var.role)) return c.json({ error: "forbidden" }, 403);
+
+			const { row, token } = createInvite(c.var.db, {
+				...c.req.valid("json"),
+				layerId: null,
+				role: "moderator",
+				createdBy: user.id,
+			});
+			return c.json(
+				{
+					invite: serialize(row, user.username),
+					token,
+					url: publicUrl(c, token),
+				},
+				201,
+			);
+		},
+	)
 	.get("/:token", async (c) => {
-		const { db, user } = c.var;
+		const { db, map, role } = c.var;
 		const token = c.req.param("token");
 		if (!looksLikeInviteToken(token))
 			return c.json({ error: "invite not found" }, 404);
@@ -182,11 +135,7 @@ export const inviteRoutes = new Hono<AppEnv>()
 		const [layer] = row.layerId
 			? await db.select().from(layers).where(eq(layers.id, row.layerId))
 			: [undefined];
-		const mapId = row.mapId ?? layer?.mapId;
-		const [map] = mapId
-			? await db.select().from(maps).where(eq(maps.id, mapId))
-			: [undefined];
-		if (!map || (row.layerId && (!layer || layer.deletedAt !== null))) {
+		if (row.layerId && (!layer || layer.deletedAt !== null)) {
 			return c.json(
 				{ error: "this invite is no longer valid", reason: "gone" },
 				410,
@@ -197,40 +146,28 @@ export const inviteRoutes = new Hono<AppEnv>()
 			.from(users)
 			.where(eq(users.id, row.createdBy));
 
-		let alreadyMember = false;
-		if (user) {
-			const current = effectiveRole(
-				user,
-				await loadMembership(db, map.id, user.id),
-			);
-			alreadyMember =
-				row.layerId === null && atLeast(current, row.role as Role);
-		}
 		return c.json({
 			invite: {
 				kind: row.layerId === null ? "map" : "layer",
 				role: row.role,
 				mapName: map.name,
-				mapSlug: map.slug,
 				layerName: layer?.name ?? null,
 				inviterName: inviter?.name ?? "someone",
-				alreadyMember,
+				alreadyMember: row.layerId === null && atLeast(role, "moderator"),
 			},
 		});
 	})
 	.post("/:token/accept", requireUser, async (c) => {
-		const user = c.var.user as NonNullable<typeof c.var.user>;
 		const token = c.req.param("token");
 		if (!looksLikeInviteToken(token))
 			return c.json({ error: "invite not found" }, 404);
-		const result = acceptInvite(c.var.db, user.id, token);
+		const result = acceptInvite(c.var.db, userOf(c).id, token);
 		if (!result.ok) return c.json({ error: result.error }, result.status);
 		const { ok: _ok, ...rest } = result;
 		return c.json(rest);
 	})
 	.delete("/:id", requireUser, async (c) => {
-		const { db } = c.var;
-		const user = c.var.user as NonNullable<typeof c.var.user>;
+		const { db, role } = c.var;
 		const [row] = await db
 			.select()
 			.from(invites)
@@ -238,15 +175,12 @@ export const inviteRoutes = new Hono<AppEnv>()
 		if (!row) return c.json({ error: "not found" }, 404);
 
 		if (row.layerId !== null) {
-			const found = await loadLayerAccess(db, user, row.layerId);
+			const found = await layerFor(c, String(row.layerId));
 			if (!found) return c.json({ error: "not found" }, 404);
-			if (!canManageLayerMembers(user, found.role, found.layer))
+			if (!canManageLayer(c.var.user, role, found.layer))
 				return c.json({ error: "forbidden" }, 403);
-		} else {
-			const access = await loadMapAccessById(db, user, row.mapId as number);
-			if (!access) return c.json({ error: "not found" }, 404);
-			if (!canManageInvites(access.role))
-				return c.json({ error: "forbidden" }, 403);
+		} else if (!canManage(role)) {
+			return c.json({ error: "forbidden" }, 403);
 		}
 		await db
 			.update(invites)

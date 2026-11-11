@@ -1,40 +1,36 @@
 import { DYE_HEX, DYES, type Dye } from "@aomc/shared/colors";
-import type { Point } from "@aomc/shared/features";
+import { type FeatureInput, MAX_NAME } from "@aomc/shared/features";
 import { useState } from "preact/hooks";
+import { showNotice } from "../api";
 import { mapView } from "../controller";
+import { dyeLabel, featureTitle, pointsOf, TYPE_LABEL } from "../featureInfo";
 import {
 	createLayer,
 	deleteFeature,
 	deleteLayer,
 	importFeatures,
-	showNotice,
 	updateLayer,
 } from "../layers";
 import { boundsOf } from "../map/geometry";
 import {
 	canEditMap,
-	currentMap,
 	editor,
 	type FeatureData,
 	isLayerHidden,
 	type LayerData,
-	layerPanelOpen,
 	layersData,
 	popup,
+	sidePanel,
 	toggleLayer,
 	user,
 } from "../state";
 import { layerSharingFor } from "./LayerSharing";
-
-const TYPE_LABEL = { pin: "Pin", line: "Line", polygon: "Area" } as const;
-const dyeLabel = (d: string) => d.replace("_", " ");
+import { Panel } from "./Panel";
 
 function goTo(f: FeatureData) {
 	const mv = mapView.value;
 	if (!mv) return;
-	const pts =
-		f.type === "pin" ? [f.geometry as Point] : (f.geometry as Point[]);
-	const b = boundsOf(pts);
+	const b = boundsOf(pointsOf(f));
 	mv.fitBounds(b, { padding: 140 });
 	popup.value = {
 		featureId: f.id,
@@ -56,7 +52,7 @@ function LayerForm(props: { initial?: LayerData; onDone: () => void }) {
 		e.preventDefault();
 		if (!name.trim() || busy) return;
 		setBusy(true);
-		const visibility = priv ? "private" : "inherit";
+		const visibility = priv ? "private" : "public";
 		const ok = l
 			? await updateLayer(l.id, {
 					name: name.trim(),
@@ -79,7 +75,7 @@ function LayerForm(props: { initial?: LayerData; onDone: () => void }) {
 			<input
 				type="text"
 				value={name}
-				maxLength={100}
+				maxLength={MAX_NAME}
 				placeholder="Layer name"
 				aria-label="Layer name"
 				onInput={(e) => setName(e.currentTarget.value)}
@@ -152,7 +148,7 @@ function ImportButton(props: { layer: LayerData }) {
 							)
 						)
 							return;
-						let data: unknown;
+						let data: FeatureInput[];
 						try {
 							data = JSON.parse(await file.text());
 						} catch {
@@ -195,7 +191,7 @@ function LayerRow(props: { layer: LayerData }) {
 				<span class="swatch" style={{ background: DYE_HEX[l.color] }} />
 				<button
 					type="button"
-					class="layer-name"
+					class="plain layer-name"
 					onClick={() => setOpen(!open)}
 					aria-expanded={open}
 				>
@@ -271,7 +267,7 @@ function LayerRow(props: { layer: LayerData }) {
 							<li key={f.id}>
 								<button
 									type="button"
-									class="feature-link"
+									class="plain feature-link"
 									onClick={() => goTo(f)}
 								>
 									<span class="type">{TYPE_LABEL[f.type]}</span>{" "}
@@ -281,7 +277,7 @@ function LayerRow(props: { layer: LayerData }) {
 									<span class="feature-actions">
 										<button
 											type="button"
-											class="link"
+											class="plain link"
 											onClick={() => {
 												editor.value = {
 													mode: "edit",
@@ -294,11 +290,9 @@ function LayerRow(props: { layer: LayerData }) {
 										</button>
 										<button
 											type="button"
-											class="link"
+											class="plain link"
 											onClick={async () => {
-												if (
-													confirm(`Delete "${f.name || TYPE_LABEL[f.type]}"?`)
-												)
+												if (confirm(`Delete "${featureTitle(f)}"?`))
 													await deleteFeature(f.id);
 											}}
 										>
@@ -319,49 +313,28 @@ function LayerRow(props: { layer: LayerData }) {
 export function LayerPanel() {
 	const [creating, setCreating] = useState(false);
 	const layers = layersData.value;
-	const role = currentMap.value?.role;
 	return (
-		<aside class="panel" aria-label="Layers">
-			<header class="panel-head">
-				<h2>Layers</h2>
-				<button
-					type="button"
-					class="btn"
-					aria-label="Close layers"
-					onClick={() => (layerPanelOpen.value = false)}
-				>
-					×
-				</button>
-			</header>
-			<div class="panel-body">
-				{canEditMap.value && (
-					<div class="new-layer">
-						{creating ? (
-							<LayerForm onDone={() => setCreating(false)} />
-						) : (
-							<button
-								type="button"
-								class="btn"
-								onClick={() => setCreating(true)}
-							>
-								+ New layer
-							</button>
-						)}
-					</div>
-				)}
-				{!user.value && <p class="muted">Log in to add or edit layers.</p>}
-				{user.value && role === "viewer" && (
-					<p class="muted">You have view-only access to this map.</p>
-				)}
-				<ul class="layers">
-					{layers.map((l) => (
-						<LayerRow key={l.id} layer={l} />
-					))}
-				</ul>
-				{layers.length === 0 && (
-					<p class="muted">No layers in this dimension yet.</p>
-				)}
-			</div>
-		</aside>
+		<Panel title="Layers" onClose={() => (sidePanel.value = null)}>
+			{canEditMap.value && (
+				<div class="new-layer">
+					{creating ? (
+						<LayerForm onDone={() => setCreating(false)} />
+					) : (
+						<button type="button" class="btn" onClick={() => setCreating(true)}>
+							+ New layer
+						</button>
+					)}
+				</div>
+			)}
+			{!user.value && <p class="muted">Log in to add or edit layers.</p>}
+			<ul class="layers">
+				{layers.map((l) => (
+					<LayerRow key={l.id} layer={l} />
+				))}
+			</ul>
+			{layers.length === 0 && (
+				<p class="muted">No layers in this dimension yet.</p>
+			)}
+		</Panel>
 	);
 }

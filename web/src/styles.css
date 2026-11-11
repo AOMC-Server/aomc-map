@@ -144,14 +144,18 @@ body,
 	pointer-events: auto;
 }
 
-.link {
-	margin-left: 8px;
+/* Buttons that look like plain text; add the specifics in the class that uses them. */
+.plain {
 	font: inherit;
 	color: var(--text);
 	background: none;
 	border: 0;
-	text-decoration: underline;
 	cursor: pointer;
+}
+
+.link {
+	margin-left: 8px;
+	text-decoration: underline;
 }
 
 .load-error {
@@ -190,6 +194,10 @@ body,
 .hint {
 	color: #9aa0aa;
 	margin: 4px 0;
+}
+
+.hint {
+	font-size: 12px;
 }
 
 /* Side panel (layers, feature editor) */
@@ -309,12 +317,7 @@ textarea {
 	display: flex;
 	align-items: center;
 	gap: 4px;
-	font: inherit;
-	color: var(--text);
-	background: none;
-	border: 0;
 	text-align: left;
-	cursor: pointer;
 	padding: 2px;
 }
 
@@ -350,12 +353,7 @@ textarea {
 .feature-link {
 	flex: 1;
 	text-align: left;
-	font: inherit;
-	color: var(--text);
-	background: none;
-	border: 0;
 	padding: 3px 0;
-	cursor: pointer;
 	overflow: hidden;
 	text-overflow: ellipsis;
 	white-space: nowrap;
@@ -429,10 +427,6 @@ textarea {
 	right: 6px;
 	font-size: 20px;
 	line-height: 1;
-	color: var(--text);
-	background: none;
-	border: 0;
-	cursor: pointer;
 }
 
 .popup-actions {
@@ -515,13 +509,8 @@ textarea {
 	display: grid;
 	grid-template-columns: auto 1fr;
 	gap: 0 8px;
-	font: inherit;
 	text-align: left;
-	color: var(--text);
-	background: none;
-	border: 0;
 	padding: 2px;
-	cursor: pointer;
 }
 
 .revision-main:disabled {
@@ -612,13 +601,9 @@ textarea {
 }
 
 .tab {
-	font: inherit;
 	color: #b8bec8;
-	background: none;
-	border: 0;
 	border-bottom: 2px solid transparent;
 	padding: 6px 10px;
-	cursor: pointer;
 }
 
 .tab.active {
@@ -728,10 +713,6 @@ textarea {
 .dim-slug {
 	display: block;
 	font-size: 11px;
-}
-
-.hint {
-	font-size: 12px;
 }
 
 .invite-page {
@@ -944,4 +925,80 @@ code {
 	.statusbar .scale {
 		margin-left: auto;
 	}
+}
+
+/* Standalone pages (/settings, /manage) */
+.page-root {
+	position: fixed;
+	inset: 0;
+}
+
+.page {
+	height: 100%;
+	overflow-y: auto;
+	padding: calc(var(--safe-top) + 16px) 16px calc(var(--safe-bottom) + 32px);
+}
+
+.page-inner {
+	max-width: 720px;
+	margin: 0 auto;
+}
+
+.page-head {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	margin-bottom: 16px;
+}
+
+.page-head h1 {
+	margin: 0;
+	font-size: 20px;
+}
+
+.page-section {
+	margin: 0 0 16px;
+	padding: 12px 16px;
+	background: var(--panel);
+	border: 1px solid var(--border);
+	border-radius: 8px;
+}
+
+.page-section h2 {
+	margin: 0 0 6px;
+	font-size: 16px;
+}
+
+.account-card {
+	display: flex;
+	align-items: center;
+	gap: 12px;
+}
+
+.toggle {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	margin: 10px 0;
+	cursor: pointer;
+}
+
+.toggle input {
+	margin-top: 2px;
+}
+
+.toggle .hint {
+	display: block;
+	margin: 0;
+}
+
+.page code {
+	padding: 1px 4px;
+	background: #1d2026;
+	border-radius: 4px;
+}
+
+.folder-pick {
+	display: inline-block;
+	margin-top: 8px;
 }

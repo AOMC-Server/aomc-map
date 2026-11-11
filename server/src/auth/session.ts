@@ -91,3 +91,6 @@ export const requireUser = createMiddleware<AppEnv>(async (c, next) => {
 	if (!c.var.user) return c.json({ error: "unauthorized" }, 401);
 	return next();
 });
+
+/** The logged-in user. Only for handlers behind requireUser. */
+export const userOf = (c: { var: { user: User | null } }) => c.var.user as User;

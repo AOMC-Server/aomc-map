@@ -4,7 +4,7 @@ export type Animation = (now: number) => boolean;
 export class Renderer {
 	private dirty = true;
 	private raf = 0;
-	private animations = new Set<Animation>();
+	private animation: Animation | null = null;
 
 	constructor(private draw: () => void) {}
 
@@ -13,11 +13,14 @@ export class Renderer {
 		this.schedule();
 	}
 
-	/** The animation is called every frame until it returns false. */
-	animate(fn: Animation): () => void {
-		this.animations.add(fn);
+	/** Runs `fn` every frame until it returns false, replacing any animation already running. */
+	animate(fn: Animation) {
+		this.animation = fn;
 		this.schedule();
-		return () => this.animations.delete(fn);
+	}
+
+	stopAnimation() {
+		this.animation = null;
 	}
 
 	private schedule() {
@@ -26,19 +29,16 @@ export class Renderer {
 
 	private frame(now: number) {
 		this.raf = 0;
-		for (const fn of [...this.animations]) {
-			if (!fn(now)) this.animations.delete(fn);
+		const animation = this.animation;
+		if (animation) {
+			if (!animation(now) && this.animation === animation)
+				this.animation = null;
 			this.dirty = true;
 		}
 		if (this.dirty) {
 			this.dirty = false;
 			this.draw();
 		}
-		if (this.animations.size > 0) this.schedule();
-	}
-
-	destroy() {
-		cancelAnimationFrame(this.raf);
-		this.animations.clear();
+		if (this.animation) this.schedule();
 	}
 }

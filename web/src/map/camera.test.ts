@@ -10,7 +10,7 @@ import {
 	type View,
 	visibleTiles,
 	zoomAt,
-} from "./camera";
+} from "@aomc/shared/view";
 
 const size = { width: 800, height: 600 };
 const view: View = { centerX: 100, centerZ: -50, zoom: 0 };

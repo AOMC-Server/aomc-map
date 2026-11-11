@@ -1,42 +1,36 @@
-import { api } from "./api";
-import { refreshHead, setRev } from "./controller";
-import { loadLayers, showNotice } from "./layers";
-import { currentMap, type RevisionInfo, revisionsData } from "./state";
+import { signal } from "@preact/signals";
+import { api, run, showNotice } from "./api";
+import { refreshMap, setRev } from "./controller";
+import { loadLayers } from "./layers";
+import { isolatedUpload, type RevisionInfo, revisionsData } from "./state";
 
 export type Progress = { message?: string; done?: number; total?: number };
 export type Outcome = { status: "done" | "failed"; error: string | null };
 
+const POLL_MS = 1500;
+const MAX_POLL_FAILURES = 5;
+
+/** Quiet lookup (no error toast): used while polling a job. */
 export async function fetchRevision(id: number): Promise<RevisionInfo | null> {
 	try {
-		const res = await fetch(`/api/revisions/${id}`);
-		return res.ok
-			? ((await res.json()) as { revision: RevisionInfo }).revision
-			: null;
+		const res = await api.api.revisions[":id"].$get({
+			param: { id: String(id) },
+		});
+		return res.ok ? (await res.json()).revision : null;
 	} catch {
 		return null;
 	}
 }
 
-/** Loads the revision log of the current map (newest first). */
+/** Loads the revision log (newest first). */
 export async function loadRevisions(): Promise<void> {
-	const detail = currentMap.value;
-	if (!detail) {
-		revisionsData.value = [];
-		return;
-	}
-	const res = await api.api.maps[":slug"].revisions.$get({
-		param: { slug: detail.map.slug },
-	});
-	if (res.ok && currentMap.value === detail) {
-		revisionsData.value = (
-			(await res.json()) as { revisions: RevisionInfo[] }
-		).revisions;
-	}
+	const out = await run(() => api.api.revisions.$get({ query: {} }));
+	if (out) revisionsData.value = out.revisions;
 }
 
 /**
  * Follows a revision until it finishes, using server-sent events and falling back to polling if
- * the stream breaks. Resolves once with the outcome.
+ * the stream breaks. Resolves once with the outcome; polling gives up after repeated failures.
  */
 export function watchRevision(
 	revisionId: number,
@@ -51,20 +45,23 @@ export function watchRevision(
 		};
 
 		const poll = async () => {
+			let failures = 0;
 			while (!settled) {
 				const r = await fetchRevision(revisionId);
 				if (r?.status === "done")
 					return settle({ status: "done", error: null });
 				if (r?.status === "failed")
 					return settle({ status: "failed", error: r.error });
-				await new Promise((r) => setTimeout(r, 1500));
+				failures = r ? 0 : failures + 1;
+				if (failures >= MAX_POLL_FAILURES)
+					return settle({
+						status: "failed",
+						error: "Lost contact with the server.",
+					});
+				await new Promise((r) => setTimeout(r, POLL_MS));
 			}
 		};
 
-		if (typeof EventSource === "undefined") {
-			void poll();
-			return;
-		}
 		const source = new EventSource(`/api/revisions/${revisionId}/events`);
 		const progress = (e: MessageEvent) => {
 			if (!settled) onProgress?.(JSON.parse(e.data) as Progress);
@@ -92,73 +89,91 @@ export function watchRevision(
 	});
 }
 
-/** Reverts or unreverts an upload (moderators), waits for the result and refreshes the map. */
-export async function revertUpload(
-	targetId: number,
-	kind: "revert" | "unrevert",
-): Promise<boolean> {
-	const res = await fetch(`/api/revisions/${targetId}/${kind}`, {
-		method: "POST",
-	});
-	const body = (await res.json().catch(() => ({}))) as {
-		revisionId?: number;
-		error?: string;
-	};
-	if (res.status !== 202 || !body.revisionId) {
-		showNotice(body.error ?? `Could not ${kind} (${res.status}).`, "error");
-		return false;
-	}
-	await loadRevisions(); // shows the pending operation right away
-	const outcome = await watchRevision(body.revisionId);
-	if (outcome.status === "failed") {
-		showNotice(
-			`The ${kind} failed: ${outcome.error ?? "unknown error"}`,
-			"error",
-		);
-	} else {
-		showNotice(kind === "revert" ? "Upload reverted." : "Upload restored.");
-	}
-	await refreshHead();
-	await loadRevisions();
-	return outcome.status === "done";
-}
+/** Uploads this browser has asked to delete and are still being erased, with what they are doing. */
+export const deleting = signal<Map<number, string>>(new Map());
 
-export type FeatureHistoryEntry = {
-	revisionId: number;
-	authorId: string;
-	authorName: string;
-	createdAt: number;
-	deleted: boolean;
-	type: "pin" | "line" | "polygon";
-	name: string;
-	popup: string;
-	color: string | null;
-	geometry: unknown;
+const setDeleting = (id: number, label: string | null) => {
+	const next = new Map(deleting.value);
+	if (label === null) next.delete(id);
+	else next.set(id, label);
+	deleting.value = next;
 };
 
-export async function loadFeatureHistory(
-	featureId: number,
-): Promise<FeatureHistoryEntry[] | null> {
-	const res = await api.api.features[":id"].history.$get({
-		param: { id: String(featureId) },
+const sleep = (ms: number) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/**
+ * Deletes an upload from the map and all of its history (moderators). The server erases it in
+ * the background; this waits until it is gone (or the erase failed) and refreshes the map.
+ */
+export async function deleteUpload(id: number): Promise<boolean> {
+	const out = await run(() =>
+		api.api.revisions[":id"].$delete({ param: { id: String(id) } }),
+	);
+	if (!out) return false;
+	setDeleting(id, "deleting…");
+	await loadRevisions(); // shows it as busy right away
+
+	// Progress only; whether it is finished is decided by the polling below.
+	const events = new EventSource(`/api/revisions/${id}/events`);
+	events.addEventListener("processing", (e) => {
+		const p = JSON.parse((e as MessageEvent).data) as Progress;
+		setDeleting(
+			id,
+			p.total ? `deleting ${p.done ?? 0}/${p.total}` : `deleting: ${p.message}`,
+		);
 	});
-	if (!res.ok) return null;
-	return ((await res.json()) as { history: FeatureHistoryEntry[] }).history;
+	events.onerror = () => events.close();
+
+	let error: string | null = null;
+	let failures = 0;
+	for (;;) {
+		const r = await fetchRevision(id);
+		if (r === null) {
+			// Gone; but a lost connection looks the same, so ask the log before believing it.
+			const gone = await run(() => api.api.revisions.$get({ query: {} }));
+			if (gone && !gone.revisions.some((x) => x.id === id)) break;
+			if (++failures >= MAX_POLL_FAILURES) {
+				error = "Lost contact with the server.";
+				break;
+			}
+		} else if (r.status === "done" && r.error) {
+			error = r.error;
+			break;
+		}
+		await sleep(POLL_MS);
+	}
+
+	events.close();
+	setDeleting(id, null);
+	if (isolatedUpload.value?.id === id) isolatedUpload.value = null;
+	showNotice(error ?? "Upload deleted.", error ? "error" : "info");
+	await refreshMap();
+	await loadRevisions();
+	return error === null;
 }
+
+export async function loadFeatureHistory(featureId: number) {
+	const out = await run(() =>
+		api.api.features[":id"].history.$get({ param: { id: String(featureId) } }),
+	);
+	return out?.history ?? null;
+}
+
+export type FeatureHistoryEntry = NonNullable<
+	Awaited<ReturnType<typeof loadFeatureHistory>>
+>[number];
 
 /** Makes an old version of a feature current again (moderators), then shows the present. */
 export async function restoreFeatureRevision(
 	featureId: number,
 	revisionId: number,
 ): Promise<boolean> {
-	const res = await api.api.features[":id"].restore[":revisionId"].$post({
-		param: { id: String(featureId), revisionId: String(revisionId) },
-	});
-	if (!res.ok) {
-		const body = (await res.json().catch(() => ({}))) as { error?: string };
-		showNotice(body.error ?? `Could not restore (${res.status}).`, "error");
-		return false;
-	}
+	const out = await run(() =>
+		api.api.features[":id"].restore[":revisionId"].$post({
+			param: { id: String(featureId), revisionId: String(revisionId) },
+		}),
+	);
+	if (!out) return false;
 	setRev(null);
 	await loadLayers();
 	showNotice("Feature restored.");

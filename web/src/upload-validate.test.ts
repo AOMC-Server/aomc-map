@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { formatBytes, validateFiles } from "./upload-validate";
+import { exportDates, formatBytes, validateFiles } from "./upload-validate";
 
 const limits = {
 	maxUploadBytes: 1000,
@@ -50,5 +50,26 @@ describe("formatBytes", () => {
 		expect(formatBytes(2048)).toBe("2.0 KB");
 		expect(formatBytes(5 * 1024 * 1024)).toBe("5.0 MB");
 		expect(formatBytes(3 * 1024 ** 3)).toBe("3.00 GB");
+	});
+});
+
+describe("exportDates", () => {
+	test("reads dates from file names and folders, once per export", () => {
+		const r = exportDates([
+			"2026-02-09_19.45.47_x-384_z-3776.png",
+			"2026-02-10_15.06.41/0_0_x-1248_z-1472.png",
+			"2026-02-10_15.06.41/0_1_x-1248_z-448.png",
+			"2026-02-10_15.06.41.zip",
+			"stray_x0_z0.png",
+		]);
+		expect(r.dates).toEqual([
+			Date.UTC(2026, 1, 9, 19, 45, 47),
+			Date.UTC(2026, 1, 10, 15, 6, 41),
+		]);
+		expect(r.undated).toBe(1);
+	});
+
+	test("no files, no dates", () => {
+		expect(exportDates([])).toEqual({ dates: [], undated: 0 });
 	});
 });

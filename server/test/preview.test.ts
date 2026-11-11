@@ -1,12 +1,22 @@
-import { describe, expect, test } from "bun:test";
-import { mkdtempSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { afterAll, describe, expect, test } from "bun:test";
+import { readdirSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import sharp from "sharp";
 import { pruneCache } from "../src/preview";
-import { BLUE, bootTiles, RED, solid, T, upload } from "./helpers";
 
-type Booted = Awaited<ReturnType<typeof bootTiles>>;
+afterAll(cleanupTempDirs);
+
+import {
+	BLUE,
+	bootTiles,
+	cleanupTempDirs,
+	makeTempDir,
+	RED,
+	solid,
+	T,
+	type TileApp,
+	upload,
+} from "./helpers";
 
 const decode = async (res: Response) => {
 	const { data, info } = await sharp(Buffer.from(await res.arrayBuffer()))
@@ -19,7 +29,7 @@ const decode = async (res: Response) => {
 	return { info, at };
 };
 
-const cacheFiles = (t: Booted) => {
+const cacheFiles = (t: TileApp) => {
 	try {
 		return readdirSync(join(t.env.DATA_DIR, "preview-cache")).filter((f) =>
 			f.endsWith(".png"),
@@ -102,12 +112,11 @@ describe("/api/preview.png", () => {
 		expect(res.status).toBe(200);
 	});
 
-	test("validates input and reports unknown maps and dimensions", async () => {
+	test("validates input and reports unknown dimensions", async () => {
 		const t = await withTiles();
 		for (const q of ["x=abc", "z=1.5", "rev=-1", "x=99999999999", "zoom=NaN"]) {
 			expect((await t.app.request(`/api/preview.png?${q}`)).status).toBe(400);
 		}
-		expect((await t.app.request("/api/preview.png?map=nope")).status).toBe(404);
 		expect((await t.app.request("/api/preview.png?dim=nope")).status).toBe(404);
 	});
 
@@ -146,7 +155,7 @@ describe("/api/preview.png", () => {
 
 describe("pruneCache", () => {
 	test("deletes the oldest files beyond the limit", async () => {
-		const dir = mkdtempSync(join(tmpdir(), "aomc-prune-"));
+		const dir = makeTempDir("aomc-prune-");
 		for (let i = 0; i < 5; i++) {
 			const file = join(dir, `${i}.png`);
 			writeFileSync(file, "x");

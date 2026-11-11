@@ -1,0 +1,1 @@
+ALTER TABLE `map_info` ADD `epoch` integer DEFAULT 0 NOT NULL;

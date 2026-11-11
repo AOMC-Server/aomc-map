@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from "bun:test";
-import type { View } from "./camera";
+import type { View } from "@aomc/shared/view";
 import { TileLayer } from "./tileLayer";
 
 const T = 16;

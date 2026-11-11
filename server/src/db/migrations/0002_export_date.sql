@@ -1,0 +1,1 @@
+ALTER TABLE `revisions` ADD `exported_at` integer;

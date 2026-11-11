@@ -118,12 +118,11 @@ export async function loadTile(
 	return data;
 }
 
-/** Stores a tile as lossless WebP. Returns null (and stores nothing) when it is fully transparent. */
-export async function storeTile(
-	blobs: BlobStore,
+/** Encodes a tile as lossless WebP. Returns null when it is fully transparent. */
+export async function encodeTile(
 	rgba: Buffer,
 	tileSize: number,
-): Promise<string | null> {
+): Promise<Buffer | null> {
 	if (isEmpty(rgba)) return null;
 	// Colour under transparent pixels is meaningless; zero it so equal tiles hash equally.
 	for (let i = 0; i < rgba.length; i += 4) {
@@ -133,10 +132,19 @@ export async function storeTile(
 			rgba[i + 2] = 0;
 		}
 	}
-	const webp = await sharp(rgba, {
+	return sharp(rgba, {
 		raw: { width: tileSize, height: tileSize, channels: 4 },
 	})
 		.webp({ lossless: true, exact: true })
 		.toBuffer();
-	return blobs.put(webp);
+}
+
+/** Stores a tile as lossless WebP. Returns null (and stores nothing) when it is fully transparent. */
+export async function storeTile(
+	blobs: BlobStore,
+	rgba: Buffer,
+	tileSize: number,
+): Promise<string | null> {
+	const webp = await encodeTile(rgba, tileSize);
+	return webp ? blobs.put(webp) : null;
 }

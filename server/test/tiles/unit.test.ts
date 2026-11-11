@@ -1,11 +1,12 @@
 import { describe, expect, test } from "bun:test";
+import { parseXaeroCoords } from "@aomc/shared";
 import {
 	downscaleInto,
 	emptyTile,
 	isEmpty,
 	overRegion,
 } from "../../src/tiles/compose";
-import { blackToAlpha, parseXaeroCoords } from "../../src/tiles/xaero";
+import { blackToAlpha } from "../../src/tiles/xaero";
 
 describe("parseXaeroCoords", () => {
 	const cases: [string, { x: number; z: number } | null][] = [

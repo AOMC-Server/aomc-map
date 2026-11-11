@@ -1,23 +1,17 @@
+import { DEFAULT_INVITE_HOURS } from "@aomc/shared";
 import { useEffect, useState } from "preact/hooks";
-import { showNotice } from "../layers";
+import { showNotice } from "../api";
 import {
 	type CreatedInvite,
-	createLayerInvite,
-	createMapInvite,
 	type InviteInfo,
-	loadLayerInvites,
-	loadMapInvites,
 	revokeInvite,
+	type Scope,
 } from "../sharing";
 import { formatTime } from "./format";
-import type { MembersScope } from "./MembersSection";
-
-const MAP_ROLES = ["viewer", "editor", "moderator"] as const;
-const LAYER_ROLES = ["viewer", "editor"] as const;
 
 const EXPIRIES: { label: string; hours: number | null }[] = [
 	{ label: "1 day", hours: 24 },
-	{ label: "7 days", hours: 24 * 7 },
+	{ label: "7 days", hours: DEFAULT_INVITE_HOURS },
 	{ label: "30 days", hours: 24 * 30 },
 	{ label: "Never", hours: null },
 ];
@@ -46,47 +40,38 @@ async function copy(text: string) {
 }
 
 /** Create, copy and revoke invite links for the map or one private layer. */
-export function InviteLinks(props: { scope: MembersScope }) {
-	const scope = props.scope;
-	const isLayer = scope.kind === "layer";
-	const layerId = scope.kind === "layer" ? scope.layerId : 0;
-	const roles: readonly string[] = isLayer ? LAYER_ROLES : MAP_ROLES;
-
+export function InviteLinks<R extends string>(props: { scope: Scope<R> }) {
+	const { scope } = props;
 	const [list, setList] = useState<InviteInfo[] | null>(null);
-	const [role, setRole] = useState("editor");
-	const [hours, setHours] = useState<number | null>(24 * 7);
+	const [role, setRole] = useState<R>(scope.defaultInviteRole);
+	const [hours, setHours] = useState<number | null>(DEFAULT_INVITE_HOURS);
 	const [maxUses, setMaxUses] = useState("");
 	const [created, setCreated] = useState<CreatedInvite | null>(null);
 	const [busy, setBusy] = useState(false);
 
 	const reload = async () => {
-		const l = isLayer
-			? await loadLayerInvites(layerId)
-			: await loadMapInvites();
+		const l = await scope.loadInvites();
 		if (l) setList(l);
 	};
 	useEffect(() => {
 		setCreated(null);
+		setList(null);
 		void reload();
-	}, [layerId, isLayer]);
+	}, [scope.key]);
 
 	const create = async (e: Event) => {
 		e.preventDefault();
 		setBusy(true);
-		const input = {
+		const out = await scope.createInvite(
+			{
+				expiresInHours: hours,
+				maxUses:
+					maxUses.trim() === ""
+						? null
+						: Math.max(1, Number.parseInt(maxUses, 10) || 1),
+			},
 			role,
-			expiresInHours: hours,
-			maxUses:
-				maxUses.trim() === ""
-					? null
-					: Math.max(1, Number.parseInt(maxUses, 10) || 1),
-		};
-		const out = isLayer
-			? await createLayerInvite(
-					layerId,
-					input as Parameters<typeof createLayerInvite>[1],
-				)
-			: await createMapInvite(input as Parameters<typeof createMapInvite>[0]);
+		);
 		setBusy(false);
 		if (out) {
 			setCreated(out);
@@ -97,17 +82,28 @@ export function InviteLinks(props: { scope: MembersScope }) {
 	return (
 		<section class="invites">
 			<h3 class="section-title">Invite links</h3>
+			{scope.inviteHelp && <p class="muted">{scope.inviteHelp}</p>}
 			<form class="invite-form" onSubmit={create}>
-				<label>
-					<span class="label">Role</span>
-					<select value={role} onChange={(e) => setRole(e.currentTarget.value)}>
-						{roles.map((r) => (
-							<option key={r} value={r}>
-								{r}
-							</option>
-						))}
-					</select>
-				</label>
+				{scope.inviteRoles.length > 0 && (
+					<label>
+						<span class="label">Role</span>
+						<select
+							value={role}
+							onChange={(e) =>
+								setRole(
+									scope.inviteRoles.find((r) => r === e.currentTarget.value) ??
+										role,
+								)
+							}
+						>
+							{scope.inviteRoles.map((r) => (
+								<option key={r} value={r}>
+									{r}
+								</option>
+							))}
+						</select>
+					</label>
+				)}
 				<label>
 					<span class="label">Expires</span>
 					<select

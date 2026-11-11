@@ -1,42 +1,15 @@
 import type { Dye } from "@aomc/shared/colors";
 import type { FeatureType, Point } from "@aomc/shared/features";
-import type { Role } from "@aomc/shared/schemas";
+import type { View } from "@aomc/shared/view";
 import { computed, signal } from "@preact/signals";
-import type { View } from "./map/camera";
+import type { InferResponseType } from "hono/client";
+import type { api } from "./api";
 
 export type User = { id: string; username: string; avatarUrl: string | null };
 
-type MapSummary = {
-	id: number;
-	slug: string;
-	name: string;
-	tileSize: number;
-	headRev: number;
-};
-
-export type Dimension = {
-	id: number;
-	slug: string;
-	name: string;
-	sortOrder: number;
-	archived: boolean;
-	/** Overworld blocks per block of this dimension (Nether: 8); null when coordinates are unrelated. */
-	scale: number | null;
-};
-
-export type UploadLimits = {
-	maxUploadBytes: number;
-	maxFilesPerUpload: number;
-	maxImageDim: number;
-};
-
-export type MapDetail = {
-	map: MapSummary;
-	role: Role;
-	maxZoom: number;
-	limits: UploadLimits;
-	dimensions: Dimension[];
-};
+export type MapDetail = InferResponseType<typeof api.api.map.$get, 200>;
+export type Dimension = MapDetail["dimensions"][number];
+export type UploadLimits = MapDetail["limits"];
 
 export type FeatureData = {
 	id: number;
@@ -51,22 +24,14 @@ export type FeatureData = {
 	updatedAt: number;
 };
 
-export type LayerData = {
-	id: number;
-	dimensionId: number;
-	name: string;
-	color: Dye;
-	hiddenByDefault: boolean;
-	visibility: "inherit" | "private";
-	sortOrder: number;
-	createdBy: string;
-	canEdit: boolean;
-	/** May manage who can see and edit this layer (members, invite links). */
-	canManage: boolean;
-	features: FeatureData[];
-};
+export type LayerData = Omit<
+	InferResponseType<typeof api.api.layers.$get, 200>["layers"][number],
+	"features" | "color"
+> & { color: Dye; features: FeatureData[] };
 
-export type Tool = "none" | "measure" | "copy";
+export type SidePanelName = "layers" | "history";
+
+export type Tool = "none" | "measure";
 
 export const user = signal<User | null>(null);
 export const currentMap = signal<MapDetail | null>(null);
@@ -86,45 +51,18 @@ export const notice = signal<{ text: string; kind: "error" | "info" } | null>(
 export const layersData = signal<LayerData[]>([]);
 /** Layers the user toggled away from their default (layerId -> hidden). */
 const layerOverrides = signal<Map<number, boolean>>(new Map());
-export const layerPanelOpen = signal(false);
-export const historyPanelOpen = signal(false);
-export const mapPanelOpen = signal(false);
+export const sidePanel = signal<SidePanelName | null>(null);
 
-export type SidePanelName = "layers" | "history" | "map";
+export type RevisionInfo = InferResponseType<
+	typeof api.api.revisions.$get,
+	200
+>["revisions"][number];
 
-/** One side panel at a time; opening the one that is already open closes it. */
-export function toggleSidePanel(name: SidePanelName) {
-	const was = {
-		layers: layerPanelOpen,
-		history: historyPanelOpen,
-		map: mapPanelOpen,
-	}[name].value;
-	layerPanelOpen.value = false;
-	historyPanelOpen.value = false;
-	mapPanelOpen.value = false;
-	if (!was) {
-		({ layers: layerPanelOpen, history: historyPanelOpen, map: mapPanelOpen })[
-			name
-		].value = true;
-	}
-}
+/** Changes when history is rewritten (an upload is deleted), so cached tiles are not reused. */
+export const mapEpoch = computed(() => currentMap.value?.map.epoch ?? 0);
 
-export type RevisionInfo = {
-	id: number;
-	rev: number | null;
-	kind: "upload" | "revert" | "unrevert";
-	dimensionId: number | null;
-	authorId: string;
-	authorName: string;
-	targetRevisionId: number | null;
-	status: "pending" | "processing" | "done" | "failed";
-	error: string | null;
-	bbox: { minX: number; minZ: number; maxX: number; maxZ: number } | null;
-	fileCount: number;
-	reverted: boolean;
-	createdAt: number;
-	completedAt: number | null;
-};
+/** The upload being looked at on its own (tiles of that upload only), or null for the whole map. */
+export const isolatedUpload = signal<RevisionInfo | null>(null);
 
 /** Revisions of the current map, newest first. */
 export const revisionsData = signal<RevisionInfo[]>([]);
@@ -162,27 +100,12 @@ export const editor = signal<EditorTarget | null>(null);
 const viewingHistory = computed(() => rev.value !== null);
 export const canEditMap = computed(() => {
 	const role = currentMap.value?.role;
-	return (
-		!viewingHistory.value &&
-		user.value !== null &&
-		role !== undefined &&
-		role !== "viewer"
-	);
+	return !viewingHistory.value && role !== undefined && role !== "viewer";
 });
 
 export const isModerator = computed(() => {
 	const role = currentMap.value?.role;
-	return user.value !== null && (role === "moderator" || role === "owner");
-});
-
-/** Owners manage everything; moderators manage the dimensions. */
-export const canAdminister = computed(() => {
-	const d = currentMap.value;
-	return (
-		user.value !== null &&
-		d !== null &&
-		(d.role === "owner" || d.role === "moderator")
-	);
+	return role === "moderator" || role === "owner";
 });
 
 export const effectiveRev = computed(() => {

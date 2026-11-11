@@ -1,20 +1,12 @@
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
-import { copyFile, mkdir, readdir, rm } from "node:fs/promises";
-import { join } from "node:path";
+import { copyFile, mkdir, readdir, rename, rm } from "node:fs/promises";
+import { basename, dirname, join } from "node:path";
 import { parseArgs } from "node:util";
+import { isBlobHash } from "../server/src/tiles/blobstore";
 
-const pad = (n: number) => String(n).padStart(2, "0");
-const stamp = (d: Date) =>
-	`${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}-${pad(d.getHours())}${pad(d.getMinutes())}${pad(d.getSeconds())}`;
-
-async function* walk(dir: string): AsyncGenerator<string> {
-	for (const entry of await readdir(dir, { withFileTypes: true })) {
-		const path = join(dir, entry.name);
-		if (entry.isDirectory()) yield* walk(path);
-		else yield path;
-	}
-}
+/** UTC, millisecond precision, so names sort by time and runs never collide. */
+const stamp = (d: Date) => d.toISOString().replace(/[-:.]/g, "");
 
 export type BackupResult = {
 	snapshot: string;
@@ -41,12 +33,10 @@ export async function backup(opts: {
 	if (!existsSync(dbFile)) throw new Error(`no database at ${dbFile}`);
 	await mkdir(opts.dest, { recursive: true });
 
-	// Two runs in the same second get -1, -2, ... instead of overwriting or failing.
-	const base = `db-${stamp(opts.now ?? new Date())}`;
-	let snapshot = join(opts.dest, `${base}.sqlite`);
-	for (let n = 1; existsSync(snapshot); n++) {
-		snapshot = join(opts.dest, `${base}-${n}.sqlite`);
-	}
+	const snapshot = join(
+		opts.dest,
+		`db-${stamp(opts.now ?? new Date())}.sqlite`,
+	);
 	const db = new Database(dbFile, { readonly: true });
 	try {
 		db.query("VACUUM INTO ?").run(snapshot);
@@ -58,29 +48,27 @@ export async function backup(opts: {
 	let blobsSkipped = 0;
 	const blobsDir = join(opts.dataDir, "blobs");
 	if (existsSync(blobsDir)) {
-		for await (const file of walk(blobsDir)) {
-			if (!file.endsWith(".webp")) continue; // skips in-progress .tmp files
-			const target = join(opts.dest, "blobs", file.slice(blobsDir.length + 1));
+		for (const rel of await readdir(blobsDir, { recursive: true })) {
+			if (!rel.endsWith(".webp") || !isBlobHash(basename(rel, ".webp")))
+				continue; // skips in-progress .tmp files
+			const target = join(opts.dest, "blobs", rel);
 			if (existsSync(target)) {
 				blobsSkipped++;
 				continue;
 			}
-			await mkdir(join(target, ".."), { recursive: true });
-			await copyFile(file, target);
+			await mkdir(dirname(target), { recursive: true });
+			// Copy under a temporary name so an interrupted run never leaves a truncated blob.
+			await copyFile(join(blobsDir, rel), `${target}.tmp`);
+			await rename(`${target}.tmp`, target);
 			blobsCopied++;
 		}
 	}
 
 	const pruned: string[] = [];
 	if (opts.keep !== undefined) {
-		// Oldest first: by timestamp, then by the -N suffix (a plain "." would sort after "-").
-		const order = (name: string) => {
-			const m = /^db-(\d{8}-\d{6})(?:-(\d+))?\.sqlite$/.exec(name);
-			return m ? `${m[1]}-${String(m[2] ?? 0).padStart(6, "0")}` : null;
-		};
 		const snapshots = (await readdir(opts.dest))
-			.filter((n) => order(n) !== null)
-			.sort((a, b) => (order(a) as string).localeCompare(order(b) as string));
+			.filter((n) => /^db-.*\.sqlite$/.test(n))
+			.sort();
 		for (const old of snapshots.slice(
 			0,
 			Math.max(0, snapshots.length - opts.keep),
@@ -108,11 +96,12 @@ if (import.meta.main) {
 		);
 		process.exit(2);
 	}
-	const result = await backup({
-		dataDir: values.data as string,
-		dest,
-		keep: Number(values.keep),
-	});
+	const keep = Number(values.keep);
+	if (!Number.isInteger(keep) || keep < 1) {
+		console.error("--keep must be a whole number of at least 1");
+		process.exit(2);
+	}
+	const result = await backup({ dataDir: values.data as string, dest, keep });
 	console.log(`database: ${result.snapshot}`);
 	console.log(
 		`blobs: ${result.blobsCopied} copied, ${result.blobsSkipped} already there`,

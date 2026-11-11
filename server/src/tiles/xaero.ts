@@ -1,5 +1,3 @@
-export { parseXaeroCoords } from "@aomc/shared/xaero";
-
 /** Pure black means "no data" in Xaero exports. Mutates an RGBA buffer. */
 export function blackToAlpha(rgba: Uint8Array): void {
 	for (let i = 0; i < rgba.length; i += 4) {

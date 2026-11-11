@@ -28,6 +28,8 @@ export type PreviewParams = {
 	z: number;
 	zoom: number;
 	rev: number;
+	/** Changes when history is rewritten; see `map_info.epoch`. */
+	epoch: number;
 };
 
 const SIZE: Size = { width: PREVIEW_W, height: PREVIEW_H };
@@ -118,17 +120,17 @@ async function renderPreview(
 		.toBuffer();
 }
 
-function previewCacheKey(mapId: number, p: PreviewParams): string {
+function previewCacheKey(p: PreviewParams): string {
 	return createHash("sha256")
 		.update(
 			JSON.stringify([
-				mapId,
 				p.dimensionId,
 				p.tileSize,
 				p.x,
 				p.z,
 				p.zoom,
 				p.rev,
+				p.epoch,
 			]),
 		)
 		.digest("hex");
@@ -163,23 +165,20 @@ export function createPreviewService(opts: {
 	async function slot<T>(fn: () => Promise<T>): Promise<T> {
 		if (running >= MAX_CONCURRENT)
 			await new Promise<void>((resolve) => waiting.push(resolve));
-		running++;
+		else running++;
 		try {
 			return await fn();
 		} finally {
-			running--;
-			waiting.shift()?.();
+			// Hand the slot straight to the next waiter so a newcomer cannot jump in.
+			const next = waiting.shift();
+			if (next) next();
+			else running--;
 		}
 	}
 
 	return {
-		async get(
-			db: Db,
-			blobs: BlobStore,
-			mapId: number,
-			p: PreviewParams,
-		): Promise<Buffer> {
-			const key = previewCacheKey(mapId, p);
+		async get(db: Db, blobs: BlobStore, p: PreviewParams): Promise<Buffer> {
+			const key = previewCacheKey(p);
 			const file = join(opts.cacheDir, `${key}.png`);
 			const cached = Bun.file(file);
 			if (await cached.exists()) return Buffer.from(await cached.arrayBuffer());

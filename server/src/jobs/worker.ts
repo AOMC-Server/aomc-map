@@ -2,14 +2,16 @@ import { rm } from "node:fs/promises";
 import { asc, eq } from "drizzle-orm";
 import { jobs, revisions } from "../db/schema";
 import { failRevision } from "../tiles/history";
-import { applyRevert } from "./applyRevert";
+import { eraseUpload } from "./eraseUpload";
 import { processUpload } from "./processUpload";
 import {
-	type ApplyRevertPayload,
+	type EraseUploadPayload,
 	incomingDir,
 	type JobContext,
 	type ProcessUploadPayload,
 } from "./types";
+
+const MAX_ATTEMPTS = 3;
 
 /** Runs persisted jobs one at a time, in id order. */
 export function createWorker(ctx: JobContext) {
@@ -19,17 +21,18 @@ export function createWorker(ctx: JobContext) {
 
 	async function runJob(job: typeof jobs.$inferSelect) {
 		const payload = job.payload as { revisionId: number };
+		const isErase = job.type === "erase_upload";
 		await db
 			.update(jobs)
-			.set({
-				status: "processing",
-				startedAt: Date.now(),
-				attempts: job.attempts + 1,
-			})
+			.set({ status: "processing", attempts: job.attempts + 1 })
 			.where(eq(jobs.id, job.id));
 		await db
 			.update(revisions)
-			.set({ status: "processing" })
+			.set(
+				isErase
+					? { status: "processing", error: null }
+					: { status: "processing" },
+			)
 			.where(eq(revisions.id, payload.revisionId));
 		progress.emit(payload.revisionId, {
 			status: "processing",
@@ -38,13 +41,12 @@ export function createWorker(ctx: JobContext) {
 		try {
 			if (job.type === "process_upload") {
 				await processUpload(ctx, job.payload as ProcessUploadPayload);
+			} else if (job.type === "erase_upload") {
+				await eraseUpload(ctx, job.payload as EraseUploadPayload);
 			} else {
-				await applyRevert(ctx, job.payload as ApplyRevertPayload);
+				throw new Error(`unknown job type ${job.type}`);
 			}
-			await db
-				.update(jobs)
-				.set({ status: "done", finishedAt: Date.now() })
-				.where(eq(jobs.id, job.id));
+			await db.update(jobs).set({ status: "done" }).where(eq(jobs.id, job.id));
 			const [rev] = await db
 				.select({ rev: revisions.rev })
 				.from(revisions)
@@ -58,13 +60,20 @@ export function createWorker(ctx: JobContext) {
 			console.error(`job ${job.id} failed:`, err);
 			await db
 				.update(jobs)
-				.set({
-					status: "failed",
-					finishedAt: Date.now(),
-					error: message.slice(0, 500),
-				})
+				.set({ status: "failed" })
 				.where(eq(jobs.id, job.id));
-			await failRevision(db, payload.revisionId, message);
+			if (isErase) {
+				// The upload is still there, as it was.
+				await db
+					.update(revisions)
+					.set({
+						status: "done",
+						error: `delete failed: ${message}`.slice(0, 500),
+					})
+					.where(eq(revisions.id, payload.revisionId));
+			} else {
+				await failRevision(db, payload.revisionId, message);
+			}
 			progress.emit(payload.revisionId, { status: "failed", error: message });
 		} finally {
 			await rm(incomingDir(env, payload.revisionId), {
@@ -103,16 +112,45 @@ export function createWorker(ctx: JobContext) {
 		kick() {
 			run().catch((err) => console.error("worker loop crashed:", err));
 		},
-		/** Jobs interrupted by a crash are retried; their results were never published. */
+		/**
+		 * Jobs interrupted by a crash are retried, since their results were never published. One
+		 * that keeps taking the process down is failed instead of crash-looping the server.
+		 */
 		start() {
-			db.update(jobs)
-				.set({ status: "pending" })
+			for (const job of db
+				.select()
+				.from(jobs)
 				.where(eq(jobs.status, "processing"))
-				.run();
-			db.update(revisions)
-				.set({ status: "pending" })
-				.where(eq(revisions.status, "processing"))
-				.run();
+				.all()) {
+				const { revisionId } = job.payload as { revisionId: number };
+				const isErase = job.type === "erase_upload";
+				if (job.attempts >= MAX_ATTEMPTS) {
+					db.update(jobs)
+						.set({ status: "failed" })
+						.where(eq(jobs.id, job.id))
+						.run();
+					db.update(revisions)
+						.set(
+							isErase
+								? {
+										status: "done",
+										error: "delete failed: interrupted too many times",
+									}
+								: { status: "failed", error: "interrupted too many times" },
+						)
+						.where(eq(revisions.id, revisionId))
+						.run();
+				} else {
+					db.update(jobs)
+						.set({ status: "pending" })
+						.where(eq(jobs.id, job.id))
+						.run();
+					db.update(revisions)
+						.set({ status: isErase ? "done" : "pending" })
+						.where(eq(revisions.id, revisionId))
+						.run();
+				}
+			}
 			timer = setInterval(() => this.kick(), 5000);
 			this.kick();
 		},

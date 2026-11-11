@@ -1,20 +1,19 @@
 import { Database } from "bun:sqlite";
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import {
 	existsSync,
 	mkdirSync,
-	mkdtempSync,
 	readdirSync,
 	utimesSync,
 	writeFileSync,
 } from "node:fs";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { jobs } from "../server/src/db/schema";
-import { runSetup } from "../server/src/setup";
 import {
 	bootTiles,
+	cleanupTempDirs,
 	decodeRgba,
+	makeTempDir,
 	makeTestApp,
 	makeUser,
 	png,
@@ -26,7 +25,9 @@ import { backup } from "./backup";
 import { gcBlobs } from "./gc-blobs";
 import { runImport } from "./import-v1";
 
-const tmp = (name: string) => mkdtempSync(join(tmpdir(), `aomc-${name}-`));
+afterAll(cleanupTempDirs);
+
+const tmp = (name: string) => makeTempDir(`aomc-${name}-`);
 
 describe("backup", () => {
 	async function withData() {
@@ -41,9 +42,9 @@ describe("backup", () => {
 		const first = await backup({
 			dataDir: t.env.DATA_DIR,
 			dest,
-			now: new Date(2026, 10, 10, 12, 0, 0),
+			now: new Date(Date.UTC(2026, 10, 10, 12, 0, 0)),
 		});
-		expect(first.snapshot).toEndWith("db-20261110-120000.sqlite");
+		expect(first.snapshot).toEndWith("db-20261110T120000000Z.sqlite");
 		expect(first.blobsCopied).toBeGreaterThan(0);
 
 		// The snapshot is a complete, readable database.
@@ -56,8 +57,11 @@ describe("backup", () => {
 			).n,
 		).toBeGreaterThan(0);
 		expect(
-			(snap.query("SELECT head_rev FROM maps").get() as { head_rev: number })
-				.head_rev,
+			(
+				snap.query("SELECT head_rev FROM map_info").get() as {
+					head_rev: number;
+				}
+			).head_rev,
 		).toBe(1);
 		snap.close();
 
@@ -84,7 +88,7 @@ describe("backup", () => {
 		const second = await backup({
 			dataDir: t.env.DATA_DIR,
 			dest,
-			now: new Date(2026, 10, 10, 13, 0, 0),
+			now: new Date(Date.UTC(2026, 10, 10, 13, 0, 0)),
 		});
 		expect(second.blobsSkipped).toBe(first.blobsCopied);
 		expect(second.blobsCopied).toBeGreaterThan(0);
@@ -93,18 +97,31 @@ describe("backup", () => {
 		);
 	});
 
-	test("two runs in the same second do not collide", async () => {
+	test("snapshot names sort by time, in UTC", async () => {
 		const t = await withData();
 		const dest = tmp("backup");
-		const now = new Date(2026, 5, 1, 9, 0, 0);
-		const a = await backup({ dataDir: t.env.DATA_DIR, dest, now });
-		const b = await backup({ dataDir: t.env.DATA_DIR, dest, now });
-		const c = await backup({ dataDir: t.env.DATA_DIR, dest, now, keep: 2 });
-		expect(a.snapshot).toEndWith("db-20260601-090000.sqlite");
-		expect(b.snapshot).toEndWith("db-20260601-090000-1.sqlite");
-		expect(c.snapshot).toEndWith("db-20260601-090000-2.sqlite");
-		// Pruning understands the suffixes and removes the oldest.
-		expect(c.pruned).toEqual(["db-20260601-090000.sqlite"]);
+		const a = await backup({
+			dataDir: t.env.DATA_DIR,
+			dest,
+			now: new Date(Date.UTC(2026, 5, 1, 9, 0, 0, 5)),
+		});
+		const b = await backup({
+			dataDir: t.env.DATA_DIR,
+			dest,
+			now: new Date(Date.UTC(2026, 5, 1, 9, 0, 0, 6)),
+		});
+		expect(a.snapshot).toEndWith("db-20260601T090000005Z.sqlite");
+		expect(b.snapshot).toEndWith("db-20260601T090000006Z.sqlite");
+	});
+
+	test("a blob left half-copied by an interrupted run is not mistaken for a backup", async () => {
+		const t = await withData();
+		const dest = tmp("backup");
+		await backup({ dataDir: t.env.DATA_DIR, dest });
+		const leftovers = readdirSync(dest, { recursive: true }).filter((n) =>
+			String(n).endsWith(".tmp"),
+		);
+		expect(leftovers).toEqual([]);
 	});
 
 	test("keeps only the newest N snapshots", async () => {
@@ -115,14 +132,17 @@ describe("backup", () => {
 				dataDir: t.env.DATA_DIR,
 				dest,
 				keep: 2,
-				now: new Date(2026, 0, 1, h, 0, 0),
+				now: new Date(Date.UTC(2026, 0, 1, h, 0, 0)),
 			});
 		}
 		expect(
 			readdirSync(dest)
 				.filter((n) => n.startsWith("db-"))
 				.sort(),
-		).toEqual(["db-20260101-030000.sqlite", "db-20260101-040000.sqlite"]);
+		).toEqual([
+			"db-20260101T030000000Z.sqlite",
+			"db-20260101T040000000Z.sqlite",
+		]);
 	});
 
 	test("complains clearly when there is nothing to back up", async () => {
@@ -280,7 +300,6 @@ describe("import-v1", () => {
 
 	async function server() {
 		const t = makeTestApp({ DEFAULT_TILE_SIZE: "512", MAX_ZOOM: "2" });
-		await runSetup(t.db, t.env);
 		const user = await makeUser(t.db, "importer");
 		return { ...t, token: user.token };
 	}
@@ -293,7 +312,7 @@ describe("import-v1", () => {
 		y: number,
 	) => {
 		const res = await app.request(
-			`/api/maps/aomc/dimensions/${dim}/tiles/${zoom}/${x}/${y}`,
+			`/api/dimensions/${dim}/tiles/${zoom}/${x}/${y}`,
 		);
 		if (res.status === 204) return null;
 		const blob = await app.request(res.headers.get("location") as string);
@@ -307,7 +326,6 @@ describe("import-v1", () => {
 		const result = await runImport({
 			url: "http://map.test",
 			token: t.token,
-			map: "aomc",
 			src,
 			batch: 2,
 			pollMs: 5,
@@ -343,7 +361,6 @@ describe("import-v1", () => {
 		const result = await runImport({
 			url: "http://map.test",
 			token: t.token,
-			map: "aomc",
 			src,
 			dims: ["overworld"],
 			batch: 1,
@@ -373,7 +390,6 @@ describe("import-v1", () => {
 			runImport({
 				url: "http://map.test",
 				token: t.token,
-				map: "aomc",
 				src,
 				batch: 1,
 				statePath: state,
@@ -392,7 +408,6 @@ describe("import-v1", () => {
 		const result = await runImport({
 			url: "http://map.test",
 			token: t.token,
-			map: "aomc",
 			src,
 			batch: 1,
 			statePath: state,
@@ -410,7 +425,6 @@ describe("import-v1", () => {
 		const again = await runImport({
 			url: "http://map.test",
 			token: t.token,
-			map: "aomc",
 			src,
 			batch: 1,
 			statePath: state,
@@ -429,7 +443,6 @@ describe("import-v1", () => {
 		const r = await runImport({
 			url: "http://map.test",
 			token: t.token,
-			map: "aomc",
 			src,
 			dims: ["nether"],
 			dimMap: { nether: "the_end" },
@@ -442,14 +455,13 @@ describe("import-v1", () => {
 		expect(await tile(t.app, "overworld", 0, 0, 0)).toBeNull();
 	});
 
-	test("clear errors for bad tokens, unknown maps, unknown dimensions and empty sources", async () => {
+	test("clear errors for bad tokens, unknown dimensions and empty sources", async () => {
 		const src = await makeV1();
 		const t = await server();
 		const run = (over: Partial<Parameters<typeof runImport>[0]>) =>
 			runImport({
 				url: "http://map.test",
 				token: t.token,
-				map: "aomc",
 				src,
 				pollMs: 5,
 				fetch: inProcess(t.app),
@@ -458,9 +470,6 @@ describe("import-v1", () => {
 			});
 
 		await expect(run({ token: "aomc_wrong" })).rejects.toThrow("HTTP 401");
-		await expect(run({ map: "nope" })).rejects.toThrow(
-			'cannot open map "nope"',
-		);
 		await expect(run({ dimMap: { overworld: "atlantis" } })).rejects.toThrow(
 			'dimension "atlantis" does not exist',
 		);
@@ -470,44 +479,30 @@ describe("import-v1", () => {
 	});
 
 	test("rate limiting by the server is retried instead of failing", async () => {
-		// Not simulated at the HTTP level; the retry path only needs a 429 once.
 		const src = await makeV1();
 		const t = await server();
 		const base = inProcess(t.app);
 		let limited = false;
-		const sleeps: number[] = [];
-		const realSetTimeout = globalThis.setTimeout;
-		globalThis.setTimeout = ((fn: () => void, ms?: number) => {
-			if (ms === 15_000) {
-				sleeps.push(ms);
-				return realSetTimeout(fn, 0);
+		const f = (async (input: RequestInfo | URL, init?: RequestInit) => {
+			if (init?.method === "POST" && !limited) {
+				limited = true;
+				return new Response(JSON.stringify({ error: "too many uploads" }), {
+					status: 429,
+				});
 			}
-			return realSetTimeout(fn, ms);
-		}) as typeof setTimeout;
-		try {
-			const f = (async (input: RequestInfo | URL, init?: RequestInit) => {
-				if (init?.method === "POST" && !limited) {
-					limited = true;
-					return new Response(JSON.stringify({ error: "too many uploads" }), {
-						status: 429,
-					});
-				}
-				return base(input, init);
-			}) as typeof fetch;
-			const r = await runImport({
-				url: "http://map.test",
-				token: t.token,
-				map: "aomc",
-				src,
-				dims: ["nether"],
-				pollMs: 5,
-				fetch: f,
-				log: () => {},
-			});
-			expect(r.uploaded).toBe(1);
-			expect(sleeps).toEqual([15_000]);
-		} finally {
-			globalThis.setTimeout = realSetTimeout;
-		}
+			return base(input, init);
+		}) as typeof fetch;
+		const r = await runImport({
+			url: "http://map.test",
+			token: t.token,
+			src,
+			dims: ["nether"],
+			pollMs: 5,
+			retryMs: 1,
+			fetch: f,
+			log: () => {},
+		});
+		expect(r.uploaded).toBe(1);
+		expect(limited).toBe(true);
 	});
 });

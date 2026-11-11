@@ -1,8 +1,7 @@
-import type { Role } from "@aomc/shared";
 import { and, eq, isNull, sql } from "drizzle-orm";
 import { randomToken, sha256Hex } from "./auth/tokens";
 import type { Db } from "./db/client";
-import { invites, layerMembers, layers, mapMembers, maps } from "./db/schema";
+import { invites, layerMembers, layers, members } from "./db/schema";
 import { atLeast, effectiveRole } from "./permissions";
 
 const INVITE_PREFIX = "inv_";
@@ -26,12 +25,11 @@ export function inviteStatus(
 	return "active";
 }
 
-/** Returns the plaintext token once; only its hash is stored. */
+/** Returns the plaintext token once; only its hash is stored. layerId null makes a map invite. */
 export function createInvite(
 	db: Db,
 	opts: {
-		mapId?: number;
-		layerId?: number;
+		layerId: number | null;
 		role: string;
 		createdBy: string;
 		expiresInHours: number | null;
@@ -43,8 +41,7 @@ export function createInvite(
 		.insert(invites)
 		.values({
 			tokenHash: sha256Hex(token),
-			mapId: opts.mapId ?? null,
-			layerId: opts.layerId ?? null,
+			layerId: opts.layerId,
 			role: opts.role,
 			createdBy: opts.createdBy,
 			expiresAt:
@@ -62,11 +59,10 @@ export type AcceptResult =
 	| {
 			ok: true;
 			kind: "map" | "layer";
-			mapSlug: string;
 			role: string;
 			alreadyMember: boolean;
 	  }
-	| { ok: false; status: 404 | 409 | 410; error: string };
+	| { ok: false; status: 404 | 410; error: string };
 
 /**
  * Applies an invite to a user in one transaction. A use is only consumed when the invite actually
@@ -88,29 +84,6 @@ export function acceptInvite(
 		if (status !== "active")
 			return { ok: false, status: 410, error: `this invite is ${status}` };
 
-		const layer = inv.layerId
-			? tx
-					.select()
-					.from(layers)
-					.where(and(eq(layers.id, inv.layerId), isNull(layers.deletedAt)))
-					.get()
-			: undefined;
-		if (inv.layerId && !layer)
-			return { ok: false, status: 404, error: "that layer no longer exists" };
-
-		const mapId = inv.mapId ?? (layer as typeof layers.$inferSelect).mapId;
-		const map = tx.select().from(maps).where(eq(maps.id, mapId)).get();
-		if (!map)
-			return { ok: false, status: 404, error: "that map no longer exists" };
-
-		const membership =
-			tx
-				.select({ role: mapMembers.role })
-				.from(mapMembers)
-				.where(and(eq(mapMembers.mapId, map.id), eq(mapMembers.userId, userId)))
-				.get()?.role ?? null;
-		// On a public map everyone is already an editor, so a lower role changes nothing.
-		const current = effectiveRole({ id: userId }, membership);
 		const consume = () =>
 			tx
 				.update(invites)
@@ -118,33 +91,39 @@ export function acceptInvite(
 				.where(eq(invites.id, inv.id))
 				.run();
 
-		if (!layer) {
-			const role = inv.role as Role;
-			if (atLeast(current, role)) {
-				return {
-					ok: true,
-					kind: "map",
-					mapSlug: map.slug,
-					role: current,
-					alreadyMember: true,
-				};
+		if (inv.layerId === null) {
+			const membership = tx
+				.select({ role: members.role })
+				.from(members)
+				.where(eq(members.userId, userId))
+				.get();
+			const current = effectiveRole({ id: userId }, membership?.role ?? null);
+			if (atLeast(current, "moderator")) {
+				return { ok: true, kind: "map", role: current, alreadyMember: true };
 			}
-			tx.insert(mapMembers)
-				.values({ mapId: map.id, userId, role, addedBy: inv.createdBy })
+			tx.insert(members)
+				.values({ userId, role: "moderator" })
 				.onConflictDoUpdate({
-					target: [mapMembers.mapId, mapMembers.userId],
-					set: { role },
+					target: members.userId,
+					set: { role: "moderator" },
 				})
 				.run();
 			consume();
 			return {
 				ok: true,
 				kind: "map",
-				mapSlug: map.slug,
-				role,
+				role: "moderator",
 				alreadyMember: false,
 			};
 		}
+
+		const layer = tx
+			.select({ id: layers.id })
+			.from(layers)
+			.where(and(eq(layers.id, inv.layerId), isNull(layers.deletedAt)))
+			.get();
+		if (!layer)
+			return { ok: false, status: 404, error: "that layer no longer exists" };
 
 		const role = inv.role as "viewer" | "editor";
 		const existing = tx
@@ -158,13 +137,7 @@ export function acceptInvite(
 			)
 			.get()?.role;
 		if (existing === "editor" || existing === role) {
-			return {
-				ok: true,
-				kind: "layer",
-				mapSlug: map.slug,
-				role: existing,
-				alreadyMember: true,
-			};
+			return { ok: true, kind: "layer", role: existing, alreadyMember: true };
 		}
 		tx.insert(layerMembers)
 			.values({ layerId: layer.id, userId, role })
@@ -174,12 +147,6 @@ export function acceptInvite(
 			})
 			.run();
 		consume();
-		return {
-			ok: true,
-			kind: "layer",
-			mapSlug: map.slug,
-			role,
-			alreadyMember: false,
-		};
+		return { ok: true, kind: "layer", role, alreadyMember: false };
 	});
 }

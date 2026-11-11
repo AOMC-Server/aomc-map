@@ -2,26 +2,19 @@ import { layerMemberRoleSchema, layerMemberSchema } from "@aomc/shared";
 import { zValidator } from "@hono/zod-validator";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
-import { requireUser } from "../auth/session";
+import { requireUser, userOf } from "../auth/session";
 import { layerMembers, users } from "../db/schema";
-import { canManageLayerMembers, loadLayerAccess } from "../permissions";
+import { canManageLayer } from "../permissions";
 import type { AppEnv } from "../types";
-
-const parseId = (value: string | undefined) =>
-	/^\d+$/.test(value ?? "") ? Number(value) : Number.NaN;
+import { layerFor } from "./util";
 
 /** /api/layers/:id/members: who may see and edit a private layer. */
 export const layerMemberRoutes = new Hono<AppEnv>()
 	.use(requireUser)
 	.get("/", async (c) => {
-		const user = c.var.user as NonNullable<typeof c.var.user>;
-		const found = await loadLayerAccess(
-			c.var.db,
-			user,
-			parseId(c.req.param("id")),
-		);
+		const found = await layerFor(c, c.req.param("id"));
 		if (!found) return c.json({ error: "not found" }, 404);
-		if (!canManageLayerMembers(user, found.role, found.layer))
+		if (!canManageLayer(c.var.user, c.var.role, found.layer))
 			return c.json({ error: "forbidden" }, 403);
 		const members = await c.var.db
 			.select({
@@ -37,10 +30,9 @@ export const layerMemberRoutes = new Hono<AppEnv>()
 	})
 	.post("/", zValidator("json", layerMemberSchema), async (c) => {
 		const { db } = c.var;
-		const user = c.var.user as NonNullable<typeof c.var.user>;
-		const found = await loadLayerAccess(db, user, parseId(c.req.param("id")));
+		const found = await layerFor(c, c.req.param("id"));
 		if (!found) return c.json({ error: "not found" }, 404);
-		if (!canManageLayerMembers(user, found.role, found.layer))
+		if (!canManageLayer(c.var.user, c.var.role, found.layer))
 			return c.json({ error: "forbidden" }, 403);
 
 		const body = c.req.valid("json");
@@ -64,14 +56,12 @@ export const layerMemberRoutes = new Hono<AppEnv>()
 		return c.json({ ok: true }, 201);
 	})
 	.patch("/:userId", zValidator("json", layerMemberRoleSchema), async (c) => {
-		const { db } = c.var;
-		const user = c.var.user as NonNullable<typeof c.var.user>;
-		const found = await loadLayerAccess(db, user, parseId(c.req.param("id")));
+		const found = await layerFor(c, c.req.param("id"));
 		if (!found) return c.json({ error: "not found" }, 404);
-		if (!canManageLayerMembers(user, found.role, found.layer))
+		if (!canManageLayer(c.var.user, c.var.role, found.layer))
 			return c.json({ error: "forbidden" }, 403);
 
-		const rows = await db
+		const rows = await c.var.db
 			.update(layerMembers)
 			.set({ role: c.req.valid("json").role })
 			.where(
@@ -86,19 +76,17 @@ export const layerMemberRoutes = new Hono<AppEnv>()
 			: c.json({ error: "not found" }, 404);
 	})
 	.delete("/:userId", async (c) => {
-		const { db } = c.var;
-		const user = c.var.user as NonNullable<typeof c.var.user>;
-		const found = await loadLayerAccess(db, user, parseId(c.req.param("id")));
+		const found = await layerFor(c, c.req.param("id"));
 		if (!found) return c.json({ error: "not found" }, 404);
 		const userId = c.req.param("userId") ?? "";
 		// Members may always leave a layer themselves.
 		if (
-			userId !== user.id &&
-			!canManageLayerMembers(user, found.role, found.layer)
+			userId !== userOf(c).id &&
+			!canManageLayer(c.var.user, c.var.role, found.layer)
 		) {
 			return c.json({ error: "forbidden" }, 403);
 		}
-		const rows = await db
+		const rows = await c.var.db
 			.delete(layerMembers)
 			.where(
 				and(

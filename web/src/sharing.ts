@@ -1,214 +1,164 @@
-import type { Role } from "@aomc/shared/schemas";
-import type { CreateLayerInvite, CreateMapInvite } from "@aomc/shared/sharing";
-import { api } from "./api";
-import { reloadMap } from "./controller";
-import { loadLayers, run } from "./layers";
-import { currentMap } from "./state";
+import {
+	type LayerRole,
+	layerRoleSchema,
+	memberRoleSchema,
+} from "@aomc/shared";
+import type { InferResponseType } from "hono/client";
+import { api, ok, run } from "./api";
+import { refreshMap } from "./controller";
+import { mutateOk } from "./layers";
 
-export type Member<R extends string = Role> = {
+type MemberRole = (typeof memberRoleSchema.options)[number];
+
+export type Member<R extends string> = {
 	userId: string;
 	role: R;
 	username: string;
 	avatarUrl: string | null;
 };
 
-export type InviteInfo = {
-	id: number;
-	kind: "map" | "layer";
-	role: string;
-	createdByName: string;
-	expiresAt: number | null;
+export type InviteInfo = InferResponseType<
+	typeof api.api.invites.$get,
+	200
+>["invites"][number];
+
+export type CreatedInvite = InferResponseType<
+	typeof api.api.invites.$post,
+	201
+>;
+
+export type InviteOptions = {
+	expiresInHours: number | null;
 	maxUses: number | null;
-	uses: number;
-	status: "active" | "revoked" | "expired" | "exhausted";
 };
 
-export type CreatedInvite = { invite: InviteInfo; token: string; url: string };
+/** Who can be added to, and invited into, the map or one private layer. */
+export type Scope<R extends string> = {
+	/** Changes when the scope points at something else. */
+	key: string;
+	roles: readonly R[];
+	defaultRole: R;
+	defaultInviteRole: R;
+	roleHelp: Record<R, string>;
+	/** Roles an invite link can grant; empty when the scope decides it (map invites make moderators). */
+	inviteRoles: readonly R[];
+	inviteHelp: string;
+	load(): Promise<Member<R>[] | null>;
+	add(userId: string, role: R): Promise<boolean>;
+	setRole(userId: string, role: R): Promise<boolean>;
+	remove(userId: string): Promise<boolean>;
+	loadInvites(): Promise<InviteInfo[] | null>;
+	createInvite(options: InviteOptions, role: R): Promise<CreatedInvite | null>;
+};
 
-const slug = () => currentMap.value?.map.slug ?? "";
-const idParam = (id: number) => ({ id: String(id) });
+export const mapScope: Scope<MemberRole> = {
+	key: "map",
+	roles: memberRoleSchema.options,
+	defaultRole: "moderator",
+	defaultInviteRole: "moderator",
+	roleHelp: {
+		moderator: "can delete uploads, restore features and manage dimensions",
+		owner: "can also manage members, invites and settings",
+	},
+	inviteRoles: [],
+	inviteHelp: "Anyone who accepts the invite becomes a moderator.",
+	async load() {
+		const out = await run(() => api.api.members.$get());
+		return out?.members ?? null;
+	},
+	add: (userId, role) =>
+		ok(() => api.api.members.$post({ json: { userId, role } })),
+	setRole: (userId, role) =>
+		ok(() =>
+			api.api.members[":userId"].$patch({ param: { userId }, json: { role } }),
+		),
+	remove: (userId) =>
+		ok(() => api.api.members[":userId"].$delete({ param: { userId } })),
+	async loadInvites() {
+		const out = await run(() => api.api.invites.$get());
+		return out?.invites ?? null;
+	},
+	createInvite: (options) =>
+		run(() => api.api.invites.$post({ json: options })),
+};
 
-// Map members
-
-export async function loadMapMembers(): Promise<Member[] | null> {
-	const out = await run<{ members: Member[] }>(() =>
-		api.api.maps[":slug"].members.$get({ param: { slug: slug() } }),
-	);
-	return out?.members ?? null;
+export function layerScope(layerId: number): Scope<LayerRole> {
+	const param = { id: String(layerId) };
+	return {
+		key: `layer-${layerId}`,
+		roles: layerRoleSchema.options,
+		defaultRole: "viewer",
+		defaultInviteRole: "editor",
+		roleHelp: {
+			viewer: "can see the layer",
+			editor: "can also edit its features",
+		},
+		inviteRoles: layerRoleSchema.options,
+		inviteHelp: "",
+		async load() {
+			const out = await run(() =>
+				api.api.layers[":id"].members.$get({ param }),
+			);
+			return out?.members ?? null;
+		},
+		add: (userId, role) =>
+			mutateOk(() =>
+				api.api.layers[":id"].members.$post({ param, json: { userId, role } }),
+			),
+		setRole: (userId, role) =>
+			mutateOk(() =>
+				api.api.layers[":id"].members[":userId"].$patch({
+					param: { ...param, userId },
+					json: { role },
+				}),
+			),
+		remove: (userId) =>
+			mutateOk(() =>
+				api.api.layers[":id"].members[":userId"].$delete({
+					param: { ...param, userId },
+				}),
+			),
+		async loadInvites() {
+			const out = await run(() =>
+				api.api.layers[":id"].invites.$get({ param }),
+			);
+			return out?.invites ?? null;
+		},
+		createInvite: (options, role) =>
+			run(() =>
+				api.api.layers[":id"].invites.$post({
+					param,
+					json: { ...options, role },
+				}),
+			),
+	};
 }
 
-export async function addMapMember(userId: string, role: Role) {
-	return (
-		(await run(() =>
-			api.api.maps[":slug"].members.$post({
-				param: { slug: slug() },
-				json: { userId, role },
-			}),
-		)) !== null
-	);
-}
-
-export async function setMapMemberRole(userId: string, role: Role) {
-	return (
-		(await run(() =>
-			api.api.maps[":slug"].members[":userId"].$patch({
-				param: { slug: slug(), userId },
-				json: { role },
-			}),
-		)) !== null
-	);
-}
-
-export async function removeMapMember(userId: string) {
-	return (
-		(await run(() =>
-			api.api.maps[":slug"].members[":userId"].$delete({
-				param: { slug: slug(), userId },
-			}),
-		)) !== null
-	);
-}
-
-// Map invites
-
-export async function loadMapInvites(): Promise<InviteInfo[] | null> {
-	const out = await run<{ invites: InviteInfo[] }>(() =>
-		api.api.maps[":slug"].invites.$get({ param: { slug: slug() } }),
-	);
-	return out?.invites ?? null;
-}
-
-export function createMapInvite(input: CreateMapInvite) {
-	return run<CreatedInvite>(() =>
-		api.api.maps[":slug"].invites.$post({
-			param: { slug: slug() },
-			json: input,
-		}),
-	);
-}
-
-export async function revokeInvite(id: number) {
-	return (
-		(await run(() =>
-			api.api.invites[":id"].$delete({ param: idParam(id) }),
-		)) !== null
-	);
-}
+export const revokeInvite = (id: number) =>
+	ok(() => api.api.invites[":id"].$delete({ param: { id: String(id) } }));
 
 // Map settings and dimensions
 
-export async function updateMapSettings(patch: {
-	name?: string;
-	tileSize?: number;
-}) {
-	const out = await run(() =>
-		api.api.maps[":slug"].$patch({ param: { slug: slug() }, json: patch }),
-	);
-	if (out) await reloadMap();
-	return out !== null;
-}
+const mapChange = (call: Parameters<typeof ok>[0]) => ok(call, refreshMap);
 
-export async function addDimension(
-	dimSlug: string,
+export const updateMapName = (name: string) =>
+	mapChange(() => api.api.map.$patch({ json: { name } }));
+
+export const addDimension = (
+	slug: string,
 	name: string,
 	scale: number | null = null,
-) {
-	const out = await run(() =>
-		api.api.maps[":slug"].dimensions.$post({
-			param: { slug: slug() },
-			json: { slug: dimSlug, name, scale },
-		}),
-	);
-	if (out) await reloadMap();
-	return out !== null;
-}
+) => mapChange(() => api.api.dimensions.$post({ json: { slug, name, scale } }));
 
-export async function updateDimension(
-	dimSlug: string,
+export const updateDimension = (
+	dim: string,
 	patch: {
 		name?: string;
 		sortOrder?: number;
 		archived?: boolean;
 		scale?: number | null;
 	},
-) {
-	const out = await run(() =>
-		api.api.maps[":slug"].dimensions[":dim"].$patch({
-			param: { slug: slug(), dim: dimSlug },
-			json: patch,
-		}),
+) =>
+	mapChange(() =>
+		api.api.dimensions[":dim"].$patch({ param: { dim }, json: patch }),
 	);
-	if (out) await reloadMap();
-	return out !== null;
-}
-
-// Layer members and invites
-
-export type LayerRoleName = "viewer" | "editor";
-
-export async function loadLayerMembers(
-	layerId: number,
-): Promise<Member<LayerRoleName>[] | null> {
-	const out = await run<{ members: Member<LayerRoleName>[] }>(() =>
-		api.api.layers[":id"].members.$get({ param: idParam(layerId) }),
-	);
-	return out?.members ?? null;
-}
-
-export async function addLayerMember(
-	layerId: number,
-	userId: string,
-	role: LayerRoleName,
-) {
-	const out = await run(() =>
-		api.api.layers[":id"].members.$post({
-			param: idParam(layerId),
-			json: { userId, role },
-		}),
-	);
-	if (out) await loadLayers();
-	return out !== null;
-}
-
-export async function setLayerMemberRole(
-	layerId: number,
-	userId: string,
-	role: LayerRoleName,
-) {
-	return (
-		(await run(() =>
-			api.api.layers[":id"].members[":userId"].$patch({
-				param: { ...idParam(layerId), userId },
-				json: { role },
-			}),
-		)) !== null
-	);
-}
-
-export async function removeLayerMember(layerId: number, userId: string) {
-	const out = await run(() =>
-		api.api.layers[":id"].members[":userId"].$delete({
-			param: { ...idParam(layerId), userId },
-		}),
-	);
-	if (out) await loadLayers();
-	return out !== null;
-}
-
-export async function loadLayerInvites(
-	layerId: number,
-): Promise<InviteInfo[] | null> {
-	const out = await run<{ invites: InviteInfo[] }>(() =>
-		api.api.layers[":id"].invites.$get({ param: idParam(layerId) }),
-	);
-	return out?.invites ?? null;
-}
-
-export function createLayerInvite(layerId: number, input: CreateLayerInvite) {
-	return run<CreatedInvite>(() =>
-		api.api.layers[":id"].invites.$post({
-			param: idParam(layerId),
-			json: input,
-		}),
-	);
-}

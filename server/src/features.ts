@@ -46,7 +46,18 @@ export async function featuresOfLayers(
 	const latest = db
 		.select({ id: sql<number>`max(${featureRevisions.id})` })
 		.from(featureRevisions)
-		.where(at === null ? undefined : lte(featureRevisions.createdAt, at))
+		.where(
+			and(
+				inArray(
+					featureRevisions.featureId,
+					db
+						.select({ id: features.id })
+						.from(features)
+						.where(inArray(features.layerId, layerIds)),
+				),
+				at === null ? undefined : lte(featureRevisions.createdAt, at),
+			),
+		)
 		.groupBy(featureRevisions.featureId);
 
 	const rows = await db
@@ -78,6 +89,38 @@ export async function latestRevision(db: Db, featureId: number) {
 
 export type RevisionContent = FeatureInput & { deleted?: boolean };
 
+type RevisionRow = typeof featureRevisions.$inferSelect;
+
+/** The editable fields of a revision, as FeatureInput. */
+export const contentOf = (
+	r: Pick<FeatureView, "type" | "name" | "popup" | "color" | "geometry">,
+) =>
+	({
+		type: r.type,
+		name: r.name,
+		popup: r.popup,
+		color: r.color,
+		geometry: r.geometry,
+	}) as FeatureInput;
+
+export function toView(
+	feature: { id: number; layerId: number },
+	r: RevisionRow,
+): FeatureView {
+	return {
+		id: feature.id,
+		layerId: feature.layerId,
+		revisionId: r.id,
+		type: r.type,
+		name: r.name,
+		popup: r.popup,
+		color: r.color,
+		geometry: r.geometry,
+		authorId: r.authorId,
+		updatedAt: r.createdAt,
+	};
+}
+
 export function insertRevision(
 	db: Pick<Db, "insert">,
 	featureId: number,
@@ -96,6 +139,6 @@ export function insertRevision(
 			color: content.color,
 			geometry: content.geometry,
 		})
-		.returning({ id: featureRevisions.id })
+		.returning()
 		.get();
 }

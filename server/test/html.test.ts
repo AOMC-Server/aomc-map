@@ -1,12 +1,12 @@
-import { describe, expect, test } from "bun:test";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { afterAll, describe, expect, test } from "bun:test";
+import { writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { eq } from "drizzle-orm";
-import { maps } from "../src/db/schema";
+import { mapInfo } from "../src/db/schema";
 import { escapeHtml, injectMeta } from "../src/html";
-import { runSetup } from "../src/setup";
-import { makeTestApp } from "./helpers";
+import { cleanupTempDirs, makeTempDir, makeTestApp } from "./helpers";
+
+afterAll(cleanupTempDirs);
 
 const INDEX = `<!doctype html>
 <html lang="en">
@@ -75,15 +75,15 @@ describe("injectMeta", () => {
 	});
 });
 
-async function bootPage(env: Record<string, string> = {}) {
-	const dist = mkdtempSync(join(tmpdir(), "aomc-dist-"));
+function bootPage(env: Record<string, string> = {}) {
+	const dist = makeTempDir("aomc-dist-");
 	writeFileSync(join(dist, "index.html"), INDEX);
 	const t = makeTestApp({
 		WEB_DIST: dist,
 		PUBLIC_URL: "https://map.example.com",
+		SESSION_SECRET: "test-secret-0123456789",
 		...env,
 	});
-	await runSetup(t.db, t.env);
 	return t;
 }
 
@@ -93,24 +93,24 @@ const meta = (html: string, key: string) =>
 	)?.[1];
 
 describe("share tags on /", () => {
-	test("the default map gets a title, description and an absolute preview image", async () => {
-		const t = await bootPage();
+	test("the default view gets a title, description and an absolute preview image", async () => {
+		const t = bootPage();
 		const html = await (await t.app.request("/")).text();
 		expect(html).toContain("<title>AOMC: Overworld</title>");
 		expect(meta(html, "og:title")).toBe("AOMC: Overworld");
 		expect(meta(html, "og:image")).toBe(
-			"https://map.example.com/api/preview.png?map=aomc&amp;dim=overworld&amp;x=0&amp;z=0&amp;zoom=2",
+			"https://map.example.com/api/preview.png?dim=overworld&amp;x=0&amp;z=0&amp;zoom=2",
 		);
 		expect(meta(html, "og:url")).toBe(
-			"https://map.example.com/?map=aomc&amp;dim=overworld&amp;x=0&amp;z=0&amp;zoom=2",
+			"https://map.example.com/?dim=overworld&amp;x=0&amp;z=0&amp;zoom=2",
 		);
 	});
 
 	test("the view in the URL is reflected, sanitised to the canonical form", async () => {
-		const t = await bootPage();
+		const t = bootPage();
 		const html = await (
 			await t.app.request(
-				"/?map=aomc&dim=nether&x=-12&z=340&zoom=1.234&rev=0&embed=1&junk=<b>",
+				"/?dim=nether&x=-12&z=340&zoom=1.234&rev=0&embed=1&junk=<b>",
 			)
 		).text();
 		expect(meta(html, "og:title")).toBe("AOMC: Nether");
@@ -118,25 +118,24 @@ describe("share tags on /", () => {
 			"AOMC, Nether, around x -12, z 340 (revision 0)",
 		);
 		expect(meta(html, "og:image")).toBe(
-			"https://map.example.com/api/preview.png?map=aomc&amp;dim=nether&amp;x=-12&amp;z=340&amp;zoom=1.23&amp;rev=0",
+			"https://map.example.com/api/preview.png?dim=nether&amp;x=-12&amp;z=340&amp;zoom=1.23&amp;rev=0",
 		);
 		expect(html).not.toContain("junk");
 	});
 
 	test("a map name cannot break out of the markup", async () => {
-		const t = await bootPage();
+		const t = bootPage();
 		await t.db
-			.update(maps)
-			.set({ name: `Evil "><script>alert(1)</script>` })
-			.where(eq(maps.slug, "aomc"));
+			.update(mapInfo)
+			.set({ name: `Evil "><script>alert(1)</script>` });
 		const html = await (await t.app.request("/")).text();
 		expect(html).not.toContain("<script>alert(1)");
 		expect(meta(html, "og:title")).toContain("&quot;&gt;&lt;script&gt;");
 	});
 
 	test("unknown or invalid views keep the generic page", async () => {
-		const t = await bootPage();
-		for (const q of ["?map=nope", "?dim=nope", "?x=abc", "?zoom=NaN"]) {
+		const t = bootPage();
+		for (const q of ["?dim=nope", "?x=abc", "?zoom=NaN"]) {
 			const html = await (await t.app.request(`/${q}`)).text();
 			expect(html).toContain("<title>AOMC Map</title>");
 			expect(html).not.toContain("og:");
@@ -144,7 +143,7 @@ describe("share tags on /", () => {
 	});
 
 	test("other pages (invite links, client routes) keep the generic page", async () => {
-		const t = await bootPage();
+		const t = bootPage();
 		for (const path of [
 			"/invite/inv_abcdefghijklmnopqrstuvwxyz",
 			"/anything/else",
@@ -156,7 +155,7 @@ describe("share tags on /", () => {
 	});
 
 	test("the page is not cached so edits to the map show up", async () => {
-		const t = await bootPage();
+		const t = bootPage();
 		expect((await t.app.request("/")).headers.get("cache-control")).toBe(
 			"no-cache",
 		);
@@ -165,6 +164,5 @@ describe("share tags on /", () => {
 	test("a site without a built web app still serves the API", async () => {
 		const t = makeTestApp({ WEB_DIST: join(tmpdir(), "aomc-missing-dist") });
 		expect((await t.app.request("/")).status).toBe(404);
-		expect((await t.app.request("/api/preview.png")).status).toBe(404); // no default map yet
 	});
 });

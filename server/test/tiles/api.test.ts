@@ -1,10 +1,12 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { zipSync } from "fflate";
-import { mapMembers } from "../../src/db/schema";
+
+afterAll(cleanupTempDirs);
+
 import {
 	BLUE,
 	bootTiles,
-	makeUser,
+	cleanupTempDirs,
 	png,
 	postUpload,
 	RED,
@@ -16,20 +18,12 @@ import {
 } from "../helpers";
 
 describe("upload validation", () => {
-	test("requires login and the editor role", async () => {
+	test("requires login", async () => {
 		const t = await bootTiles();
 		const data = await solid(T, T, RED);
 		expect(
 			(await postUpload(t, null, [{ name: "a_x0_z0.png", data }])).status,
 		).toBe(401);
-
-		const viewer = await makeUser(t.db, "viewer");
-		await t.db
-			.insert(mapMembers)
-			.values({ mapId: t.mapId, userId: "viewer", role: "viewer" });
-		expect(
-			(await postUpload(t, viewer, [{ name: "a_x0_z0.png", data }])).status,
-		).toBe(403);
 	});
 
 	test("coordinates come from the file name, negative values included", async () => {
@@ -74,8 +68,7 @@ describe("upload validation", () => {
 		]);
 		expect(await readTile(t, 0, 0, 0)).toBeNull();
 		expect(
-			(await (await t.app.request("/api/maps/aomc/revisions")).json())
-				.revisions,
+			(await (await t.app.request("/api/revisions")).json()).revisions,
 		).toHaveLength(0);
 	});
 
@@ -123,7 +116,7 @@ describe("upload validation", () => {
 				})
 			).status,
 		).toBe(404);
-		await t.app.request("/api/maps/aomc/dimensions/nether", {
+		await t.app.request("/api/dimensions/nether", {
 			method: "PATCH",
 			body: JSON.stringify({ archived: true }),
 			headers: { ...t.mod.auth, "Content-Type": "application/json" },
@@ -223,7 +216,7 @@ describe("progress and revisions API", () => {
 			fileCount: 1,
 			bbox: { minX: 32, minZ: 48, maxX: 47, maxZ: 63 },
 		});
-		const list = await (await t.app.request("/api/maps/aomc/revisions")).json();
+		const list = await (await t.app.request("/api/revisions")).json();
 		expect(list.revisions.map((r: { id: number }) => r.id)).toEqual([id]);
 		expect((await t.app.request("/api/revisions/9999")).status).toBe(404);
 		expect((await t.app.request("/api/revisions/abc")).status).toBe(404);
@@ -233,27 +226,20 @@ describe("progress and revisions API", () => {
 describe("tile and blob routes", () => {
 	test("validates zoom and coordinates, 204s for empty tiles", async () => {
 		const t = await bootTiles();
-		const base = "/api/maps/aomc/dimensions/overworld/tiles";
+		const base = "/api/dimensions/overworld/tiles";
 		expect((await t.app.request(`${base}/0/5/5`)).status).toBe(204);
 		expect((await t.app.request(`${base}/4/0/0`)).status).toBe(400);
 		expect((await t.app.request(`${base}/-1/0/0`)).status).toBe(400);
 		expect((await t.app.request(`${base}/0/x/0`)).status).toBe(400);
 		expect(
-			(await t.app.request("/api/maps/aomc/dimensions/nope/tiles/0/0/0"))
-				.status,
-		).toBe(404);
-		expect(
-			(await t.app.request("/api/maps/nope/dimensions/overworld/tiles/0/0/0"))
-				.status,
+			(await t.app.request("/api/dimensions/nope/tiles/0/0/0")).status,
 		).toBe(404);
 	});
 
 	test("blobs are immutable WebP, and malformed names never touch the disk", async () => {
 		const t = await bootTiles();
 		await upload(t, await solid(T, T, RED), 0, 0);
-		const res = await t.app.request(
-			"/api/maps/aomc/dimensions/overworld/tiles/0/0/0",
-		);
+		const res = await t.app.request("/api/dimensions/overworld/tiles/0/0/0");
 		const location = res.headers.get("location") as string;
 		expect(location).toMatch(/^\/blobs\/[0-9a-f]{64}\.webp$/);
 
@@ -278,9 +264,7 @@ describe("tile and blob routes", () => {
 		await upload(t, await solid(T, T, RED), 16, 0);
 		const loc = async (x: number) =>
 			(
-				await t.app.request(
-					`/api/maps/aomc/dimensions/overworld/tiles/0/${x}/0`,
-				)
+				await t.app.request(`/api/dimensions/overworld/tiles/0/${x}/0`)
 			).headers.get("location");
 		expect(await loc(0)).toBe(await loc(1));
 	});

@@ -17,7 +17,8 @@ export type UploadFile = {
 	height: number;
 };
 export type ProcessUploadPayload = { revisionId: number; files: UploadFile[] };
-export type ApplyRevertPayload = { revisionId: number; targetId: number };
+/** Deletes the upload `revisionId` from the map and from all of its history. */
+export type EraseUploadPayload = { revisionId: number };
 
 /** Uploaded source files are stored as incoming/<revisionId>/<index>.png until processed. */
 export const incomingDir = (env: Env, revisionId: number) =>

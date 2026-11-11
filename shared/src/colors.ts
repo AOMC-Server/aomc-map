@@ -1,26 +1,5 @@
 /** The 16 Minecraft dye colours, as used by banner icons in /static/markers/<dye>_banner.png. */
-export const DYES = [
-	"black",
-	"blue",
-	"brown",
-	"cyan",
-	"gray",
-	"green",
-	"light_blue",
-	"light_gray",
-	"lime",
-	"magenta",
-	"orange",
-	"pink",
-	"purple",
-	"red",
-	"white",
-	"yellow",
-] as const;
-
-export type Dye = (typeof DYES)[number];
-
-export const DYE_HEX: Record<Dye, string> = {
+export const DYE_HEX = {
 	black: "#1d1d21",
 	blue: "#4952cc",
 	brown: "#a55e2a",
@@ -37,4 +16,7 @@ export const DYE_HEX: Record<Dye, string> = {
 	red: "#e1372e",
 	white: "#eeeeee",
 	yellow: "#fed83d",
-};
+} as const;
+
+export type Dye = keyof typeof DYE_HEX;
+export const DYES = Object.keys(DYE_HEX) as [Dye, ...Dye[]];

@@ -1,11 +1,13 @@
-import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
+import { afterAll, describe, expect, test } from "bun:test";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { makeTestApp } from "./helpers";
+import { cleanupTempDirs, makeTempDir, makeTestApp } from "./helpers";
+
+afterAll(cleanupTempDirs);
 
 function makeDist() {
-	const dir = mkdtempSync(join(tmpdir(), "aomc-dist-"));
+	const dir = makeTempDir("aomc-dist-");
 	mkdirSync(join(dir, "assets"));
 	writeFileSync(join(dir, "index.html"), "<!doctype html><title>app</title>");
 	writeFileSync(join(dir, "assets", "app-abc123.js"), "console.log(1)");
@@ -16,11 +18,15 @@ function makeDist() {
 describe("static web app", () => {
 	test("serves index.html at / and for client-side routes", async () => {
 		const { app } = makeTestApp({ WEB_DIST: makeDist() });
-		for (const path of ["/", "/invite/abc", "/some/deep/link"]) {
+		for (const path of ["/invite/abc", "/some/deep/link"]) {
 			const res = await app.request(path);
 			expect(res.status).toBe(200);
 			expect(await res.text()).toContain("<title>app</title>");
 		}
+		// The root page also gets share tags (see html.test.ts), so only its shell is checked.
+		const root = await app.request("/");
+		expect(root.status).toBe(200);
+		expect(await root.text()).toStartWith("<!doctype html>");
 	});
 
 	test("serves files, with immutable caching for hashed assets", async () => {

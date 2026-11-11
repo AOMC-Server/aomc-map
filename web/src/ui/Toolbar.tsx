@@ -2,19 +2,22 @@ import { useEffect, useRef } from "preact/hooks";
 import { selectDimension } from "../controller";
 import {
 	activeTool,
-	canAdminister,
 	currentMap,
 	dimSlug,
-	historyPanelOpen,
-	layerPanelOpen,
-	mapPanelOpen,
+	isModerator,
 	rev,
+	type SidePanelName,
+	sidePanel,
 	type Tool,
-	toggleSidePanel,
 	visibleDimensions,
 } from "../state";
 import { uploadBusy, uploadOpen } from "../upload";
 import { LoginButton } from "./LoginButton";
+
+/** One side panel at a time; opening the one that is already open closes it. */
+const toggle = (name: SidePanelName) => {
+	sidePanel.value = sidePanel.value === name ? null : name;
+};
 
 function ToolButton(props: {
 	tool: Exclude<Tool, "none">;
@@ -78,32 +81,30 @@ export function Toolbar() {
 
 			<button
 				type="button"
-				class={`btn ${layerPanelOpen.value ? "active" : ""}`}
-				aria-pressed={layerPanelOpen.value}
-				onClick={() => toggleSidePanel("layers")}
+				class={`btn ${sidePanel.value === "layers" ? "active" : ""}`}
+				aria-pressed={sidePanel.value === "layers"}
+				onClick={() => toggle("layers")}
 			>
 				Layers
 			</button>
 
 			<button
 				type="button"
-				class={`btn ${historyPanelOpen.value || rev.value !== null ? "active" : ""}`}
-				aria-pressed={historyPanelOpen.value}
-				onClick={() => toggleSidePanel("history")}
+				class={`btn ${sidePanel.value === "history" || rev.value !== null ? "active" : ""}`}
+				aria-pressed={sidePanel.value === "history"}
+				onClick={() => toggle("history")}
 			>
 				History
 			</button>
 
-			{canAdminister.value && (
-				<button
-					type="button"
-					class={`btn ${mapPanelOpen.value ? "active" : ""}`}
-					aria-pressed={mapPanelOpen.value}
+			{isModerator.value && (
+				<a
+					class="btn"
+					href="/manage"
 					title="Settings, dimensions, members and invite links"
-					onClick={() => toggleSidePanel("map")}
 				>
 					Manage
-				</button>
+				</a>
 			)}
 
 			<div class="group">
@@ -111,11 +112,6 @@ export function Toolbar() {
 					tool="measure"
 					label="Measure"
 					title="Click two points to measure (Esc clears)"
-				/>
-				<ToolButton
-					tool="copy"
-					label="Copy coords"
-					title="Click to copy coordinates to the clipboard"
 				/>
 			</div>
 

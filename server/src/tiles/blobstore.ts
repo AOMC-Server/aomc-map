@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename } from "node:fs/promises";
+import { mkdir, readFile, rename, utimes } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomToken } from "../auth/tokens";
 
@@ -23,7 +23,12 @@ export function createBlobStore(root: string) {
 		async put(data: Uint8Array): Promise<string> {
 			const hash = createHash("sha256").update(data).digest("hex");
 			const target = path(hash);
-			if (await Bun.file(target).exists()) return hash;
+			if (await Bun.file(target).exists()) {
+				// Reused: refresh the age so scripts/gc-blobs.ts treats it as new.
+				const now = new Date();
+				await utimes(target, now, now);
+				return hash;
+			}
 			await mkdir(dirname(target), { recursive: true });
 			const tmp = `${target}.${randomToken(6)}.tmp`;
 			await Bun.write(tmp, data);

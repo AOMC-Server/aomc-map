@@ -1,6 +1,7 @@
 import type { FeatureType, Point } from "@aomc/shared/features";
-import { effect, signal } from "@preact/signals";
+import { signal } from "@preact/signals";
 import { BLOCK_CENTER } from "../map/featureLayer";
+import { isTyping } from "../map/input";
 import type { MapView } from "../map/MapView";
 
 /**
@@ -80,30 +81,23 @@ const toBlock = (map: MapView, sx: number, sy: number): Point => {
 	return [Math.floor(b.x), Math.floor(b.z)];
 };
 
-export function initDrawTool(map: MapView): () => void {
-	let cursor: { sx: number; sy: number } | null = null;
-	const disposers: (() => void)[] = [];
+/** Screen position of the pointer, for the rubber band line while placing vertices. */
+let pointer: { sx: number; sy: number } | null = null;
 
-	disposers.push(
-		map.on("move", (e) => {
-			cursor = e ? { sx: e.sx, sy: e.sy } : null;
-			if (drawing.value?.mode === "draw") map.invalidate();
-		}),
-		map.on("click", (e) => {
-			const d = drawing.value;
-			if (d?.mode !== "draw") return;
-			const p = toBlock(map, e.sx, e.sy);
-			if (d.type === "pin")
-				drawing.value = { ...d, points: [p], mode: "placed" };
-			else drawing.value = { ...d, points: [...d.points, p] };
-		}),
-		effect(() => {
-			drawing.value;
-			map.invalidate();
-		}),
-	);
+export function initDrawTool(map: MapView) {
+	map.on("move", (e) => {
+		pointer = e ? { sx: e.sx, sy: e.sy } : null;
+		if (drawing.value?.mode === "draw") map.invalidate();
+	});
+	map.on("click", (e) => {
+		const d = drawing.value;
+		if (d?.mode !== "draw") return;
+		const p = toBlock(map, e.sx, e.sy);
+		if (d.type === "pin") drawing.value = { ...d, points: [p], mode: "placed" };
+		else drawing.value = { ...d, points: [...d.points, p] };
+	});
 
-	map.setDragHandler((sx, sy) => {
+	map.dragHandler = (sx, sy) => {
 		const d = drawing.value;
 		if (!d) return null;
 		let best = -1;
@@ -128,68 +122,11 @@ export function initDrawTool(map: MapView): () => void {
 			},
 			end() {},
 		};
-	});
-	disposers.push(() => map.setDragHandler(null));
+	};
 
-	map.setOverlay("draw", (ctx) => {
+	window.addEventListener("keydown", (e) => {
 		const d = drawing.value;
-		if (!d || d.points.length === 0) return;
-		const pts = d.points.map(([x, z]) =>
-			map.blockToScreen(x + BLOCK_CENTER, z + BLOCK_CENTER),
-		);
-		ctx.save();
-		ctx.lineJoin = "round";
-		ctx.lineCap = "round";
-		if (d.type !== "pin") {
-			ctx.beginPath();
-			for (const [i, p] of pts.entries()) {
-				if (i === 0) ctx.moveTo(p.x, p.y);
-				else ctx.lineTo(p.x, p.y);
-			}
-			if (d.type === "polygon" && d.mode === "placed") ctx.closePath();
-			ctx.strokeStyle = "#ffd23f";
-			ctx.lineWidth = 3;
-			ctx.stroke();
-			if (d.mode === "draw" && cursor) {
-				const last = pts[pts.length - 1];
-				if (last) {
-					ctx.setLineDash([6, 5]);
-					ctx.lineWidth = 2;
-					ctx.beginPath();
-					ctx.moveTo(last.x, last.y);
-					ctx.lineTo(cursor.sx, cursor.sy);
-					if (d.type === "polygon" && pts.length >= 2)
-						ctx.lineTo(
-							(pts[0] as { x: number }).x,
-							(pts[0] as { y: number }).y,
-						);
-					ctx.stroke();
-					ctx.setLineDash([]);
-				}
-			}
-		}
-		pts.forEach((p, i) => {
-			ctx.beginPath();
-			ctx.arc(p.x, p.y, HANDLE_RADIUS, 0, Math.PI * 2);
-			ctx.fillStyle = i === 0 && d.type !== "pin" ? "#3fe08a" : "#fff";
-			ctx.fill();
-			ctx.lineWidth = 2;
-			ctx.strokeStyle = "#000";
-			ctx.stroke();
-		});
-		ctx.restore();
-	});
-	disposers.push(() => map.setOverlay("draw", null));
-
-	const onKey = (e: KeyboardEvent) => {
-		const d = drawing.value;
-		if (!d) return;
-		const t = e.target as HTMLElement | null;
-		if (
-			t &&
-			(t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))
-		)
-			return;
+		if (!d || isTyping(e.target)) return;
 		if (e.key === "Enter") {
 			if (finishDraw()) e.preventDefault();
 		} else if (e.key === "Escape") {
@@ -199,11 +136,52 @@ export function initDrawTool(map: MapView): () => void {
 			undoPoint();
 			e.preventDefault();
 		}
-	};
-	window.addEventListener("keydown", onKey);
-	disposers.push(() => window.removeEventListener("keydown", onKey));
+	});
+}
 
-	return () => {
-		for (const dispose of disposers) dispose();
-	};
+/** Overlay: the geometry being placed, with vertex handles. */
+export function drawGeometry(ctx: CanvasRenderingContext2D, map: MapView) {
+	const d = drawing.value;
+	if (!d || d.points.length === 0) return;
+	const pts = d.points.map(([x, z]) =>
+		map.blockToScreen(x + BLOCK_CENTER, z + BLOCK_CENTER),
+	);
+	ctx.save();
+	ctx.lineJoin = "round";
+	ctx.lineCap = "round";
+	if (d.type !== "pin") {
+		ctx.beginPath();
+		for (const [i, p] of pts.entries()) {
+			if (i === 0) ctx.moveTo(p.x, p.y);
+			else ctx.lineTo(p.x, p.y);
+		}
+		if (d.type === "polygon" && d.mode === "placed") ctx.closePath();
+		ctx.strokeStyle = "#ffd23f";
+		ctx.lineWidth = 3;
+		ctx.stroke();
+		if (d.mode === "draw" && pointer) {
+			const last = pts[pts.length - 1];
+			if (last) {
+				ctx.setLineDash([6, 5]);
+				ctx.lineWidth = 2;
+				ctx.beginPath();
+				ctx.moveTo(last.x, last.y);
+				ctx.lineTo(pointer.sx, pointer.sy);
+				if (d.type === "polygon" && pts.length >= 2)
+					ctx.lineTo((pts[0] as { x: number }).x, (pts[0] as { y: number }).y);
+				ctx.stroke();
+				ctx.setLineDash([]);
+			}
+		}
+	}
+	pts.forEach((p, i) => {
+		ctx.beginPath();
+		ctx.arc(p.x, p.y, HANDLE_RADIUS, 0, Math.PI * 2);
+		ctx.fillStyle = i === 0 && d.type !== "pin" ? "#3fe08a" : "#fff";
+		ctx.fill();
+		ctx.lineWidth = 2;
+		ctx.strokeStyle = "#000";
+		ctx.stroke();
+	});
+	ctx.restore();
 }

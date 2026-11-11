@@ -1,6 +1,7 @@
 import { floorDiv } from "@aomc/shared";
 import { eq } from "drizzle-orm";
-import { dimensions, maps, revisions } from "../db/schema";
+import { dimensions, revisions } from "../db/schema";
+import { loadMap } from "../permissions";
 import {
 	decodeRaw,
 	emptyTile,
@@ -8,7 +9,12 @@ import {
 	overRegion,
 	storeTile,
 } from "../tiles/compose";
-import { type Bbox, commitRevision, tileHashAt } from "../tiles/history";
+import {
+	type Bbox,
+	commitRevision,
+	tileHashAt,
+	tilePatches,
+} from "../tiles/history";
 import { buildPyramid, type TileWrite, tileKey } from "../tiles/pyramid";
 import { blackToAlpha } from "../tiles/xaero";
 import {
@@ -32,8 +38,7 @@ export async function processUpload(
 		.where(eq(revisions.id, revisionId));
 	if (!revision || revision.dimensionId === null)
 		throw new Error("revision not found");
-	const [map] = await db.select().from(maps).where(eq(maps.id, revision.mapId));
-	if (!map) throw new Error("map not found");
+	const map = await loadMap(db);
 	const [dim] = await db
 		.select()
 		.from(dimensions)
@@ -90,14 +95,30 @@ export async function processUpload(
 	}
 	if (patches.length === 0) throw new Error("upload contains no map data");
 
-	// Composite each patch over the tile as of the current head.
+	// Composite each patch into its tile. Normally that is over the tile as of the current head;
+	// but if an export made later than this one already covers the tile, this (older) export
+	// goes underneath it, so the tile is replayed from every patch in export order.
+	const exportedAt = revision.exportedAt ?? revision.createdAt;
 	const changed = new Map<string, string | null>();
 	const writes: TileWrite[] = [];
 	n = 0;
 	for (const p of patches) {
 		const current = await tileHashAt(db, dim.id, 0, p.x, p.y, head);
-		const canvas = current ? await loadTile(blobs, current, T) : emptyTile(T);
-		overRegion(canvas, T, await loadTile(blobs, p.hash, T), T, T, 0, 0);
+		const live = (await tilePatches(db, dim.id, p.x, p.y)).filter(
+			(q) => !q.reverted,
+		);
+		let canvas: Buffer;
+		if (live.some((q) => q.at > exportedAt)) {
+			const stack = [...live, { id: revisionId, at: exportedAt, hash: p.hash }];
+			stack.sort((a, b) => a.at - b.at || a.id - b.id);
+			canvas = emptyTile(T);
+			for (const q of stack) {
+				overRegion(canvas, T, await loadTile(blobs, q.hash, T), T, T, 0, 0);
+			}
+		} else {
+			canvas = current ? await loadTile(blobs, current, T) : emptyTile(T);
+			overRegion(canvas, T, await loadTile(blobs, p.hash, T), T, T, 0, 0);
+		}
 		const hash = await storeTile(blobs, canvas, T);
 		if (hash !== current) {
 			changed.set(tileKey(p.x, p.y), hash);
@@ -125,7 +146,6 @@ export async function processUpload(
 	};
 	say("publishing");
 	commitRevision(db, {
-		mapId: map.id,
 		revisionId,
 		rev: head + 1,
 		dimensionId: dim.id,

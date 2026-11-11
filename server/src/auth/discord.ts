@@ -1,4 +1,3 @@
-import { eq } from "drizzle-orm";
 import type { Db } from "../db/client";
 import { users } from "../db/schema";
 import type { Env } from "../env";
@@ -71,23 +70,16 @@ function avatarUrl(profile: DiscordProfile): string | null {
 		: null;
 }
 
-export async function upsertUser(db: Db, profile: DiscordProfile) {
+export function upsertUser(db: Db, profile: DiscordProfile) {
 	const now = Date.now();
 	const values = {
 		username: profile.username,
 		avatarUrl: avatarUrl(profile),
 		lastLoginAt: now,
 	};
-	const [existing] = await db
-		.select({ id: users.id })
-		.from(users)
-		.where(eq(users.id, profile.id));
-	if (existing) {
-		await db.update(users).set(values).where(eq(users.id, profile.id));
-	} else {
-		await db
-			.insert(users)
-			.values({ id: profile.id, createdAt: now, ...values });
-	}
-	await applyPendingOwners(db, profile.id);
+	db.insert(users)
+		.values({ id: profile.id, createdAt: now, ...values })
+		.onConflictDoUpdate({ target: users.id, set: values })
+		.run();
+	applyPendingOwners(db, profile.id);
 }

@@ -1,11 +1,10 @@
 import { DYE_HEX } from "@aomc/shared/colors";
 import { mapView } from "../controller";
+import { featureTitle, TYPE_LABEL } from "../featureInfo";
 import { deleteFeature } from "../layers";
 import { canEditMap, editor, layersData, popup, view } from "../state";
 import { featureHistoryFor } from "./FeatureHistory";
 import { PopupText } from "./PopupText";
-
-const TYPE_LABEL = { pin: "Pin", line: "Line", polygon: "Area" } as const;
 
 /** DOM popup for the clicked feature, anchored to the map position and following pans and zooms. */
 export function Popup() {
@@ -33,11 +32,11 @@ export function Popup() {
 			class={`popup ${placeBelow ? "below" : ""}`}
 			style={{ left: `${left}px`, top: `${top}px` }}
 			role="dialog"
-			aria-label={feature.name || TYPE_LABEL[feature.type]}
+			aria-label={featureTitle(feature)}
 		>
 			<button
 				type="button"
-				class="popup-close"
+				class="plain popup-close"
 				aria-label="Close"
 				onClick={() => (popup.value = null)}
 			>
@@ -45,7 +44,7 @@ export function Popup() {
 			</button>
 			<h3>
 				<span class="swatch" style={{ background: color }} />
-				{feature.name || TYPE_LABEL[feature.type]}
+				{featureTitle(feature)}
 			</h3>
 			<div class="popup-meta">
 				{TYPE_LABEL[feature.type]} · {layer.name}
@@ -72,12 +71,7 @@ export function Popup() {
 							type="button"
 							class="btn"
 							onClick={async () => {
-								if (
-									!confirm(
-										`Delete "${feature.name || TYPE_LABEL[feature.type]}"?`,
-									)
-								)
-									return;
+								if (!confirm(`Delete "${featureTitle(feature)}"?`)) return;
 								popup.value = null;
 								await deleteFeature(feature.id);
 							}}
@@ -92,7 +86,7 @@ export function Popup() {
 					onClick={() => {
 						featureHistoryFor.value = {
 							featureId: feature.id,
-							title: feature.name || TYPE_LABEL[feature.type],
+							title: featureTitle(feature),
 						};
 					}}
 				>

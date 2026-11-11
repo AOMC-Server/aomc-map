@@ -11,16 +11,15 @@ CREATE TABLE `api_tokens` (
 CREATE UNIQUE INDEX `api_tokens_token_hash_unique` ON `api_tokens` (`token_hash`);--> statement-breakpoint
 CREATE TABLE `dimensions` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	`map_id` integer NOT NULL,
 	`slug` text NOT NULL,
 	`name` text NOT NULL,
 	`sort_order` integer DEFAULT 0 NOT NULL,
 	`archived` integer DEFAULT false NOT NULL,
-	`created_at` integer NOT NULL,
-	FOREIGN KEY (`map_id`) REFERENCES `maps`(`id`) ON UPDATE no action ON DELETE cascade
+	`scale` real,
+	`created_at` integer NOT NULL
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `dimensions_map_slug` ON `dimensions` (`map_id`,`slug`);--> statement-breakpoint
+CREATE UNIQUE INDEX `dimensions_slug_unique` ON `dimensions` (`slug`);--> statement-breakpoint
 CREATE TABLE `feature_revisions` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`feature_id` integer NOT NULL,
@@ -47,7 +46,6 @@ CREATE TABLE `features` (
 CREATE TABLE `invites` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
 	`token_hash` text NOT NULL,
-	`map_id` integer,
 	`layer_id` integer,
 	`role` text NOT NULL,
 	`created_by` text NOT NULL,
@@ -55,10 +53,8 @@ CREATE TABLE `invites` (
 	`max_uses` integer,
 	`uses` integer DEFAULT 0 NOT NULL,
 	`revoked` integer DEFAULT false NOT NULL,
-	FOREIGN KEY (`map_id`) REFERENCES `maps`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`layer_id`) REFERENCES `layers`(`id`) ON UPDATE no action ON DELETE cascade,
-	FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action,
-	CONSTRAINT "invites_one_target" CHECK(("invites"."map_id" IS NOT NULL) + ("invites"."layer_id" IS NOT NULL) = 1)
+	FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
 CREATE UNIQUE INDEX `invites_token_hash_unique` ON `invites` (`token_hash`);--> statement-breakpoint
@@ -68,10 +64,7 @@ CREATE TABLE `jobs` (
 	`payload` text NOT NULL,
 	`status` text DEFAULT 'pending' NOT NULL,
 	`attempts` integer DEFAULT 0 NOT NULL,
-	`created_at` integer NOT NULL,
-	`started_at` integer,
-	`finished_at` integer,
-	`error` text
+	`created_at` integer NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE `layer_members` (
@@ -85,58 +78,41 @@ CREATE TABLE `layer_members` (
 --> statement-breakpoint
 CREATE TABLE `layers` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	`map_id` integer NOT NULL,
 	`dimension_id` integer NOT NULL,
 	`name` text NOT NULL,
 	`color` text NOT NULL,
 	`hidden_by_default` integer DEFAULT false NOT NULL,
-	`visibility` text DEFAULT 'inherit' NOT NULL,
+	`visibility` text DEFAULT 'public' NOT NULL,
 	`sort_order` integer DEFAULT 0 NOT NULL,
 	`created_by` text NOT NULL,
 	`created_at` integer NOT NULL,
 	`deleted_at` integer,
-	FOREIGN KEY (`map_id`) REFERENCES `maps`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`dimension_id`) REFERENCES `dimensions`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`created_by`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE INDEX `layers_map` ON `layers` (`map_id`,`dimension_id`);--> statement-breakpoint
-CREATE TABLE `map_members` (
-	`map_id` integer NOT NULL,
-	`user_id` text NOT NULL,
+CREATE INDEX `layers_dimension` ON `layers` (`dimension_id`);--> statement-breakpoint
+CREATE TABLE `map_info` (
+	`id` integer PRIMARY KEY NOT NULL,
+	`name` text NOT NULL,
+	`tile_size` integer NOT NULL,
+	`head_rev` integer DEFAULT 0 NOT NULL,
+	`created_at` integer NOT NULL
+);
+--> statement-breakpoint
+CREATE TABLE `members` (
+	`user_id` text PRIMARY KEY NOT NULL,
 	`role` text NOT NULL,
-	`added_by` text,
 	`created_at` integer NOT NULL,
-	PRIMARY KEY(`map_id`, `user_id`),
-	FOREIGN KEY (`map_id`) REFERENCES `maps`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`user_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE cascade
 );
 --> statement-breakpoint
-CREATE TABLE `maps` (
-	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	`slug` text NOT NULL,
-	`name` text NOT NULL,
-	`owner_id` text,
-	`visibility` text DEFAULT 'private' NOT NULL,
-	`is_default` integer DEFAULT false NOT NULL,
-	`tile_size` integer NOT NULL,
-	`head_rev` integer DEFAULT 0 NOT NULL,
-	`created_at` integer NOT NULL,
-	FOREIGN KEY (`owner_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action
-);
---> statement-breakpoint
-CREATE UNIQUE INDEX `maps_slug_unique` ON `maps` (`slug`);--> statement-breakpoint
-CREATE UNIQUE INDEX `maps_one_default` ON `maps` (`is_default`) WHERE "maps"."is_default" = 1;--> statement-breakpoint
 CREATE TABLE `pending_owners` (
-	`map_id` integer NOT NULL,
-	`discord_id` text NOT NULL,
-	PRIMARY KEY(`map_id`, `discord_id`),
-	FOREIGN KEY (`map_id`) REFERENCES `maps`(`id`) ON UPDATE no action ON DELETE cascade
+	`discord_id` text PRIMARY KEY NOT NULL
 );
 --> statement-breakpoint
 CREATE TABLE `revisions` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	`map_id` integer NOT NULL,
 	`rev` integer,
 	`kind` text NOT NULL,
 	`dimension_id` integer,
@@ -152,12 +128,11 @@ CREATE TABLE `revisions` (
 	`reverted` integer DEFAULT false NOT NULL,
 	`created_at` integer NOT NULL,
 	`completed_at` integer,
-	FOREIGN KEY (`map_id`) REFERENCES `maps`(`id`) ON UPDATE no action ON DELETE cascade,
 	FOREIGN KEY (`dimension_id`) REFERENCES `dimensions`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`author_id`) REFERENCES `users`(`id`) ON UPDATE no action ON DELETE no action
 );
 --> statement-breakpoint
-CREATE UNIQUE INDEX `revisions_map_rev` ON `revisions` (`map_id`,`rev`);--> statement-breakpoint
+CREATE UNIQUE INDEX `revisions_rev_unique` ON `revisions` (`rev`);--> statement-breakpoint
 CREATE TABLE `sessions` (
 	`id` text PRIMARY KEY NOT NULL,
 	`user_id` text NOT NULL,

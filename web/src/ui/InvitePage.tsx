@@ -1,17 +1,13 @@
+import type { InferResponseType } from "hono/client";
 import { useEffect, useState } from "preact/hooks";
-import { api } from "../api";
+import { api, attempt, loginUrl } from "../api";
 import { loadUser } from "../controller";
 import { user } from "../state";
 
-type Preview = {
-	kind: "map" | "layer";
-	role: string;
-	mapName: string;
-	mapSlug: string;
-	layerName: string | null;
-	inviterName: string;
-	alreadyMember: boolean;
-};
+type Preview = InferResponseType<
+	(typeof api.api.invites)[":token"]["$get"],
+	200
+>["invite"];
 
 type State =
 	| { phase: "loading" }
@@ -25,8 +21,6 @@ export const inviteTokenFromPath = (path: string): string | null => {
 	return m ? decodeURIComponent(m[1] as string) : null;
 };
 
-const mapLink = (slug: string) => `/?map=${encodeURIComponent(slug)}`;
-
 /** /invite/<token>: log in if needed, accept, and land on the map. */
 export function InvitePage(props: { token: string }) {
 	const { token } = props;
@@ -35,36 +29,29 @@ export function InvitePage(props: { token: string }) {
 
 	const accept = async (invite: Preview) => {
 		setState({ phase: "accepting", invite });
-		const res = await api.api.invites[":token"].accept.$post({
-			param: { token },
-		});
-		if (res.ok) {
-			location.replace(mapLink(invite.mapSlug));
+		const result = await attempt(() =>
+			api.api.invites[":token"].accept.$post({ param: { token } }),
+		);
+		if (result.ok) {
+			location.replace("/");
 			return;
 		}
-		const body = (await res.json().catch(() => ({}))) as { error?: string };
-		setState({
-			phase: "failed",
-			invite,
-			message: body.error ?? `Could not accept (${res.status}).`,
-		});
+		setState({ phase: "failed", invite, message: result.error });
 	};
 
 	useEffect(() => {
 		void (async () => {
 			await loadUser();
-			const res = await api.api.invites[":token"].$get({ param: { token } });
-			if (!res.ok) {
-				const body = (await res.json().catch(() => ({}))) as { error?: string };
-				setState({
-					phase: "invalid",
-					message: body.error ?? "This invite link is not valid.",
-				});
+			const result = await attempt(() =>
+				api.api.invites[":token"].$get({ param: { token } }),
+			);
+			if (!result.ok) {
+				setState({ phase: "invalid", message: result.error });
 				return;
 			}
-			const { invite } = (await res.json()) as { invite: Preview };
+			const { invite } = result.body;
 			if (invite.alreadyMember) {
-				location.replace(mapLink(invite.mapSlug));
+				location.replace("/");
 				return;
 			}
 			setState({ phase: "ready", invite });
@@ -72,7 +59,7 @@ export function InvitePage(props: { token: string }) {
 		})();
 	}, [token]);
 
-	const loginHref = `/auth/discord?returnTo=${encodeURIComponent(`/invite/${token}?accept=1`)}`;
+	const loginHref = loginUrl(`/invite/${token}?accept=1`);
 
 	return (
 		<main class="invite-page">

@@ -6,10 +6,10 @@ import {
 	screenToBlock,
 	type View,
 	zoomAt,
-} from "./camera";
+} from "@aomc/shared/view";
 import { FeatureLayer, type Hit, type RenderLayer } from "./featureLayer";
 import type { Bounds } from "./geometry";
-import { type DragSession, Input, type InputHost } from "./input";
+import { type DragSession, Input } from "./input";
 import { Renderer } from "./renderer";
 import { TileLayer, type TileSource } from "./tileLayer";
 
@@ -32,14 +32,18 @@ const DEFAULT_VIEW: View = { centerX: 0, centerZ: 0, zoom: 2 };
  */
 export class MapView {
 	readonly canvas = document.createElement("canvas");
+	readonly maxZoom: number;
+	/** Drawing hooks (css pixel coordinates) that run after the tiles, in order. */
+	readonly overlays: Overlay[] = [];
+	/** Lets a tool claim pointer-downs (return a session to drag, or null to pan as usual). */
+	dragHandler: DragHandler | null = null;
+	doubleClickZoom = true;
 	private ctx: CanvasRenderingContext2D;
 	private view: View;
 	private size: Size = { width: 1, height: 1 };
 	private dpr = 1;
 	private tiles: TileLayer;
 	private renderer: Renderer;
-	private input: Input;
-	private observer: ResizeObserver;
 	private listeners: {
 		[K in keyof MapEvents]: Set<(e: MapEvents[K]) => void>;
 	} = {
@@ -48,14 +52,9 @@ export class MapView {
 		hover: new Set(),
 		viewchange: new Set(),
 	};
-	private overlays = new Map<string, Overlay>();
 	private features: FeatureLayer;
-	private dragHandler: DragHandler | null = null;
 	private hoverKey: string | null = null;
 	private baseCursor = "grab";
-	private stopAnimation: (() => void) | null = null;
-	private dblClickZoom = true;
-	readonly maxZoom: number;
 
 	constructor(
 		private container: HTMLElement,
@@ -80,38 +79,9 @@ export class MapView {
 			onChange: () => this.renderer.invalidate(),
 		});
 		this.features = new FeatureLayer(() => this.renderer.invalidate());
-		this.input = new Input(this.canvas, this.host());
-		this.observer = new ResizeObserver(() => this.resize());
-		this.observer.observe(container);
+		new Input(this.canvas, this);
+		new ResizeObserver(() => this.resize()).observe(container);
 		this.resize();
-	}
-
-	private host(): InputHost {
-		return {
-			getView: () => this.view,
-			getSize: () => this.size,
-			setView: (v) => this.setView(v),
-			clampZoom: (z) => clampZoom(z, this.maxZoom),
-			stopAnimation: () => this.cancelAnimation(),
-			tweenTo: (target, ms, anchor) => this.tweenTo(target, ms, anchor),
-			inertia: (vx, vy) => this.inertia(vx, vy),
-			pointer: (sx, sy, kind) => {
-				const b = this.screenToBlock(sx, sy);
-				const e = { ...b, sx, sy };
-				const hit = this.hitTest(sx, sy);
-				if (kind === "click") this.emit("click", { ...e, hit });
-				else {
-					this.emit("move", e);
-					this.updateHover(hit, sx, sy);
-				}
-			},
-			pointerLeft: () => {
-				this.emit("move", null);
-				this.updateHover(null, 0, 0);
-			},
-			doubleClickZoomEnabled: () => this.dblClickZoom,
-			beginDrag: (sx, sy) => this.dragHandler?.(sx, sy) ?? null,
-		};
 	}
 
 	// Public API
@@ -139,6 +109,10 @@ export class MapView {
 		return { ...this.size };
 	}
 
+	clampZoom(zoom: number): number {
+		return clampZoom(zoom, this.maxZoom);
+	}
+
 	screenToBlock(sx: number, sy: number) {
 		return screenToBlock(this.view, this.size, sx, sy);
 	}
@@ -147,11 +121,9 @@ export class MapView {
 		return blockToScreen(this.view, this.size, x, z);
 	}
 
-	setTileSource(
-		source: TileSource | null,
-		opts: { keepPrevious?: boolean } = {},
-	) {
-		this.tiles.setSource(source, opts.keepPrevious);
+	/** keepPrevious: keep showing the old images until the new ones arrive (same content, newer revision). */
+	setTileSource(source: TileSource, keepPrevious = false) {
+		this.tiles.setSource(source, keepPrevious);
 	}
 
 	on<K extends keyof MapEvents>(
@@ -160,17 +132,6 @@ export class MapView {
 	): () => void {
 		this.listeners[name].add(cb);
 		return () => this.listeners[name].delete(cb);
-	}
-
-	/** Registers a drawing hook (css pixel coordinates) that runs after the tiles. Pass null to remove. */
-	setOverlay(id: string, draw: Overlay | null) {
-		if (draw) this.overlays.set(id, draw);
-		else this.overlays.delete(id);
-		this.renderer.invalidate();
-	}
-
-	setDoubleClickZoom(enabled: boolean) {
-		this.dblClickZoom = enabled;
 	}
 
 	setCursor(cursor: string) {
@@ -189,23 +150,14 @@ export class MapView {
 		this.renderer.invalidate();
 	}
 
-	getFeatureBounds(id: number): Bounds | null {
-		return this.features.boundsOfFeature(id);
-	}
-
 	hitTest(sx: number, sy: number): Hit | null {
 		return this.features.hitTest(this.view, this.size, sx, sy);
-	}
-
-	/** Lets a tool claim pointer-downs (return a session to drag, or null to pan as usual). */
-	setDragHandler(handler: DragHandler | null) {
-		this.dragHandler = handler;
 	}
 
 	/** Moves and zooms so that `bounds` fits in the viewport with some padding. */
 	fitBounds(
 		bounds: Bounds,
-		opts: { padding?: number; closestZoom?: number; ms?: number } = {},
+		opts: { padding?: number; closestZoom?: number } = {},
 	) {
 		const pad = opts.padding ?? 80;
 		const w = Math.max(bounds.maxX - bounds.minX + 1, 1);
@@ -214,66 +166,48 @@ export class MapView {
 		const availH = Math.max(this.size.height - pad * 2, 50);
 		// zoom is log2(blocks per pixel); pick the one that fits both axes.
 		const fit = Math.log2(Math.max(w / availW, h / availH));
-		const zoom = Math.max(fit, opts.closestZoom ?? -2);
-		this.flyTo(
+		this.tweenTo(
 			{
 				centerX: (bounds.minX + bounds.maxX + 1) / 2,
 				centerZ: (bounds.minZ + bounds.maxZ + 1) / 2,
-				zoom,
+				zoom: Math.max(fit, opts.closestZoom ?? -2),
 			},
-			opts.ms ?? 450,
+			450,
 		);
-	}
-
-	/** Animates to a view, keeping `anchor` (screen px, default centre) stable while zooming. */
-	flyTo(target: Partial<View>, ms = 400) {
-		this.tweenTo({ ...this.view, ...stripUndefined(target) }, ms);
 	}
 
 	invalidate() {
 		this.renderer.invalidate();
 	}
 
-	destroy() {
-		this.cancelAnimation();
-		this.input.destroy();
-		this.observer.disconnect();
-		this.renderer.destroy();
-		this.tiles.dispose();
-		this.canvas.remove();
+	// Used by Input
+
+	/** Reports the pointer position: a click, or a move that updates the hover state. */
+	pointer(sx: number, sy: number, kind: "move" | "click") {
+		const e = { ...this.screenToBlock(sx, sy), sx, sy };
+		const hit = this.hitTest(sx, sy);
+		if (kind === "click") this.emit("click", { ...e, hit });
+		else {
+			this.emit("move", e);
+			this.updateHover(hit, sx, sy);
+		}
 	}
 
-	// Internals
-
-	private emit<K extends keyof MapEvents>(name: K, e: MapEvents[K]) {
-		for (const cb of this.listeners[name]) cb(e);
+	pointerLeft() {
+		this.emit("move", null);
+		this.updateHover(null, 0, 0);
 	}
 
-	private updateHover(hit: Hit | null, sx: number, sy: number) {
-		const key = hit
-			? hit.kind === "feature"
-				? `f${hit.feature.id}`
-				: `c${hit.bounds.minX},${hit.bounds.minZ},${hit.count}`
-			: null;
-		if (key === this.hoverKey) return;
-		this.hoverKey = key;
-		this.features.hoveredId = hit?.kind === "feature" ? hit.feature.id : null;
-		this.canvas.style.cursor = hit ? "pointer" : this.baseCursor;
-		this.renderer.invalidate();
-		this.emit("hover", { hit, sx, sy });
+	cancelAnimation() {
+		this.renderer.stopAnimation();
 	}
 
-	private cancelAnimation() {
-		this.stopAnimation?.();
-		this.stopAnimation = null;
-	}
-
-	private tweenTo(target: View, ms: number, anchor?: { x: number; y: number }) {
-		this.cancelAnimation();
+	/** Animates to a view, keeping `anchor` (screen px) stable while zooming. */
+	tweenTo(target: View, ms: number, anchor?: { x: number; y: number }) {
 		const from = this.view;
 		const to = { ...target, zoom: clampZoom(target.zoom, this.maxZoom) };
 		const began = performance.now();
-		this.stopAnimation = this.renderer.animate((now) => {
+		this.renderer.animate((now) => {
 			const t = Math.min((Math.max(now, began) - began) / ms, 1);
 			const e = 1 - (1 - t) ** 3;
 			const zoom = from.zoom + (to.zoom - from.zoom) * e;
@@ -297,10 +231,9 @@ export class MapView {
 		});
 	}
 
-	private inertia(vx: number, vy: number) {
-		this.cancelAnimation();
+	inertia(vx: number, vy: number) {
 		let last = performance.now();
-		this.stopAnimation = this.renderer.animate((now) => {
+		this.renderer.animate((now) => {
 			const dt = Math.min(now - last, 50);
 			last = now;
 			this.setView(panBy(this.view, vx * dt, vy * dt));
@@ -309,6 +242,26 @@ export class MapView {
 			vy *= Math.exp(-decay);
 			return Math.hypot(vx, vy) > 0.02;
 		});
+	}
+
+	// Internals
+
+	private emit<K extends keyof MapEvents>(name: K, e: MapEvents[K]) {
+		for (const cb of this.listeners[name]) cb(e);
+	}
+
+	private updateHover(hit: Hit | null, sx: number, sy: number) {
+		const key = hit
+			? hit.kind === "feature"
+				? `f${hit.feature.id}`
+				: `c${hit.bounds.minX},${hit.bounds.minZ},${hit.count}`
+			: null;
+		if (key === this.hoverKey) return;
+		this.hoverKey = key;
+		this.features.hoveredId = hit?.kind === "feature" ? hit.feature.id : null;
+		this.canvas.style.cursor = hit ? "pointer" : this.baseCursor;
+		this.renderer.invalidate();
+		this.emit("hover", { hit, sx, sy });
 	}
 
 	private resize() {
@@ -338,7 +291,7 @@ export class MapView {
 		this.tiles.draw(ctx, this.view, this.size, dpr);
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 		this.features.draw(ctx, this.view, this.size);
-		for (const overlay of this.overlays.values()) overlay(ctx, this);
+		for (const overlay of this.overlays) overlay(ctx, this);
 	}
 }
 

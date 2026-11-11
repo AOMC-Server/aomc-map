@@ -1,16 +1,16 @@
-import { and, desc, eq, inArray } from "drizzle-orm";
+import { desc, eq, sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { requireUser } from "../auth/session";
 import type { Db } from "../db/client";
 import { jobs, revisions, users } from "../db/schema";
-import { canModerate, loadMapAccess, loadMapAccessById } from "../permissions";
+import { canModerate } from "../permissions";
 import type { ProgressEvent } from "../progress";
 import type { AppEnv } from "../types";
+import { parseId } from "./util";
 
 const revisionFields = {
 	id: revisions.id,
-	mapId: revisions.mapId,
 	rev: revisions.rev,
 	kind: revisions.kind,
 	dimensionId: revisions.dimensionId,
@@ -26,6 +26,7 @@ const revisionFields = {
 	fileCount: revisions.fileCount,
 	reverted: revisions.reverted,
 	createdAt: revisions.createdAt,
+	exportedAt: revisions.exportedAt,
 	completedAt: revisions.completedAt,
 };
 
@@ -52,45 +53,30 @@ function loadRevision(db: Db, id: number) {
 		.get();
 }
 
-const parseId = (value: string | undefined) =>
-	/^\d+$/.test(value ?? "") ? Number(value) : NaN;
-
-/** GET /api/maps/:slug/revisions: newest first, for the history panel. */
-export const mapRevisionRoutes = new Hono<AppEnv>().get("/", async (c) => {
-	const access = await loadMapAccess(
-		c.var.db,
-		c.var.user,
-		c.req.param("slug") ?? "",
-	);
-	if (!access) return c.json({ error: "not found" }, 404);
-	const limit = Math.min(
-		Math.max(Number(c.req.query("limit")) || 200, 1),
-		1000,
-	);
-	const rows = await c.var.db
-		.select(revisionFields)
-		.from(revisions)
-		.innerJoin(users, eq(users.id, revisions.authorId))
-		.where(eq(revisions.mapId, access.map.id))
-		.orderBy(desc(revisions.id))
-		.limit(limit);
-	return c.json({ revisions: rows.map(serialize) });
-});
-
 export const revisionRoutes = new Hono<AppEnv>()
-	.get("/:id", async (c) => {
+	/** Newest first, for the history panel. */
+	.get("/", async (c) => {
+		const limit = Math.min(
+			Math.max(Number(c.req.query("limit")) || 200, 1),
+			1000,
+		);
+		const rows = await c.var.db
+			.select(revisionFields)
+			.from(revisions)
+			.innerJoin(users, eq(users.id, revisions.authorId))
+			.orderBy(desc(revisions.id))
+			.limit(limit);
+		return c.json({ revisions: rows.map(serialize) });
+	})
+	.get("/:id", (c) => {
 		const row = loadRevision(c.var.db, parseId(c.req.param("id")));
-		const access =
-			row && (await loadMapAccessById(c.var.db, c.var.user, row.mapId));
-		if (!row || !access) return c.json({ error: "not found" }, 404);
+		if (!row) return c.json({ error: "not found" }, 404);
 		return c.json({ revision: serialize(row) });
 	})
 	.get("/:id/events", async (c) => {
 		const { db, svc } = c.var;
 		const id = parseId(c.req.param("id"));
-		const row = loadRevision(db, id);
-		const access = row && (await loadMapAccessById(db, c.var.user, row.mapId));
-		if (!row || !access) return c.json({ error: "not found" }, 404);
+		if (!loadRevision(db, id)) return c.json({ error: "not found" }, 404);
 
 		return streamSSE(c, async (stream) => {
 			let chain: Promise<unknown> = Promise.resolve();
@@ -121,64 +107,45 @@ export const revisionRoutes = new Hono<AppEnv>()
 			unsubscribe();
 		});
 	})
-	.post("/:id/revert", requireUser, (c) => startRevert(c, "revert"))
-	.post("/:id/unrevert", requireUser, (c) => startRevert(c, "unrevert"));
+	/**
+	 * Deletes an upload from the map and from all of its history (moderators). It cannot be
+	 * undone; the files can simply be uploaded again. A failed upload has nothing to undo and is
+	 * just removed; a finished one is erased by a background job.
+	 */
+	.delete("/:id", requireUser, async (c) => {
+		const { db, svc } = c.var;
+		if (!canModerate(c.var.role)) return c.json({ error: "forbidden" }, 403);
+		const id = parseId(c.req.param("id"));
+		const [target] = await db
+			.select()
+			.from(revisions)
+			.where(eq(revisions.id, id));
+		if (target?.kind !== "upload") {
+			return c.json({ error: "not found" }, 404);
+		}
+		if (target.status === "pending" || target.status === "processing") {
+			return c.json({ error: "this upload is still being processed" }, 409);
+		}
 
-async function startRevert(
-	c: import("hono").Context<AppEnv>,
-	kind: "revert" | "unrevert",
-) {
-	const { db, svc } = c.var;
-	const user = c.var.user as NonNullable<typeof c.var.user>;
-	const targetId = parseId(c.req.param("id"));
-	const [target] = await db
-		.select()
-		.from(revisions)
-		.where(eq(revisions.id, targetId));
-	const access = target && (await loadMapAccessById(db, user, target.mapId));
-	if (!target || !access) return c.json({ error: "not found" }, 404);
-	if (!canModerate(access.role)) return c.json({ error: "forbidden" }, 403);
-	if (target.kind !== "upload" || target.status !== "done") {
-		return c.json({ error: "only finished uploads can be reverted" }, 400);
-	}
-	if (target.reverted !== (kind === "unrevert")) {
-		return c.json(
-			{ error: kind === "revert" ? "already reverted" : "not reverted" },
-			409,
-		);
-	}
-	const [inFlight] = await db
-		.select({ id: revisions.id })
-		.from(revisions)
-		.where(
-			and(
-				eq(revisions.targetRevisionId, targetId),
-				inArray(revisions.status, ["pending", "processing"]),
-			),
-		);
-	if (inFlight)
-		return c.json({ error: "another revert is already pending" }, 409);
+		if (target.status === "failed") {
+			db.transaction((tx) => {
+				tx.delete(jobs)
+					.where(sql`json_extract(${jobs.payload}, '$.revisionId') = ${id}`)
+					.run();
+				tx.delete(revisions).where(eq(revisions.id, id)).run();
+			});
+			return c.json({ ok: true });
+		}
 
-	const created = db.transaction((tx) => {
-		const revision = tx
-			.insert(revisions)
-			.values({
-				mapId: target.mapId,
-				kind,
-				dimensionId: target.dimensionId,
-				authorId: user.id,
-				targetRevisionId: targetId,
-			})
-			.returning({ id: revisions.id })
-			.get();
-		tx.insert(jobs)
-			.values({
-				type: "apply_revert",
-				payload: { revisionId: revision.id, targetId },
-			})
-			.run();
-		return revision;
+		db.transaction((tx) => {
+			tx.update(revisions)
+				.set({ status: "processing", error: null })
+				.where(eq(revisions.id, id))
+				.run();
+			tx.insert(jobs)
+				.values({ type: "erase_upload", payload: { revisionId: id } })
+				.run();
+		});
+		svc.worker.kick();
+		return c.json({ ok: true }, 202);
 	});
-	svc.worker.kick();
-	return c.json({ revisionId: created.id }, 202);
-}

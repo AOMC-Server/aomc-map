@@ -1,13 +1,14 @@
-import type { Point } from "@aomc/shared/features";
 import { signal } from "@preact/signals";
 import { useEffect, useState } from "preact/hooks";
+import { dyeLabel, pointsOf, TYPE_LABEL } from "../featureInfo";
 import {
 	type FeatureHistoryEntry,
 	loadFeatureHistory,
 	restoreFeatureRevision,
 } from "../revisions";
 import { isModerator, popup } from "../state";
-import { dyeLabel, formatTime } from "./format";
+import { formatTime } from "./format";
+import { Modal } from "./Modal";
 
 /** The feature whose revision list is open. */
 export const featureHistoryFor = signal<{
@@ -15,14 +16,17 @@ export const featureHistoryFor = signal<{
 	title: string;
 } | null>(null);
 
-const TYPE_LABEL = { pin: "Pin", line: "Line", polygon: "Area" } as const;
+const close = () => {
+	featureHistoryFor.value = null;
+};
 
 function summary(e: FeatureHistoryEntry): string {
-	const g = e.geometry;
+	const points = pointsOf(e);
+	const first = points[0];
 	const where =
-		e.type === "pin"
-			? `at ${(g as Point)[0]}, ${(g as Point)[1]}`
-			: `${(g as Point[]).length} points`;
+		e.type === "pin" && first
+			? `at ${first[0]}, ${first[1]}`
+			: `${points.length} points`;
 	const color = e.color ? `, ${dyeLabel(e.color)}` : "";
 	return `${TYPE_LABEL[e.type]} "${e.name || "unnamed"}" ${where}${color}`;
 }
@@ -31,23 +35,19 @@ function summary(e: FeatureHistoryEntry): string {
 export function FeatureHistory() {
 	const target = featureHistoryFor.value;
 	const [entries, setEntries] = useState<FeatureHistoryEntry[] | null>(null);
+	const [failed, setFailed] = useState(false);
 	const [busy, setBusy] = useState(false);
 	const featureId = target?.featureId;
 
 	useEffect(() => {
 		if (featureId === undefined) return;
 		setEntries(null);
-		void loadFeatureHistory(featureId).then(setEntries);
+		setFailed(false);
+		void loadFeatureHistory(featureId).then((list) => {
+			setEntries(list);
+			setFailed(list === null);
+		});
 	}, [featureId]);
-
-	useEffect(() => {
-		if (!target) return;
-		const onKey = (e: KeyboardEvent) => {
-			if (e.key === "Escape") featureHistoryFor.value = null;
-		};
-		window.addEventListener("keydown", onKey);
-		return () => window.removeEventListener("keydown", onKey);
-	}, [target]);
 
 	if (!target) return null;
 
@@ -58,65 +58,51 @@ export function FeatureHistory() {
 		const ok = await restoreFeatureRevision(target.featureId, e.revisionId);
 		setBusy(false);
 		if (ok) {
-			featureHistoryFor.value = null;
+			close();
 			popup.value = null;
 		}
 	};
 
 	return (
-		<div class="modal-backdrop">
-			<div
-				class="modal"
-				role="dialog"
-				aria-modal="true"
-				aria-label="Feature history"
-			>
-				<button
-					type="button"
-					class="popup-close"
-					aria-label="Close"
-					onClick={() => (featureHistoryFor.value = null)}
-				>
-					×
-				</button>
-				<h2>History of “{target.title}”</h2>
-				{entries === null && <p class="muted">Loading…</p>}
-				<ul class="feature-history">
-					{entries?.map((e, i) => (
-						<li key={e.revisionId} class={e.deleted ? "deleted" : ""}>
-							<div class="fh-main">
-								<div>
-									{e.deleted ? (
-										<b>Deleted</b>
-									) : i === entries.length - 1 ? (
-										<b>Created</b>
-									) : (
-										<b>Edited</b>
-									)}
-									{i === 0 && <span class="badge">current</span>}
-								</div>
-								<div class="muted">{summary(e)}</div>
-								<div class="muted">
-									{e.authorName} · {formatTime(e.createdAt)}
-								</div>
+		<Modal label="Feature history" onClose={close}>
+			<h2>History of “{target.title}”</h2>
+			{entries === null && !failed && <p class="muted">Loading…</p>}
+			{failed && <p class="error-text">Could not load the history.</p>}
+			<ul class="feature-history">
+				{entries?.map((e, i) => (
+					<li key={e.revisionId} class={e.deleted ? "deleted" : ""}>
+						<div class="fh-main">
+							<div>
+								{e.deleted ? (
+									<b>Deleted</b>
+								) : i === entries.length - 1 ? (
+									<b>Created</b>
+								) : (
+									<b>Edited</b>
+								)}
+								{i === 0 && <span class="badge">current</span>}
 							</div>
-							{isModerator.value && i > 0 && (
-								<button
-									type="button"
-									class="btn small"
-									disabled={busy}
-									onClick={() => restore(e)}
-								>
-									Restore
-								</button>
-							)}
-						</li>
-					))}
-				</ul>
-				{!isModerator.value && entries && (
-					<p class="muted">Only moderators can restore earlier versions.</p>
-				)}
-			</div>
-		</div>
+							<div class="muted">{summary(e)}</div>
+							<div class="muted">
+								{e.authorName} · {formatTime(e.createdAt)}
+							</div>
+						</div>
+						{isModerator.value && i > 0 && (
+							<button
+								type="button"
+								class="btn small"
+								disabled={busy}
+								onClick={() => restore(e)}
+							>
+								Restore
+							</button>
+						)}
+					</li>
+				))}
+			</ul>
+			{!isModerator.value && entries && (
+				<p class="muted">Only moderators can restore earlier versions.</p>
+			)}
+		</Modal>
 	);
 }

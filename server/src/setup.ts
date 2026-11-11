@@ -1,6 +1,6 @@
 import { eq } from "drizzle-orm";
 import type { Db } from "./db/client";
-import { dimensions, mapMembers, maps, pendingOwners } from "./db/schema";
+import { dimensions, mapInfo, members, pendingOwners } from "./db/schema";
 import type { Env } from "./env";
 
 /** scale: overworld blocks per block of that dimension; null = coordinates are unrelated. */
@@ -12,60 +12,42 @@ const DEFAULT_DIMENSIONS = [
 ];
 
 /** Creates the map on first run. Safe to call on every boot. */
-export async function runSetup(db: Db, env: Env) {
-	const [existing] = await db.select({ id: maps.id }).from(maps).limit(1);
-	if (existing) return;
+export function runSetup(db: Db, env: Env) {
+	if (db.select().from(mapInfo).get()) return;
 
 	db.transaction((tx) => {
-		const map = tx
-			.insert(maps)
+		tx.insert(mapInfo)
 			.values({
-				slug: env.SETUP_MAP_SLUG,
+				id: 1,
 				name: env.SETUP_MAP_NAME,
 				tileSize: env.DEFAULT_TILE_SIZE,
 			})
-			.returning({ id: maps.id })
-			.get();
+			.run();
 		tx.insert(dimensions)
-			.values(
-				DEFAULT_DIMENSIONS.map((d, i) => ({
-					...d,
-					mapId: map.id,
-					sortOrder: i,
-				})),
-			)
+			.values(DEFAULT_DIMENSIONS.map((d, i) => ({ ...d, sortOrder: i })))
 			.run();
 		if (env.SETUP_OWNER_DISCORD_IDS.length > 0) {
 			tx.insert(pendingOwners)
-				.values(
-					env.SETUP_OWNER_DISCORD_IDS.map((discordId) => ({
-						mapId: map.id,
-						discordId,
-					})),
-				)
+				.values(env.SETUP_OWNER_DISCORD_IDS.map((discordId) => ({ discordId })))
 				.onConflictDoNothing()
 				.run();
 		}
 	});
 }
 
-/** Turns pending_owners rows for this Discord id into owner memberships. */
-export async function applyPendingOwners(db: Db, userId: string) {
+/** Turns a pending_owners row for this Discord id into an owner membership. */
+export function applyPendingOwners(db: Db, userId: string) {
 	db.transaction((tx) => {
 		const pending = tx
-			.select()
-			.from(pendingOwners)
+			.delete(pendingOwners)
 			.where(eq(pendingOwners.discordId, userId))
+			.returning()
 			.all();
-		for (const p of pending) {
-			tx.insert(mapMembers)
-				.values({ mapId: p.mapId, userId, role: "owner" })
-				.onConflictDoUpdate({
-					target: [mapMembers.mapId, mapMembers.userId],
-					set: { role: "owner" },
-				})
+		if (pending.length > 0) {
+			tx.insert(members)
+				.values({ userId, role: "owner" })
+				.onConflictDoUpdate({ target: members.userId, set: { role: "owner" } })
 				.run();
 		}
-		tx.delete(pendingOwners).where(eq(pendingOwners.discordId, userId)).run();
 	});
 }

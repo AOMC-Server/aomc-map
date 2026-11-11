@@ -3,8 +3,6 @@ import { z } from "zod";
 export const MAX_INVITE_HOURS = 24 * 365;
 export const DEFAULT_INVITE_HOURS = 24 * 7;
 
-/** Map invites never grant ownership; owners are added explicitly from the members panel. */
-export const mapInviteRoleSchema = z.enum(["viewer", "editor", "moderator"]);
 export const layerRoleSchema = z.enum(["viewer", "editor"]);
 export type LayerRole = z.infer<typeof layerRoleSchema>;
 
@@ -17,8 +15,8 @@ const expiry = z
 	.default(DEFAULT_INVITE_HOURS);
 const maxUses = z.number().int().min(1).max(1000).nullable().default(null);
 
+/** Map invites make moderators; owners are added explicitly from the members panel. */
 export const createMapInviteSchema = z.object({
-	role: mapInviteRoleSchema,
 	expiresInHours: expiry,
 	maxUses,
 });

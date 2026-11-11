@@ -1,57 +1,22 @@
-import { describe, expect, test } from "bun:test";
+import { afterAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
+import { invites, layerMembers, members } from "../src/db/schema";
 import {
-	dimensions,
-	invites,
-	layerMembers,
-	mapMembers,
-	maps,
-} from "../src/db/schema";
-import { runSetup } from "../src/setup";
-import { makeTestApp, makeUser } from "./helpers";
+	type Auth,
+	bootTiles,
+	call,
+	cleanupTempDirs,
+	makeUser,
+} from "./helpers";
 
-type Auth = { auth: Record<string, string> } | null;
+afterAll(cleanupTempDirs);
+
 type Ctx = Awaited<ReturnType<typeof boot>>;
 
-async function boot() {
-	const t = makeTestApp();
-	await runSetup(t.db, t.env);
-	const [map] = await t.db.select().from(maps);
-	const mapId = (map as { id: number }).id;
-	const owner = await makeUser(t.db, "owner", "Olive");
-	const editor = await makeUser(t.db, "editor", "Eddie");
-	const mod = await makeUser(t.db, "mod", "Moddy");
-	await t.db.insert(mapMembers).values([
-		{ mapId, userId: "owner", role: "owner" },
-		{ mapId, userId: "mod", role: "moderator" },
-	]);
-	return { ...t, mapId, owner, editor, mod };
-}
+const boot = () => bootTiles({}, { owner: true });
 
-async function call(
-	t: Ctx,
-	user: Auth,
-	method: string,
-	path: string,
-	body?: unknown,
-) {
-	const headers: Record<string, string> = { ...(user?.auth ?? {}) };
-	if (body !== undefined) headers["Content-Type"] = "application/json";
-	const res = await t.app.request(path, {
-		method,
-		headers,
-		body: body === undefined ? undefined : JSON.stringify(body),
-	});
-	const text = await res.text();
-	return { status: res.status, body: text ? JSON.parse(text) : null };
-}
-
-async function mapInvite(
-	t: Ctx,
-	body: object = { role: "editor" },
-	user: Auth = t.owner,
-) {
-	const res = await call(t, user, "POST", "/api/maps/aomc/invites", body);
+async function mapInvite(t: Ctx, body: object = {}, user: Auth = t.owner) {
+	const res = await call(t, user, "POST", "/api/invites", body);
 	expect(res.status).toBe(201);
 	return res.body as { invite: { id: number }; token: string; url: string };
 }
@@ -59,11 +24,11 @@ async function mapInvite(
 describe("map invites", () => {
 	test("owners create invites; the token is shown once and is never listed", async () => {
 		const t = await boot();
-		const made = await mapInvite(t, { role: "moderator" });
+		const made = await mapInvite(t);
 		expect(made.token.startsWith("inv_")).toBe(true);
 		expect(made.url).toBe(`http://localhost:3000/invite/${made.token}`);
 
-		const list = await call(t, t.owner, "GET", "/api/maps/aomc/invites");
+		const list = await call(t, t.owner, "GET", "/api/invites");
 		expect(list.status).toBe(200);
 		expect(list.body.invites).toHaveLength(1);
 		expect(list.body.invites[0]).toMatchObject({
@@ -72,7 +37,7 @@ describe("map invites", () => {
 			status: "active",
 			uses: 0,
 			maxUses: null,
-			createdByName: "Olive",
+			createdByName: "owner",
 		});
 		expect(JSON.stringify(list.body)).not.toContain(made.token);
 		const [stored] = await t.db.select().from(invites);
@@ -80,47 +45,39 @@ describe("map invites", () => {
 		expect(stored?.expiresAt).toBeGreaterThan(Date.now() + 6 * 24 * 3600_000);
 	});
 
-	test("input is validated and ownership cannot be handed out by link", async () => {
+	test("input is validated and a map invite always makes a moderator", async () => {
 		const t = await boot();
 		const post = (body: object) =>
-			call(t, t.owner, "POST", "/api/maps/aomc/invites", body);
-		expect((await post({ role: "owner" })).status).toBe(400);
-		expect((await post({ role: "admin" })).status).toBe(400);
-		expect((await post({ role: "editor", expiresInHours: 0 })).status).toBe(
-			400,
-		);
-		expect((await post({ role: "editor", maxUses: 0 })).status).toBe(400);
-		const forever = await post({
-			role: "viewer",
-			expiresInHours: null,
-			maxUses: 5,
-		});
+			call(t, t.owner, "POST", "/api/invites", body);
+		expect((await post({ expiresInHours: 0 })).status).toBe(400);
+		expect((await post({ maxUses: 0 })).status).toBe(400);
+		const forever = await post({ expiresInHours: null, maxUses: 5 });
 		expect(forever.status).toBe(201);
-		expect(forever.body.invite).toMatchObject({ expiresAt: null, maxUses: 5 });
+		expect(forever.body.invite).toMatchObject({
+			expiresAt: null,
+			maxUses: 5,
+			role: "moderator",
+		});
+		// A role in the body cannot hand out ownership.
+		const sneaky = await post({ role: "owner" });
+		expect(sneaky.body.invite.role).toBe("moderator");
 	});
 
 	test("only owners may list, create or revoke", async () => {
 		const t = await boot();
 		const made = await mapInvite(t);
-		for (const user of [t.mod, t.editor]) {
-			expect(
-				(await call(t, user, "GET", "/api/maps/aomc/invites")).status,
-			).toBe(403);
-			expect(
-				(
-					await call(t, user, "POST", "/api/maps/aomc/invites", {
-						role: "viewer",
-					})
-				).status,
-			).toBe(403);
+		const editor = await makeUser(t.db, "editor2");
+		for (const user of [t.mod, editor]) {
+			expect((await call(t, user, "GET", "/api/invites")).status).toBe(403);
+			expect((await call(t, user, "POST", "/api/invites", {})).status).toBe(
+				403,
+			);
 			expect(
 				(await call(t, user, "DELETE", `/api/invites/${made.invite.id}`))
 					.status,
 			).toBe(403);
 		}
-		expect((await call(t, null, "GET", "/api/maps/aomc/invites")).status).toBe(
-			401,
-		);
+		expect((await call(t, null, "GET", "/api/invites")).status).toBe(401);
 		expect(
 			(await call(t, null, "DELETE", `/api/invites/${made.invite.id}`)).status,
 		).toBe(401);
@@ -135,16 +92,15 @@ describe("map invites", () => {
 
 	test("preview works without logging in and reports what the invite is for", async () => {
 		const t = await boot();
-		const made = await mapInvite(t, { role: "moderator" });
+		const made = await mapInvite(t);
 		const res = await call(t, null, "GET", `/api/invites/${made.token}`);
 		expect(res.status).toBe(200);
-		expect(res.body.invite).toMatchObject({
+		expect(res.body.invite).toEqual({
 			kind: "map",
 			role: "moderator",
 			mapName: "AOMC",
-			mapSlug: "aomc",
 			layerName: null,
-			inviterName: "Olive",
+			inviterName: "owner",
 			alreadyMember: false,
 		});
 		const other = await makeUser(t.db, "someone");
@@ -170,9 +126,9 @@ describe("map invites", () => {
 		}
 	});
 
-	test("accepting needs an account, grants the role, and counts a use once", async () => {
+	test("accepting needs an account, makes a moderator, and counts a use once", async () => {
 		const t = await boot();
-		const made = await mapInvite(t, { role: "moderator" });
+		const made = await mapInvite(t);
 		expect(
 			(await call(t, null, "POST", `/api/invites/${made.token}/accept`)).status,
 		).toBe(401);
@@ -187,14 +143,13 @@ describe("map invites", () => {
 		expect(res.status).toBe(200);
 		expect(res.body).toEqual({
 			kind: "map",
-			mapSlug: "aomc",
 			role: "moderator",
 			alreadyMember: false,
 		});
 		const [member] = await t.db
 			.select()
-			.from(mapMembers)
-			.where(eq(mapMembers.userId, "fresh"));
+			.from(members)
+			.where(eq(members.userId, "fresh"));
 		expect(member?.role).toBe("moderator");
 
 		const again = await call(
@@ -203,52 +158,28 @@ describe("map invites", () => {
 			"POST",
 			`/api/invites/${made.token}/accept`,
 		);
-		expect(again.body.alreadyMember).toBe(true);
+		expect(again.body).toMatchObject({
+			alreadyMember: true,
+			role: "moderator",
+		});
 		const [row] = await t.db.select().from(invites);
 		expect(row?.uses).toBe(1);
 	});
 
-	test("roles only ever go up: no downgrades, and a viewer link adds nothing on a public map", async () => {
+	test("roles only ever go up: an owner accepting stays an owner", async () => {
 		const t = await boot();
-		const viewerLink = await mapInvite(t, { role: "viewer" });
-		const editorLink = await mapInvite(t, { role: "editor" });
-
-		// A logged-in non-member is already an implicit editor on a public map.
+		const made = await mapInvite(t);
 		const res = await call(
 			t,
-			t.editor,
+			t.owner,
 			"POST",
-			`/api/invites/${viewerLink.token}/accept`,
+			`/api/invites/${made.token}/accept`,
 		);
-		expect(res.body).toMatchObject({ alreadyMember: true, role: "editor" });
+		expect(res.body).toMatchObject({ alreadyMember: true, role: "owner" });
 		expect(
-			await t.db
-				.select()
-				.from(mapMembers)
-				.where(eq(mapMembers.userId, "editor")),
-		).toHaveLength(0);
-
-		// A moderator accepting an editor link stays a moderator.
-		const mod = await call(
-			t,
-			t.mod,
-			"POST",
-			`/api/invites/${editorLink.token}/accept`,
-		);
-		expect(mod.body).toMatchObject({ alreadyMember: true, role: "moderator" });
-
-		// An explicit viewer is upgraded.
-		const restricted = await makeUser(t.db, "restricted");
-		await t.db
-			.insert(mapMembers)
-			.values({ mapId: t.mapId, userId: "restricted", role: "viewer" });
-		const up = await call(
-			t,
-			restricted,
-			"POST",
-			`/api/invites/${editorLink.token}/accept`,
-		);
-		expect(up.body).toMatchObject({ alreadyMember: false, role: "editor" });
+			await t.db.select().from(members).where(eq(members.userId, "owner")),
+		).toEqual([expect.objectContaining({ role: "owner" })]);
+		expect((await t.db.select().from(invites))[0]?.uses).toBe(0);
 	});
 
 	test("revoked, expired and used-up invites are refused with 410", async () => {
@@ -260,7 +191,7 @@ describe("map invites", () => {
 			.update(invites)
 			.set({ expiresAt: Date.now() - 1000 })
 			.where(eq(invites.id, expired.invite.id));
-		const single = await mapInvite(t, { role: "moderator", maxUses: 1 });
+		const single = await mapInvite(t, { maxUses: 1 });
 
 		const a = await makeUser(t.db, "a");
 		const b = await makeUser(t.db, "b");
@@ -287,32 +218,15 @@ describe("map invites", () => {
 		);
 		expect(used.status).toBe(410);
 		expect(used.body.error).toContain("exhausted");
-		expect((await call(t, null, "GET", `/api/maps/aomc/invites`)).status).toBe(
-			401,
-		);
-		const list = await call(t, t.owner, "GET", "/api/maps/aomc/invites");
+		const list = await call(t, t.owner, "GET", "/api/invites");
 		expect(
 			list.body.invites.map((i: { status: string }) => i.status).sort(),
 		).toEqual(["exhausted", "expired", "revoked"]);
 	});
 });
 
-async function privateLayer(
-	t: Ctx,
-	opts: { mapSlug?: string; creator?: Auth } = {},
-) {
-	const slug = opts.mapSlug ?? "aomc";
-	const creator = opts.creator ?? t.editor;
-	const [map] = await t.db.select().from(maps).where(eq(maps.slug, slug));
-	await t.db
-		.insert(dimensions)
-		.values({
-			mapId: (map as { id: number }).id,
-			slug: "overworld",
-			name: "Overworld",
-		})
-		.onConflictDoNothing();
-	const res = await call(t, creator, "POST", `/api/maps/${slug}/layers`, {
+async function privateLayer(t: Ctx) {
+	const res = await call(t, t.editor, "POST", "/api/layers", {
 		dimension: "overworld",
 		name: "Secret",
 		color: "red",
@@ -322,9 +236,9 @@ async function privateLayer(
 	return res.body.layer as { id: number };
 }
 
-const layerNames = async (t: Ctx, user: Auth, slug = "aomc") =>
+const layerNames = async (t: Ctx, user: Auth) =>
 	(
-		(await call(t, user, "GET", `/api/maps/${slug}/layers`)).body.layers as {
+		(await call(t, user, "GET", "/api/layers")).body.layers as {
 			name: string;
 		}[]
 	).map((l) => l.name);
@@ -392,7 +306,6 @@ describe("layer invites", () => {
 		expect(preview.body.invite).toMatchObject({
 			kind: "layer",
 			layerName: "Secret",
-			mapSlug: "aomc",
 		});
 
 		const res = await call(
@@ -403,7 +316,6 @@ describe("layer invites", () => {
 		);
 		expect(res.body).toEqual({
 			kind: "layer",
-			mapSlug: "aomc",
 			role: "viewer",
 			alreadyMember: false,
 		});
@@ -506,7 +418,7 @@ describe("layer members", () => {
 			expect.objectContaining({
 				userId: "editor",
 				role: "editor",
-				username: "Eddie",
+				username: "editor",
 			}),
 		]);
 
@@ -612,8 +524,7 @@ describe("layer members", () => {
 			role: "viewer",
 		});
 		const flag = async (user: Auth) =>
-			(await call(t, user, "GET", "/api/maps/aomc/layers")).body.layers[0]
-				.canManage;
+			(await call(t, user, "GET", "/api/layers")).body.layers[0].canManage;
 		expect(await flag(t.editor)).toBe(true);
 		expect(await flag(t.mod)).toBe(true);
 		expect(await flag(t.owner)).toBe(true);

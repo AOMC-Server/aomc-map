@@ -1,4 +1,4 @@
-import { parseXaeroCoords } from "@aomc/shared/xaero";
+import { parseXaeroCoords, parseXaeroExportDate } from "@aomc/shared/xaero";
 import type { UploadLimits } from "./state";
 
 export type FileInfo = { name: string; size: number };
@@ -48,6 +48,26 @@ export function validateFiles(
 		);
 	}
 	return { errors, pngCount, zipCount, totalBytes };
+}
+
+export type ExportDates = {
+	/** Distinct export times, oldest first. */
+	dates: number[];
+	/** PNGs with no date in their name or folder; they count as made when uploaded. */
+	undated: number;
+};
+
+/** Which exports the files are from. Zips are not counted: their contents are read on the server. */
+export function exportDates(paths: string[]): ExportDates {
+	const dates = new Set<number>();
+	let undated = 0;
+	for (const path of paths) {
+		if (ext(path) !== ".png") continue;
+		const date = parseXaeroExportDate(path);
+		if (date === null) undated++;
+		else dates.add(date);
+	}
+	return { dates: [...dates].sort((a, b) => a - b), undated };
 }
 
 export function formatBytes(n: number): string {

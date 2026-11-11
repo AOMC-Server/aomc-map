@@ -16,6 +16,9 @@ export function LoginButton() {
 				<img class="avatar" src={u.avatarUrl} alt="" width={24} height={24} />
 			)}
 			<span class="username">{u.username}</span>
+			<a class="btn" href="/settings" title="Your settings and API tokens">
+				Settings
+			</a>
 			<button
 				type="button"
 				class="btn"

@@ -8,7 +8,15 @@ import {
 	uploadOpen,
 	uploadState,
 } from "../upload";
-import { formatBytes, validateFiles } from "../upload-validate";
+import {
+	fromDrop,
+	fromFileList,
+	itemKey,
+	type UploadItem,
+} from "../upload-files";
+import { exportDates, formatBytes, validateFiles } from "../upload-validate";
+import { formatExportDay } from "./format";
+import { Modal } from "./Modal";
 
 function ProgressBar(props: { percent?: number; label: string }) {
 	const p = props.percent;
@@ -33,7 +41,7 @@ function ProgressBar(props: { percent?: number; label: string }) {
 
 /** Upload of Xaero's World Map exports (PNG or ZIP) into the current map and dimension. */
 export function UploadDialog() {
-	const [files, setFiles] = useState<File[]>([]);
+	const [files, setFiles] = useState<UploadItem[]>([]);
 	const [dragging, setDragging] = useState(false);
 	const [dim, setDim] = useState(dimSlug.value ?? "");
 
@@ -42,31 +50,22 @@ export function UploadDialog() {
 	const dims = visibleDimensions.value;
 
 	useEffect(() => {
-		const onKey = (e: KeyboardEvent) => {
-			if (e.key === "Escape") uploadOpen.value = false;
-		};
-		window.addEventListener("keydown", onKey);
-		return () => window.removeEventListener("keydown", onKey);
-	}, []);
-
-	useEffect(() => {
 		if (dimSlug.value) setDim(dimSlug.value);
 	}, [dimSlug.value]);
 
 	if (!detail) return null;
-	const canUpload = user.value !== null && detail.role !== "viewer";
-	const validation = validateFiles(files, detail.limits);
+	const canUpload = detail.role !== "viewer";
+	const validation = validateFiles(
+		files.map((i) => ({ name: i.file.name, size: i.file.size })),
+		detail.limits,
+	);
+	const dates = exportDates(files.map((i) => i.path));
 	const dimName = dims.find((d) => d.slug === dim)?.name ?? dim;
 
-	const addFiles = (list: FileList | File[] | null) => {
-		if (!list) return;
-		const incoming = [...list];
+	const addFiles = (incoming: UploadItem[]) => {
 		setFiles((prev) => {
-			const seen = new Set(prev.map((f) => `${f.name}:${f.size}`));
-			return [
-				...prev,
-				...incoming.filter((f) => !seen.has(`${f.name}:${f.size}`)),
-			];
+			const seen = new Set(prev.map(itemKey));
+			return [...prev, ...incoming.filter((i) => !seen.has(itemKey(i)))];
 		});
 	};
 
@@ -75,229 +74,264 @@ export function UploadDialog() {
 	};
 
 	return (
-		<div class="modal-backdrop">
-			<div
-				class="modal"
-				role="dialog"
-				aria-modal="true"
-				aria-label="Upload map data"
-			>
-				<button
-					type="button"
-					class="popup-close"
-					aria-label="Close"
-					onClick={close}
-				>
-					×
-				</button>
-				<h2>Upload map data</h2>
+		<Modal label="Upload map data" onClose={close}>
+			<h2>Upload map data</h2>
 
-				{state.phase === "idle" && (
-					<>
-						<ol class="steps">
-							<li>
-								<b>Turn off resource packs</b> if you have any enabled.
-							</li>
-							<li>
-								In Xaero's World Map, drag with the right mouse button over the
-								area and choose to export it as PNG.
-							</li>
-							<li>
-								Set <b>Multiple Unscaled Images</b> to ON, then confirm.
-							</li>
-							<li>
-								Select the exported images (or a ZIP of them). They are usually
-								saved in{" "}
-								<code>.minecraft/your_instance_folder/map exports/</code>
-							</li>
-						</ol>
+			{state.phase === "idle" && (
+				<>
+					<ol class="steps">
+						<li>
+							<b>Turn off resource packs</b> if you have any enabled.
+						</li>
+						<li>
+							In Xaero's World Map, drag with the right mouse button over the
+							area and choose to export it as PNG.
+						</li>
+						<li>
+							Set <b>Multiple Unscaled Images</b> to ON, then confirm.
+						</li>
+						<li>
+							Select the exported images (or a ZIP of them). They are usually
+							saved in <code>.minecraft/your_instance_folder/map exports/</code>
+						</li>
+					</ol>
 
-						{!user.value ? (
-							<p>
-								<a class="btn primary" href={loginUrl()}>
-									Log in with Discord
-								</a>{" "}
-								to upload.
-							</p>
-						) : !canUpload ? (
-							<p class="muted">
-								You have view-only access to this map, so you can't upload to
-								it.
-							</p>
-						) : (
-							<>
-								<div class="upload-target">
-									Uploading to <b>{detail.map.name}</b>, dimension{" "}
-									<select
-										value={dim}
-										aria-label="Dimension"
-										onChange={(e) => setDim(e.currentTarget.value)}
-									>
-										{dims.map((d) => (
-											<option key={d.slug} value={d.slug}>
-												{d.name}
-											</option>
-										))}
-									</select>
-								</div>
-
-								<label
-									class={`dropzone ${dragging ? "dragging" : ""}`}
-									onDragOver={(e) => {
-										e.preventDefault();
-										setDragging(true);
-									}}
-									onDragLeave={() => setDragging(false)}
-									onDrop={(e) => {
-										e.preventDefault();
-										setDragging(false);
-										addFiles(e.dataTransfer?.files ?? null);
-									}}
+					{!user.value ? (
+						<p>
+							<a class="btn primary" href={loginUrl()}>
+								Log in with Discord
+							</a>{" "}
+							to upload.
+						</p>
+					) : !canUpload ? (
+						<p class="muted">
+							You have view-only access to this map, so you can't upload to it.
+						</p>
+					) : (
+						<>
+							<div class="upload-target">
+								Uploading to <b>{detail.map.name}</b>, dimension{" "}
+								<select
+									value={dim}
+									aria-label="Dimension"
+									onChange={(e) => setDim(e.currentTarget.value)}
 								>
-									<input
-										type="file"
-										multiple
-										accept=".png,.zip,image/png,application/zip"
-										hidden
-										onChange={(e) => {
-											addFiles(e.currentTarget.files);
-											e.currentTarget.value = "";
-										}}
-									/>
-									<span>Drop PNG or ZIP files here, or click to choose</span>
-								</label>
+									{dims.map((d) => (
+										<option key={d.slug} value={d.slug}>
+											{d.name}
+										</option>
+									))}
+								</select>
+							</div>
 
-								{files.length > 0 && (
-									<div class="file-summary">
-										<div>
-											<b>{files.length}</b> file{files.length === 1 ? "" : "s"},{" "}
-											{formatBytes(validation.totalBytes)}
-											<button
-												type="button"
-												class="link"
-												onClick={() => setFiles([])}
-											>
-												clear
-											</button>
+							<label
+								class={`dropzone ${dragging ? "dragging" : ""}`}
+								onDragOver={(e) => {
+									e.preventDefault();
+									setDragging(true);
+								}}
+								onDragLeave={() => setDragging(false)}
+								onDrop={(e) => {
+									e.preventDefault();
+									setDragging(false);
+									if (e.dataTransfer)
+										void fromDrop(e.dataTransfer).then(addFiles);
+								}}
+							>
+								<input
+									type="file"
+									multiple
+									accept=".png,.zip,image/png,application/zip"
+									hidden
+									onChange={(e) => {
+										if (e.currentTarget.files)
+											addFiles(fromFileList(e.currentTarget.files));
+										e.currentTarget.value = "";
+									}}
+								/>
+								<span>
+									Drop PNG or ZIP files, or whole export folders, here, or click
+									to choose files
+								</span>
+							</label>
+							<label class="btn folder-pick">
+								<input
+									type="file"
+									multiple
+									// @ts-expect-error non-standard attribute, supported by every major browser
+									webkitdirectory=""
+									hidden
+									onChange={(e) => {
+										if (e.currentTarget.files)
+											addFiles(fromFileList(e.currentTarget.files));
+										e.currentTarget.value = "";
+									}}
+								/>
+								Choose a folder…
+							</label>
+							<p class="muted hint">
+								Exports are layered by the date in their file or folder name
+								(like <code>2026-02-10_15.06.41</code>), newest on top, so
+								importing old exports never covers newer data.
+							</p>
+
+							{files.length > 0 && (
+								<div class="file-summary">
+									<div>
+										<b>{files.length}</b> file{files.length === 1 ? "" : "s"},{" "}
+										{formatBytes(validation.totalBytes)}
+										<button
+											type="button"
+											class="plain link"
+											onClick={() => setFiles([])}
+										>
+											clear
+										</button>
+									</div>
+									{dates.dates.length > 0 && (
+										<div class="muted">
+											{dates.dates.length} export
+											{dates.dates.length === 1 ? "" : "s"} made{" "}
+											{formatExportDay(dates.dates[0] as number)}
+											{dates.dates.length > 1 &&
+												` to ${formatExportDay(dates.dates.at(-1) as number)}`}
 										</div>
-										<ul class="file-list">
-											{files.slice(0, 6).map((f) => (
-												<li key={`${f.name}:${f.size}`}>{f.name}</li>
+									)}
+									{dates.undated > 0 && (
+										<div class="muted">
+											{dates.undated} file
+											{dates.undated === 1 ? " has" : "s have"} no date in the
+											name or folder and will count as made now.
+										</div>
+									)}
+									<ul class="file-list">
+										{files.slice(0, 6).map((f) => (
+											<li key={itemKey(f)}>{f.path}</li>
+										))}
+										{files.length > 6 && (
+											<li class="muted">…and {files.length - 6} more</li>
+										)}
+									</ul>
+									{validation.errors.length > 0 && (
+										<ul class="errors">
+											{validation.errors.slice(0, 5).map((e) => (
+												<li key={e}>{e}</li>
 											))}
-											{files.length > 6 && (
-												<li class="muted">…and {files.length - 6} more</li>
+											{validation.errors.length > 5 && (
+												<li>
+													…and {validation.errors.length - 5} more problems
+												</li>
 											)}
 										</ul>
-										{validation.errors.length > 0 && (
-											<ul class="errors">
-												{validation.errors.slice(0, 5).map((e) => (
-													<li key={e}>{e}</li>
-												))}
-												{validation.errors.length > 5 && (
-													<li>
-														…and {validation.errors.length - 5} more problems
-													</li>
-												)}
-											</ul>
-										)}
-									</div>
-								)}
-
-								<div class="modal-actions">
-									<button
-										type="button"
-										class="btn primary"
-										disabled={
-											files.length === 0 || validation.errors.length > 0 || !dim
-										}
-										onClick={() => startUpload(detail.map.slug, dim, files)}
-									>
-										{files.length === 0
-											? "Upload"
-											: `Upload ${files.length} file${files.length === 1 ? "" : "s"} to ${dimName}`}
-									</button>
+									)}
 								</div>
-							</>
-						)}
-					</>
-				)}
+							)}
 
-				{state.phase === "uploading" && (
-					<ProgressBar
-						percent={state.percent}
-						label={`Uploading ${state.fileCount} file${state.fileCount === 1 ? "" : "s"}… ${Math.round(state.percent)}%`}
-					/>
-				)}
-
-				{state.phase === "processing" && (
-					<>
-						<ProgressBar
-							percent={
-								state.total
-									? ((state.done ?? 0) / state.total) * 100
-									: undefined
-							}
-							label={`${state.message}${state.total ? ` (${state.done ?? 0}/${state.total})` : "…"}`}
-						/>
-						<p class="muted">
-							You can close this window; processing continues in the background.
-						</p>
-					</>
-				)}
-
-				{state.phase === "done" && (
-					<>
-						<p class="success">
-							Upload finished
-							{state.rev !== null ? ` as revision ${state.rev}` : ""}.
-						</p>
-						<div class="modal-actions">
-							{state.bbox && (
+							<div class="modal-actions">
 								<button
 									type="button"
 									class="btn primary"
-									onClick={() => state.bbox && showUploadOnMap(state.bbox)}
+									disabled={
+										files.length === 0 || validation.errors.length > 0 || !dim
+									}
+									onClick={() => startUpload(dim, files)}
 								>
-									Show on map
+									{files.length === 0
+										? "Upload"
+										: `Upload ${files.length} file${files.length === 1 ? "" : "s"} to ${dimName}`}
 								</button>
-							)}
+							</div>
+						</>
+					)}
+				</>
+			)}
+
+			{state.phase === "uploading" && (
+				<ProgressBar
+					percent={state.percent}
+					label={`Uploading ${state.fileCount} file${state.fileCount === 1 ? "" : "s"}… ${Math.round(state.percent)}%`}
+				/>
+			)}
+
+			{state.phase === "processing" && (
+				<>
+					<ProgressBar
+						percent={
+							state.total ? ((state.done ?? 0) / state.total) * 100 : undefined
+						}
+						label={`${state.message}${state.total ? ` (${state.done ?? 0}/${state.total})` : "…"}`}
+					/>
+					<p class="muted">
+						You can close this window; processing continues in the background.
+					</p>
+				</>
+			)}
+
+			{state.phase === "done" && (
+				<>
+					<p class="success">
+						{state.exports > 1
+							? `${state.exports} exports added`
+							: "Upload finished"}
+						{state.rev !== null && state.exports === 1
+							? ` as revision ${state.rev}`
+							: ""}
+						.
+					</p>
+					{state.failed > 0 && (
+						<p class="error-text">
+							{state.failed} export{state.failed === 1 ? "" : "s"} failed; see
+							the history panel.
+						</p>
+					)}
+					<div class="modal-actions">
+						{state.bbox && (
 							<button
 								type="button"
-								class="btn"
-								onClick={() => {
-									setFiles([]);
-									resetUpload();
-								}}
+								class="btn primary"
+								onClick={() =>
+									state.bbox && showUploadOnMap(state.bbox, state.dimSlug)
+								}
 							>
-								Upload more
+								Show on map
 							</button>
-						</div>
-					</>
-				)}
-
-				{state.phase === "failed" && (
-					<>
-						<p class="error-text">{state.error}</p>
-						{state.fileErrors.length > 0 && (
-							<ul class="errors">
-								{state.fileErrors.slice(0, 8).map((e) => (
-									<li key={`${e.file}:${e.error}`}>
-										<b>{e.file}</b>: {e.error}
-									</li>
-								))}
-								{state.fileErrors.length > 8 && (
-									<li>…and {state.fileErrors.length - 8} more</li>
-								)}
-							</ul>
 						)}
-						<div class="modal-actions">
-							<button type="button" class="btn" onClick={resetUpload}>
-								Try again
-							</button>
-						</div>
-					</>
-				)}
-			</div>
-		</div>
+						<button
+							type="button"
+							class="btn"
+							onClick={() => {
+								setFiles([]);
+								resetUpload();
+							}}
+						>
+							Upload more
+						</button>
+					</div>
+				</>
+			)}
+
+			{state.phase === "failed" && (
+				<>
+					<p class="error-text">{state.error}</p>
+					{state.fileErrors.length > 0 && (
+						<ul class="errors">
+							{state.fileErrors.slice(0, 8).map((e) => (
+								<li key={`${e.file}:${e.error}`}>
+									<b>{e.file}</b>: {e.error}
+								</li>
+							))}
+							{state.fileErrors.length > 8 && (
+								<li>…and {state.fileErrors.length - 8} more</li>
+							)}
+						</ul>
+					)}
+					<div class="modal-actions">
+						<button type="button" class="btn" onClick={resetUpload}>
+							Try again
+						</button>
+					</div>
+				</>
+			)}
+		</Modal>
 	);
 }

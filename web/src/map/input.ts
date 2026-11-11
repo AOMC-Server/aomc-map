@@ -1,22 +1,15 @@
-import { panBy, type Size, type View, zoomAt } from "./camera";
-
-export interface InputHost {
-	getView(): View;
-	getSize(): Size;
-	setView(view: View): void;
-	clampZoom(zoom: number): number;
-	/** Cancels any running tween or inertia. */
-	stopAnimation(): void;
-	tweenTo(target: View, ms: number, anchor?: { x: number; y: number }): void;
-	inertia(vx: number, vy: number): void;
-	pointer(sx: number, sy: number, kind: "move" | "click"): void;
-	pointerLeft(): void;
-	doubleClickZoomEnabled(): boolean;
-	/** Lets a tool claim a pointer-down (e.g. to drag a vertex) instead of panning the map. */
-	beginDrag(sx: number, sy: number): DragSession | null;
-}
+import { panBy, zoomAt } from "@aomc/shared/view";
+import type { MapView } from "./MapView";
 
 export type DragSession = { move(sx: number, sy: number): void; end(): void };
+
+/** True for key events aimed at a text field, which the map must leave alone. */
+export function isTyping(target: EventTarget | null): boolean {
+	const t = target as HTMLElement | null;
+	return (
+		!!t && (t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))
+	);
+}
 
 const DRAG_THRESHOLD = 5;
 const INERTIA_MIN_SPEED = 0.15; // px per ms
@@ -32,34 +25,22 @@ export class Input {
 	private lastMove = 0;
 	private lastPinch: { dist: number; mid: Pt } | null = null;
 	private session: DragSession | null = null;
-	private cleanup: (() => void)[] = [];
 
 	constructor(
 		private el: HTMLElement,
-		private host: InputHost,
+		private map: MapView,
 	) {
-		this.on(el, "pointerdown", this.down);
-		this.on(el, "pointermove", this.move);
-		this.on(el, "pointerup", this.up);
-		this.on(el, "pointercancel", this.cancel);
-		this.on(el, "pointerleave", () => {
-			if (this.pointers.size === 0) host.pointerLeft();
+		el.addEventListener("pointerdown", this.down);
+		el.addEventListener("pointermove", this.move);
+		el.addEventListener("pointerup", this.up);
+		el.addEventListener("pointercancel", this.cancel);
+		el.addEventListener("pointerleave", () => {
+			if (this.pointers.size === 0) map.pointerLeft();
 		});
-		this.on(el, "wheel", this.wheel, { passive: false });
-		this.on(el, "dblclick", this.dblclick);
-		this.on(el, "contextmenu", (e) => e.preventDefault());
-		this.on(window, "keydown", this.key);
-	}
-
-	private on<E extends Event>(
-		target: EventTarget,
-		type: string,
-		fn: (e: E) => void,
-		options?: AddEventListenerOptions,
-	) {
-		const handler = fn as unknown as EventListener;
-		target.addEventListener(type, handler, options);
-		this.cleanup.push(() => target.removeEventListener(type, handler, options));
+		el.addEventListener("wheel", this.wheel, { passive: false });
+		el.addEventListener("dblclick", this.dblclick);
+		el.addEventListener("contextmenu", (e) => e.preventDefault());
+		window.addEventListener("keydown", this.key);
 	}
 
 	private local(e: PointerEvent | MouseEvent | WheelEvent): Pt {
@@ -69,12 +50,12 @@ export class Input {
 
 	private down = (e: PointerEvent) => {
 		if (e.pointerType === "mouse" && e.button !== 0) return;
-		this.host.stopAnimation();
+		this.map.cancelAnimation();
 		this.el.setPointerCapture(e.pointerId);
 		const p = this.local(e);
 		this.pointers.set(e.pointerId, p);
 		if (this.pointers.size === 1) {
-			this.session = this.host.beginDrag(p.x, p.y);
+			this.session = this.map.dragHandler?.(p.x, p.y) ?? null;
 			if (this.session) return;
 			this.start = { ...p, t: performance.now() };
 			this.moved = false;
@@ -98,7 +79,7 @@ export class Input {
 	private move = (e: PointerEvent) => {
 		const p = this.local(e);
 		if (!this.pointers.has(e.pointerId)) {
-			if (e.pointerType === "mouse") this.host.pointer(p.x, p.y, "move");
+			if (e.pointerType === "mouse") this.map.pointer(p.x, p.y, "move");
 			return;
 		}
 		const prev = this.pointers.get(e.pointerId) as Pt;
@@ -110,17 +91,17 @@ export class Input {
 
 		if (this.pointers.size >= 2 && this.lastPinch) {
 			const next = this.pinchState();
-			let view = this.host.getView();
-			const zoom = this.host.clampZoom(
+			let view = this.map.getView();
+			const zoom = this.map.clampZoom(
 				view.zoom - Math.log2(next.dist / this.lastPinch.dist),
 			);
-			view = zoomAt(view, this.host.getSize(), next.mid.x, next.mid.y, zoom);
+			view = zoomAt(view, this.map.getSize(), next.mid.x, next.mid.y, zoom);
 			view = panBy(
 				view,
 				next.mid.x - this.lastPinch.mid.x,
 				next.mid.y - this.lastPinch.mid.y,
 			);
-			this.host.setView(view);
+			this.map.setView(view);
 			this.lastPinch = next;
 			return;
 		}
@@ -143,8 +124,8 @@ export class Input {
 				y: 0.7 * (dy / dt) + 0.3 * this.velocity.y,
 			};
 			this.lastMove = now;
-			this.host.setView(panBy(this.host.getView(), dx, dy));
-			if (e.pointerType === "mouse") this.host.pointer(p.x, p.y, "move");
+			this.map.setView(panBy(this.map.getView(), dx, dy));
+			if (e.pointerType === "mouse") this.map.pointer(p.x, p.y, "move");
 		}
 	};
 
@@ -171,7 +152,7 @@ export class Input {
 		this.start = null;
 
 		if (!this.moved) {
-			this.host.pointer(p.x, p.y, "click");
+			this.map.pointer(p.x, p.y, "click");
 			return;
 		}
 		const idle = performance.now() - this.lastMove;
@@ -181,7 +162,7 @@ export class Input {
 			speed > INERTIA_MIN_SPEED &&
 			performance.now() - start.t > 30
 		) {
-			this.host.inertia(this.velocity.x, this.velocity.y);
+			this.map.inertia(this.velocity.x, this.velocity.y);
 		}
 	};
 
@@ -194,41 +175,40 @@ export class Input {
 
 	private wheel = (e: WheelEvent) => {
 		e.preventDefault();
-		this.host.stopAnimation();
+		this.map.cancelAnimation();
 		const unit = e.deltaMode === 1 ? 16 : e.deltaMode === 2 ? 400 : 1;
 		const factor = e.ctrlKey ? 0.02 : 0.005; // ctrl+wheel is a trackpad pinch
 		const p = this.local(e);
-		const view = this.host.getView();
-		const zoom = this.host.clampZoom(view.zoom + e.deltaY * unit * factor);
-		this.host.setView(zoomAt(view, this.host.getSize(), p.x, p.y, zoom));
+		const view = this.map.getView();
+		const zoom = this.map.clampZoom(view.zoom + e.deltaY * unit * factor);
+		this.map.setView(zoomAt(view, this.map.getSize(), p.x, p.y, zoom));
 	};
 
 	private dblclick = (e: MouseEvent) => {
-		if (!this.host.doubleClickZoomEnabled()) return;
+		if (!this.map.doubleClickZoom) return;
 		const p = this.local(e);
-		const view = this.host.getView();
-		const zoom = this.host.clampZoom(view.zoom - 1);
-		this.host.tweenTo({ ...view, zoom }, 220, p);
+		const view = this.map.getView();
+		const zoom = this.map.clampZoom(view.zoom - 1);
+		this.map.tweenTo({ ...view, zoom }, 220, p);
 	};
 
 	private key = (e: KeyboardEvent) => {
 		if (e.ctrlKey || e.metaKey || e.altKey) return;
-		const t = e.target as HTMLElement | null;
 		if (
-			t &&
-			(t.isContentEditable || /^(INPUT|TEXTAREA|SELECT)$/.test(t.tagName))
+			isTyping(e.target) ||
+			(e.target as Element | null)?.closest?.(".panel, .modal, .popup")
 		)
 			return;
-		const view = this.host.getView();
-		const size = this.host.getSize();
+		const view = this.map.getView();
+		const size = this.map.getSize();
 		const step = e.shiftKey ? 400 : 120;
 		const pan = (dx: number, dy: number) => {
 			const target = panBy(view, dx, dy);
-			this.host.tweenTo(target, 140);
+			this.map.tweenTo(target, 140);
 		};
 		const zoomBy = (delta: number) => {
-			const zoom = this.host.clampZoom(view.zoom + delta);
-			this.host.tweenTo({ ...view, zoom }, 180, {
+			const zoom = this.map.clampZoom(view.zoom + delta);
+			this.map.tweenTo({ ...view, zoom }, 180, {
 				x: size.width / 2,
 				y: size.height / 2,
 			});
@@ -259,9 +239,4 @@ export class Input {
 		}
 		e.preventDefault();
 	};
-
-	destroy() {
-		for (const fn of this.cleanup) fn();
-		this.cleanup = [];
-	}
 }

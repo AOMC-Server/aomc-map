@@ -1,12 +1,13 @@
 import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
-import { Hono } from "hono";
+import { type Context, Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { injectMeta, type PageMeta } from "../html";
+import { loadMap } from "../permissions";
 import { resolvePreviewTarget, viewQuerySchema } from "../previewTarget";
 import type { AppEnv } from "../types";
 
-const API_PREFIXES = ["/api/", "/auth/", "/blobs/"];
+const API_PREFIXES = ["/auth/", "/blobs/"];
 
 /** Serves the built web app, with index.html as the fallback for client-side routes. */
 export function staticRoutes(distDir: string) {
@@ -15,24 +16,23 @@ export function staticRoutes(distDir: string) {
 	const indexPath = join(distDir, "index.html");
 	if (!existsSync(indexPath)) return app;
 
-	/**
-	 * Share tags for the page at "/". Crawlers are anonymous, so only public maps get a title and
-	 * preview image; anything else keeps the generic page and leaks nothing.
-	 */
-	async function metaFor(
-		c: import("hono").Context<AppEnv>,
-	): Promise<PageMeta | null> {
+	/** Share tags for the page at "/", from the view in the query string. */
+	async function metaFor(c: Context<AppEnv>): Promise<PageMeta | null> {
 		const { db, env } = c.var;
 		const query = viewQuerySchema.safeParse(
 			Object.fromEntries(new URL(c.req.url).searchParams),
 		);
 		if (!query.success) return null;
-		const target = await resolvePreviewTarget(db, env, null, query.data);
+		const target = await resolvePreviewTarget(
+			db,
+			env,
+			await loadMap(db),
+			query.data,
+		);
 		if (!target) return null;
 
 		const { x, z, zoom, rev } = target.params;
 		const view = new URLSearchParams({
-			map: target.mapSlug,
 			dim: target.dimensionSlug,
 			x: String(x),
 			z: String(z),

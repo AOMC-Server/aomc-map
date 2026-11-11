@@ -1,10 +1,20 @@
-import { useState } from "preact/hooks";
+import { MAX_NAME } from "@aomc/shared/features";
+import type { ComponentChildren } from "preact";
+import { useEffect, useState } from "preact/hooks";
+import { loginUrl } from "../api";
+import { loadMapDetail, loadUser } from "../controller";
 import { describeDimensionScale, formatScale, parseScale } from "../scale";
-import { addDimension, updateDimension, updateMapSettings } from "../sharing";
+import {
+	addDimension,
+	mapScope,
+	updateDimension,
+	updateMapName,
+} from "../sharing";
 import { slugify } from "../slug";
-import { currentMap, type Dimension, mapPanelOpen } from "../state";
+import { currentMap, type Dimension, user } from "../state";
 import { InviteLinks } from "./InviteLinks";
 import { MembersSection } from "./MembersSection";
+import { Page } from "./Page";
 
 type Tab = "settings" | "dimensions" | "members" | "invites";
 
@@ -18,19 +28,13 @@ const TAB_LABELS: Record<Tab, string> = {
 function SettingsTab() {
 	const detail = currentMap.value;
 	const [name, setName] = useState(detail?.map.name ?? "");
-	const [tile, setTile] = useState(String(detail?.map.tileSize ?? ""));
 	const [busy, setBusy] = useState(false);
 	if (!detail) return null;
-	const empty = detail.map.headRev === 0;
 
 	const save = async (e: Event) => {
 		e.preventDefault();
 		setBusy(true);
-		const size = Number.parseInt(tile, 10);
-		await updateMapSettings({
-			name: name.trim(),
-			...(empty && size !== detail.map.tileSize ? { tileSize: size } : {}),
-		});
+		await updateMapName(name.trim());
 		setBusy(false);
 	};
 
@@ -41,25 +45,13 @@ function SettingsTab() {
 				<input
 					type="text"
 					value={name}
-					maxLength={100}
+					maxLength={MAX_NAME}
 					onInput={(e) => setName(e.currentTarget.value)}
 				/>
 			</label>
-			<label class="field">
-				<span class="label">Tile size (blocks per tile edge)</span>
-				<input
-					type="text"
-					inputMode="numeric"
-					value={tile}
-					disabled={!empty}
-					onInput={(e) => setTile(e.currentTarget.value.replace(/\D/g, ""))}
-				/>
-				<span class="muted hint">
-					{empty
-						? "An even number from 16 to 2048. This can only be changed until the first upload."
-						: "Locked: the map already has uploads, and tiles cannot be re-cut."}
-				</span>
-			</label>
+			<p class="muted hint">
+				Tile size: {detail.map.tileSize} blocks per tile edge (fixed).
+			</p>
 			<button type="submit" class="btn primary" disabled={busy || !name.trim()}>
 				Save
 			</button>
@@ -96,7 +88,7 @@ function DimensionRow(props: {
 				<input
 					type="text"
 					value={name}
-					maxLength={100}
+					maxLength={MAX_NAME}
 					aria-label={`Name of ${d.slug}`}
 					onInput={(e) => setName(e.currentTarget.value)}
 					onBlur={() => {
@@ -234,7 +226,7 @@ function DimensionsTab() {
 					placeholder="New dimension name"
 					aria-label="New dimension name"
 					value={newName}
-					maxLength={100}
+					maxLength={MAX_NAME}
 					onInput={(e) => {
 						setNewName(e.currentTarget.value);
 						if (!slugTouched) setNewSlug(slugify(e.currentTarget.value));
@@ -277,31 +269,42 @@ function DimensionsTab() {
 	);
 }
 
-/** Map administration: settings, dimensions, members and invite links. */
-export function MapPanel() {
+/** /manage: map settings, dimensions, members and invite links, for moderators and owners. */
+export function ManagePage() {
+	const [loaded, setLoaded] = useState(false);
+
+	useEffect(() => {
+		void Promise.all([loadMapDetail(), loadUser()]).then(() => setLoaded(true));
+	}, []);
+
 	const detail = currentMap.value;
 	const role = detail?.role;
 	const tabs: Tab[] = [];
 	if (role === "owner") tabs.push("settings");
 	if (role === "owner" || role === "moderator") tabs.push("dimensions");
 	if (role === "owner") tabs.push("members", "invites");
-	const [tab, setTab] = useState<Tab>(tabs[0] ?? "dimensions");
+	const [tab, setTab] = useState<Tab>("settings");
 	const active = tabs.includes(tab) ? tab : tabs[0];
 
-	return (
-		<aside class="panel" aria-label="Map administration">
-			<header class="panel-head">
-				<h2>{detail?.map.name ?? "Map"}</h2>
-				<button
-					type="button"
-					class="btn"
-					aria-label="Close"
-					onClick={() => (mapPanelOpen.value = false)}
-				>
-					×
-				</button>
-			</header>
-			{tabs.length > 1 && (
+	let body: ComponentChildren;
+	if (!loaded) {
+		body = <p class="muted">Loading…</p>;
+	} else if (!detail) {
+		body = <p class="error-text">The map could not be loaded.</p>;
+	} else if (!user.value) {
+		body = (
+			<>
+				<p>Log in to manage this map.</p>
+				<a class="btn primary" href={loginUrl()}>
+					Log in with Discord
+				</a>
+			</>
+		);
+	} else if (!active) {
+		body = <p>Only moderators and owners can manage the map.</p>;
+	} else {
+		body = (
+			<>
 				<div class="tabs" role="tablist">
 					{tabs.map((t) => (
 						<button
@@ -309,23 +312,24 @@ export function MapPanel() {
 							type="button"
 							role="tab"
 							aria-selected={t === active}
-							class={`tab ${t === active ? "active" : ""}`}
+							class={`plain tab ${t === active ? "active" : ""}`}
 							onClick={() => setTab(t)}
 						>
 							{TAB_LABELS[t]}
 						</button>
 					))}
 				</div>
-			)}
-			<div class="panel-body">
-				{active === "settings" && <SettingsTab />}
-				{active === "dimensions" && <DimensionsTab />}
-				{active === "members" && <MembersSection scope={{ kind: "map" }} />}
-				{active === "invites" && <InviteLinks scope={{ kind: "map" }} />}
-				{!active && (
-					<p class="muted">You don't have anything to manage on this map.</p>
-				)}
-			</div>
-		</aside>
+				<div class="page-section">
+					{active === "settings" && <SettingsTab />}
+					{active === "dimensions" && <DimensionsTab />}
+					{active === "members" && <MembersSection scope={mapScope} />}
+					{active === "invites" && <InviteLinks scope={mapScope} />}
+				</div>
+			</>
+		);
+	}
+
+	return (
+		<Page title={detail ? `Manage ${detail.map.name}` : "Manage"}>{body}</Page>
 	);
 }

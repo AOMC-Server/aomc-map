@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import type { View } from "./camera";
+import type { View } from "@aomc/shared/view";
 import { FeatureLayer, type RenderLayer } from "./featureLayer";
 
 const size = { width: 1000, height: 700 };

@@ -1,7 +1,6 @@
-import type { View } from "./map/camera";
+import type { View } from "@aomc/shared/view";
 
 export type UrlState = {
-	map: string | null;
 	dim: string | null;
 	view: Partial<View>;
 	rev: number | null;
@@ -18,7 +17,6 @@ export function parseUrl(search: string): UrlState {
 	const q = new URLSearchParams(search);
 	const rev = num(q.get("rev"));
 	return {
-		map: q.get("map"),
 		dim: q.get("dim"),
 		view: {
 			centerX: num(q.get("x")),
@@ -31,14 +29,12 @@ export function parseUrl(search: string): UrlState {
 }
 
 export function formatUrl(state: {
-	map: string;
 	dim: string;
 	view: View;
 	rev: number | null;
 	embed: boolean;
 }): string {
 	const q = new URLSearchParams();
-	q.set("map", state.map);
 	q.set("dim", state.dim);
 	q.set("x", String(Math.round(state.view.centerX)));
 	q.set("z", String(Math.round(state.view.centerZ)));

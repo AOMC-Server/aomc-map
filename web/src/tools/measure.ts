@@ -1,4 +1,4 @@
-import { computed, effect, signal } from "@preact/signals";
+import { computed, signal } from "@preact/signals";
 import type { MapView } from "../map/MapView";
 
 export type Point = { x: number; z: number };
@@ -63,12 +63,4 @@ export function drawMeasure(ctx: CanvasRenderingContext2D, map: MapView) {
 		ctx.stroke();
 	}
 	ctx.restore();
-}
-
-/** Redraws the map whenever the measurement changes. */
-export function watchMeasure(map: MapView) {
-	return effect(() => {
-		measurePoints.value;
-		map.invalidate();
-	});
 }

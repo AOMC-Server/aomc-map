@@ -5,22 +5,29 @@
     {
       "idx": 0,
       "version": "6",
-      "when": 1794350706621,
-      "tag": "0000_magenta_avengers",
+      "when": 1794358535285,
+      "tag": "0000_public_goblin_queen",
       "breakpoints": true
     },
     {
       "idx": 1,
       "version": "6",
-      "when": 1794356946333,
-      "tag": "0001_loud_spirit",
+      "when": 1794360270545,
+      "tag": "0001_token_expiry",
       "breakpoints": true
     },
     {
       "idx": 2,
       "version": "6",
-      "when": 1794357504694,
-      "tag": "0002_romantic_talisman",
+      "when": 1794360745254,
+      "tag": "0002_export_date",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1794362109786,
+      "tag": "0003_map_epoch",
       "breakpoints": true
     }
   ]

@@ -15,5 +15,5 @@ export function describeDimensionScale(scale: number | null): string {
 	if (scale === null)
 		return "No scale: coordinates can't be compared with other dimensions";
 	if (scale === 1) return "Same coordinates as the overworld";
-	return `1 block here = ${scale} overworld block${scale === 1 ? "" : "s"}`;
+	return `1 block here = ${scale} overworld blocks`;
 }

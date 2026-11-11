@@ -2,7 +2,7 @@
 
 A web map for a Minecraft server, built from [Xaero's World Map](https://modrinth.com/mod/xaeros-world-map) exports. Players upload exported images, the server stitches them into tiles, and everyone can browse the map, add pins, lines and areas, and travel back through the map's history. Logins are via Discord.
 
-- Every upload is a **revision**: browse any past state with the time slider, and moderators can revert or restore uploads without losing history.
+- Every upload is a **revision**: browse any past state with the time slider, and moderators can delete a bad upload, which erases it from the map and from all of its history.
 - **Layers** of pins, lines and areas with their own history, optional private layers, JSON import/export.
 - Invite links and roles (viewer, editor, moderator, owner) for the people who help maintain it.
 - One TypeScript codebase on [Bun](https://bun.sh): Hono API, SQLite (Drizzle), sharp for images, and a Preact UI over a hand-written canvas map renderer.
@@ -23,6 +23,7 @@ scripts/   backup, blob garbage collection, v1 importer
    cp .env.example .env
    # fill in DISCORD_CLIENT_ID, DISCORD_CLIENT_SECRET, PUBLIC_URL, a random SESSION_SECRET,
    # and SETUP_OWNER_DISCORD_IDS (your own Discord user id)
+   mkdir -p data && chown 1000:1000 data   # the container runs as uid 1000
    ```
 
    To get your Discord user id: enable _Developer Mode_ in Discord's settings, then right-click yourself and choose _Copy User ID_.
@@ -32,9 +33,9 @@ scripts/   backup, blob garbage collection, v1 importer
    docker compose up -d --build
    docker compose logs -f
    ```
-4. Open `PUBLIC_URL`, log in with Discord, and you are an owner of the main map (**Manage** appears in the toolbar). Upload some exports with **Upload**.
+4. Open `PUBLIC_URL`, log in with Discord, and you are an owner of the map (**Manage** appears in the toolbar). Upload some exports with **Upload**.
 
-The first start creates the main map with the dimensions Overworld, Overworld Caves, Nether and The End. Everything lives in `./data` (`db.sqlite` and `blobs/`), which is the only thing you need to back up. Migrations run automatically on boot, so upgrading is `git pull && docker compose up -d --build`.
+The first start creates the map with the dimensions Overworld, Overworld Caves, Nether and The End. Everything lives in `./data` (`db.sqlite` and `blobs/`), which is the only thing you need to back up. Migrations run automatically on boot, so upgrading is `git pull && docker compose up -d --build`.
 
 > The `:z` on the volume in `docker-compose.yml` relabels the directory for SELinux hosts and is harmless elsewhere.
 
@@ -71,13 +72,13 @@ All settings are environment variables (see `.env.example`).
 | Variable                                     | Default                 | Meaning                                                                       |
 | -------------------------------------------- | ----------------------- | ----------------------------------------------------------------------------- |
 | `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` |                         | Discord OAuth credentials                                                     |
-| `SESSION_SECRET`                             | dev value               | signs the OAuth state cookie; set a long random string                        |
+| `SESSION_SECRET`                             | dev value               | signs the OAuth state cookie; required when `PUBLIC_URL` is https             |
 | `PUBLIC_URL`                                 | `http://localhost:3000` | public address; used for cookies, the Origin check, invite links and previews |
-| `SETUP_MAP_NAME`, `SETUP_MAP_SLUG`           | `AOMC`, `aomc`          | the main map created on first boot                                            |
+| `SETUP_MAP_NAME`                             | `AOMC`                  | name of the map created on first boot                                         |
 | `SETUP_OWNER_DISCORD_IDS`                    |                         | comma-separated Discord ids that become owners when they first log in         |
 | `PORT`                                       | `3000`                  | listen port                                                                   |
 | `DATA_DIR`                                   | `./data`                | database, blobs, preview cache (`/data` in Docker)                            |
-| `DEFAULT_TILE_SIZE`                          | `512`                   | blocks per tile edge for the main map; locked after the first upload          |
+| `DEFAULT_TILE_SIZE`                          | `512`                   | blocks per tile edge; fixed when the map is created on first boot             |
 | `MAX_ZOOM`                                   | `8`                     | zoom-out levels above 1:1                                                     |
 | `MAX_UPLOAD_BYTES`                           | 200 MB                  | per upload request                                                            |
 | `MAX_IMAGE_DIM`                              | `4096`                  | longest edge of one uploaded image                                            |
@@ -87,59 +88,61 @@ All settings are environment variables (see `.env.example`).
 
 ## Using the map
 
-**Viewer.** `/?map=<slug>&dim=<slug>&x=&z=&zoom=&rev=` is kept in the address bar, so every view is a shareable link (`rev` is omitted at the latest revision). `embed=1` hides all UI for iframes. Zoom 0 is one block per pixel, negative zooms in (down to -4), positive zooms out. Drag or touch to pan, wheel or pinch to zoom, double-click to zoom in, arrow keys and `+`/`-`. The toolbar has _Measure_ (two clicks, Esc clears) and _Copy coords_ (click to build a list on the clipboard).
+**Viewer.** `/?dim=<slug>&x=&z=&zoom=&rev=` is kept in the address bar, so every view is a shareable link (`rev` is omitted at the latest revision). `embed=1` hides all UI for iframes. Zoom 0 is one block per pixel, negative zooms in (down to -4), positive zooms out. Drag or touch to pan, wheel or pinch to zoom, double-click to zoom in, arrow keys and `+`/`-`. The toolbar has _Measure_ (two clicks, Esc clears).
 
 **Uploading.** Use _Upload_ in the toolbar, or the API (below). In Xaero's World Map: turn resource packs off, drag with the right mouse button over an area, export as PNG with **Multiple Unscaled Images** on, then upload the images (or a ZIP of them). File names contain `_x<X>_z<Z>` (the block coordinates of the top-left corner). Pure black pixels mean "no data" and never overwrite anything. Processing runs in a background queue, one job at a time; you can close the dialog while it works.
 
+**Old exports.** Xaero names every export with the time it was made (`2026-02-10_15.06.41_x-384_z-3776.png`, or a folder `2026-02-10_15.06.41/` holding the tiles). The upload reads that date from the file or folder name (the dialog accepts whole folders, and ZIPs with folders inside), makes one revision per export, and layers the exports by date: where they overlap, the newest export is on top however late it was uploaded, so importing an old export only fills in what is missing and never covers newer data. Files with no date count as made at upload time. The history panel shows the export date next to the upload time. Dates are used as written in the name (no time zone), and one from the future counts as now.
+
 **Layers and features.** The _Layers_ panel toggles visibility and creates layers. "Add feature" opens the editor: click the map to place points, drag a point to move it, Enter or _Finish_ to complete, Esc to cancel. Popups support `**bold**`, `[links](https://…)` and line breaks, and are rendered as text, never HTML. Layers can be exported and imported as JSON (an array of `{type, name, popup, color, geometry}`; pins have `[x, z]`, lines and areas `[[x, z], …]`, integers within ±30,000,000, at most 5000 features per layer).
 
-**History.** The _History_ panel has the time slider (tiles and features both follow it) and the upload log. Hover or click an entry to outline its area. While looking at the past editing is off. Moderators can **Revert** an upload and **Restore** it again; this publishes a new revision, so older revisions still show what was there. Feature popups have a _History_ button, and moderators can restore an earlier version of a feature (to bring back a deleted one, slide to a revision where it existed, open its popup, and restore).
+**History.** The _History_ panel has the time slider (tiles and features both follow it) and the upload log. Hover or click an entry to outline its area. While looking at the past editing is off. Every upload in the log has an **Isolate** button that shows only what that upload added, with the rest of the map hidden ; _Show everything_, or moving the time slider, goes back. Moderators can **Delete** an upload. This is permanent: the upload disappears from the current map, from every past revision on the time slider and from the log, and it cannot be restored (upload the files again to bring it back). Other uploads keep their revision numbers, so there is a gap (or, if it was the newest, the head moves back). Most deletes are of a recent mistake and touch few tiles, because only the tiles the upload covered are rewritten, and only from its revision onwards. Deleting runs in the background queue; the entry shows _deleting…_ until it is done. Uploads that were reverted by older versions of the server stay hidden and can be deleted too. Feature popups have a _History_ button, and moderators can restore an earlier version of a feature (to bring back a deleted one, slide to a revision where it existed, open its popup, and restore).
 
 **Dimensions and scale.** A dimension's scale is how many overworld blocks one of its blocks covers: 1 for the Overworld and Caves, 8 for the Nether, and none for the End, whose coordinates don't correspond to anything. Switching between dimensions that have a scale keeps showing the same place (Overworld → Nether divides the coordinates by 8 and zooms in three levels), and the status bar shows the overworld equivalent of the cursor while you are in a scaled dimension. Switching to or from a dimension without a scale can't map anything, so the view returns to wherever you last were in that dimension (its origin the first time). Scales are set in _Manage → Dimensions_; existing installs get the usual values for the standard dimension names when they upgrade.
 
-**Roles.** _viewer_ can look, _editor_ can upload and edit, _moderator_ can also revert uploads and restore features (and manage dimensions), _owner_ can also manage members, invites and settings. The map is public: logged-in visitors are implicit editors and anonymous visitors are viewers, unless someone has been given a role explicitly. There is exactly one map, created on first boot; it cannot be created or deleted through the app.
+**Roles.** The map is public. Anonymous visitors can look; anyone logged in is an _editor_ and can upload and edit. _Moderators_ can also delete uploads, restore features, manage dimensions and see every private layer; _owners_ can also manage members, invites and settings. Moderators and owners are granted explicitly (members panel, invite link or `SETUP_OWNER_DISCORD_IDS`). There is exactly one map, created on first boot.
 
 **Managing the map** (_Manage_ in the toolbar):
 
-- _Settings_: name, and tile size (until the first upload).
+- _Settings_: the map name.
 - _Dimensions_: add, rename, reorder, archive. Archived dimensions keep their tiles and history.
-- _Members_: change roles, remove people, or add someone by Discord user id (they must have logged in once). The last owner can't be demoted or removed.
-- _Invites_: links with a role (viewer, editor, moderator), an expiry and an optional use limit. The link is shown once and only a hash is stored. `/invite/<token>` shows who invited you, asks you to log in, and lands you on the map. Accepting never lowers anyone's role.
+- _Members_: make someone a moderator or owner by Discord user id (they must have logged in once), change roles, or remove people. The last owner can't be demoted or removed.
+- _Invites_: links that make the person a moderator, with an expiry and an optional use limit. The link is shown once and only a hash is stored. `/invite/<token>` shows who invited you, asks you to log in, and lands you on the map. Accepting never lowers anyone's role.
 
-**Private layers** (a layer's visibility setting) are only visible to map moderators and the layer's members. The layer's creator and moderators get a _Sharing_ button for members and layer invite links. Layer access never opens a private map by itself; people need access to the map first.
+**Private layers** (a layer's visibility setting) are only visible to map moderators and the layer's members. The layer's creator and moderators get a _Sharing_ button for members and layer invite links.
 
 ## API
 
-Authentication is a session cookie (browser) or `Authorization: Bearer aomc_…` (scripts). Create a token with `POST /api/tokens {"name": "…"}` while logged in; it is shown once. Writes made with a cookie must come from `PUBLIC_URL` (CSRF), Bearer requests need no such check. Errors are JSON `{"error": "…"}`; resources you may not see answer 404.
+Authentication is a session cookie (browser) or `Authorization: Bearer aomc_…` (scripts). Generate one on the **Settings** page (`/settings`), or with `POST /api/tokens {"name": "…", "expiresInDays": 180}` while logged in with a session (a token cannot create or revoke tokens). It is shown once, expires after 180 days unless you pick another period (`null` = never) and each user can hold 25. Writes made with a cookie must come from `PUBLIC_URL` (CSRF), Bearer requests need no such check. Errors are JSON `{"error": "…"}`; resources you may not see answer 404.
 
 ```bash
 # Upload
 curl -H "Authorization: Bearer aomc_…" \
   -F 'files[]=@Overworld_x-512_z0.png' -F 'files[]=@Overworld_x0_z0.png' \
-  http://localhost:3000/api/maps/aomc/dimensions/overworld/uploads
-# -> {"revisionId": 1}   poll GET /api/revisions/1, or stream GET /api/revisions/1/events (SSE)
+  http://localhost:3000/api/dimensions/overworld/uploads
+# -> {"revisionId": 1, "revisionIds": [1]}   poll GET /api/revisions/1, or stream GET /api/revisions/1/events (SSE)
 ```
 
-An upload may also carry `coords`, a JSON array of `{x, z}` aligned with the files (after ZIP expansion), which overrides the file names. ZIP entries are read by base name only.
+An upload may also carry `coords`, a JSON array of `{x, z}` aligned with the files (after ZIP expansion), which overrides the file names. ZIP entries are read by base name only for coordinates. The export date comes from the file name, from the path of an entry inside a ZIP, or from `paths`, a JSON array of strings aligned with the uploaded files (before ZIP expansion) naming where each came from, e.g. `"2026-02-10_15.06.41/0_0_x-1248_z-1472.png"`. An upload with several export dates creates one revision per date, oldest first (`revisionIds`, in order; `revisionId` is the last).
 
-| Area      | Endpoints                                                                                                                                                                           |
-| --------- | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Session   | `GET /auth/discord`, `GET /auth/discord/callback`, `POST /auth/logout`, `GET /api/me`, `GET/POST/DELETE /api/tokens`                                                                |
-| Maps      | `GET /api/maps`, `GET/PATCH /api/maps/:slug`, `…/dimensions` (`POST`, `PATCH /:dim`), `…/members`                                                                                   |
-| Tiles     | `GET /api/maps/:map/dimensions/:dim/tiles/:zoom/:x/:y?rev=R` → 302 to `/blobs/<hash>.webp`, or 204 if empty; zoom 0 is 1:1 and a tile index is `floor(block / tileSize)`            |
-| Revisions | `GET /api/maps/:map/revisions`, `GET /api/revisions/:id`, `…/events` (SSE), `POST …/revert`, `POST …/unrevert`                                                                      |
-| Layers    | `GET /api/maps/:map/layers?dim=&at=<rev>`, `POST /api/maps/:map/layers`, `PATCH/DELETE /api/layers/:id`, `POST /api/layers/:id/features`, `GET /export`, `POST /import[?replace=1]` |
-| Features  | `PATCH/DELETE /api/features/:id`, `GET …/history`, `POST …/restore/:revisionId`                                                                                                     |
-| Sharing   | `…/invites` (map and layer), `GET /api/invites/:token`, `POST …/accept`, `DELETE /api/invites/:id`, `…/layers/:id/members`                                                          |
-| Images    | `GET /blobs/<hash>.webp`, `GET /api/preview.png`                                                                                                                                    |
+| Area      | Endpoints                                                                                                                                                                                                                          |
+| --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Session   | `GET /auth/discord`, `GET /auth/discord/callback`, `POST /auth/logout`, `GET /api/me`, `GET/POST/DELETE /api/tokens`                                                                                                               |
+| Map       | `GET/PATCH /api/map`, `POST /api/dimensions`, `PATCH /api/dimensions/:dim`, `/api/members`                                                                                                                                         |
+| Tiles     | `GET /api/dimensions/:dim/tiles/:zoom/:x/:y?rev=R` → 302 to `/blobs/<hash>.webp`, or 204 if empty (`?only=<upload revision id>` gives that upload's own tile instead); zoom 0 is 1:1 and a tile index is `floor(block / tileSize)` |
+| Revisions | `GET /api/revisions`, `GET /api/revisions/:id`, `…/events` (SSE), `DELETE /api/revisions/:id` (moderators; 202, erased in the background)                                                                                          |
+| Layers    | `GET /api/layers?dim=&at=<rev>`, `POST /api/layers`, `PATCH/DELETE /api/layers/:id`, `POST /api/layers/:id/features`, `GET /export`, `POST /import[?replace=1]`                                                                    |
+| Features  | `PATCH/DELETE /api/features/:id`, `GET …/history`, `POST …/restore/:revisionId`                                                                                                                                                    |
+| Sharing   | `GET/POST /api/invites` (map), `/api/layers/:id/invites`, `GET /api/invites/:token`, `POST …/accept`, `DELETE /api/invites/:id`, `…/layers/:id/members`                                                                            |
+| Images    | `GET /blobs/<hash>.webp`, `GET /api/preview.png`                                                                                                                                                                                   |
 
 ## Link previews
 
-Pasting a link to the map into Discord, Slack and similar shows a card with a picture of that spot. The server renders it: `GET /api/preview.png?map=&dim=&x=&z=&zoom=&rev=` composites the tiles around the point into a 1200×630 PNG with a marker in the middle (no headless browser), and `/` carries the matching Open Graph and Twitter tags. Rules:
+Pasting a link to the map into Discord, Slack and similar shows a card with a picture of that spot. The server renders it: `GET /api/preview.png?dim=&x=&z=&zoom=&rev=` composites the tiles around the point into a 1200×630 PNG with a marker in the middle (no headless browser), and `/` carries the matching Open Graph and Twitter tags. Rules:
 
 - The image contains tiles only (no layers or features, so nothing from private layers can show up in it), and the map is public, so anyone may request it.
 - All values in the tags are HTML-escaped, and the URLs are rebuilt from validated numbers rather than echoing the query string.
-- Images are cached on disk (`DATA_DIR/preview-cache`, newest `PREVIEW_CACHE_MAX` kept), keyed by map, dimension, position, zoom and revision. Identical concurrent requests share one render and at most two renders run at once.
+- Images are cached on disk (`DATA_DIR/preview-cache`, newest `PREVIEW_CACHE_MAX` kept), keyed by dimension, position, zoom and revision. Identical concurrent requests share one render and at most two renders run at once.
 
 ## Operations
 
@@ -158,7 +161,7 @@ data/preview-cache/
 docker compose exec aomc-map bun scripts/backup.ts /data/backups     # or: bun run backup <dir> --data ./data
 ```
 
-This writes a consistent `db-YYYYMMDD-HHMMSS.sqlite` (SQLite's `VACUUM INTO`, safe while the server runs) and copies any blobs the destination doesn't have yet. Blobs never change once written, so the copy only ever grows and repeated runs are cheap. `--keep N` (default 14) prunes old database snapshots. Put it in cron, then sync the destination off the machine with whatever you already use (rsync, restic, rclone, …). Litestream also works for continuous database replication, if you want it; the blobs still need the copy above.
+This writes a consistent `db-<UTC timestamp>.sqlite` (SQLite's `VACUUM INTO`, safe while the server runs) and copies any blobs the destination doesn't have yet. Blobs never change once written, so the copy only ever grows and repeated runs are cheap. `--keep N` (default 14, at least 1) prunes old database snapshots. Put it in cron, then sync the destination off the machine with whatever you already use (rsync, restic, rclone, …). Litestream also works for continuous database replication, if you want it; the blobs still need the copy above.
 
 **Restore:** stop the server, copy the snapshot to `data/db.sqlite` (delete any `db.sqlite-wal` and `db.sqlite-shm` next to it), merge the backed-up `blobs/` into `data/blobs/`, start the server.
 
@@ -171,7 +174,7 @@ docker compose exec aomc-map bun scripts/gc-blobs.ts            # report only
 docker compose exec aomc-map bun scripts/gc-blobs.ts --delete
 ```
 
-It keeps everything referenced by a tile version or an upload patch, keeps files younger than an hour (`--min-age-minutes`), and refuses to delete while jobs are pending, because a running job writes blobs before the database row that points to them.
+It keeps everything referenced by a tile version or an upload patch, keeps files younger than an hour (`--min-age-minutes`; the blob store refreshes a file's age whenever an upload reuses it), and refuses to delete while jobs are pending, because a running job writes blobs before the database row that points to them.
 
 ### Importing the old (v1) map
 
@@ -179,26 +182,26 @@ The importer uses only the public API, so it works against any running server. v
 
 ```bash
 export AOMC_TOKEN=aomc_…          # an editor's token, from POST /api/tokens
-bun scripts/import-v1.ts --url https://map.example.com --map aomc \
+bun scripts/import-v1.ts --url https://map.example.com \
     --src /path/to/v1/data/output --state import-state.json
 ```
 
-It uploads in batches (`--batch`, default 200) with explicit coordinates, waits for each batch to finish, and records finished files in the state file, so an interrupted run resumes where it stopped (run the same command again). `--dims overworld,nether` limits the dimensions and `--dim-map old=slug` renames one. The dimensions must already exist on the map. Tiles that are entirely black have nothing to import and are skipped. Check the result on a copy of your data first: a revert undoes an import batch by batch, but nothing deletes a whole import.
+It uploads in batches (`--batch`, default 200) with explicit coordinates, waits for each batch to finish, and records finished files in the state file, so an interrupted run resumes where it stopped (run the same command again). `--dims overworld,nether` limits the dimensions and `--dim-map old=slug` renames one. The dimensions must already exist on the map. Tiles that are entirely black have nothing to import and are skipped. Check the result on a copy of your data first: a moderator can delete an import batch by batch from the upload log, but nothing deletes a whole import in one go.
 
 ### Rate limits and quotas
 
-Upload requests are limited per user (`UPLOAD_RATE_LIMIT` per minute, in memory), and uploads are bounded by `MAX_UPLOAD_BYTES`, `MAX_IMAGE_DIM` and `MAX_FILES_PER_UPLOAD`. There is no per-map storage quota.
+Upload requests are limited per user (`UPLOAD_RATE_LIMIT` per minute, in memory), and uploads are bounded by `MAX_UPLOAD_BYTES`, `MAX_IMAGE_DIM` and `MAX_FILES_PER_UPLOAD`. There is no storage quota.
 
 ### Health
 
-The container has a health check (`/api/me`). Jobs interrupted by a crash or restart are retried on the next boot; a revision only becomes visible when it is fully written, so a half-finished upload never shows.
+The container has a health check (`/api/me`). Jobs interrupted by a crash or restart are retried on the next boot (a job that has been interrupted three times is marked failed instead); a revision only becomes visible when it is fully written, so a half-finished upload never shows.
 
 ## How it works
 
-- **Tiles.** An upload is cut into one patch per touched tile (black pixels become transparent), the patch is composited over the tile's current image, and the zoom-out pyramid above it is rebuilt. Tile images are lossless WebP stored by content hash. A tile's history is a list of `(tile, rev, blob)` rows, so "the map at revision R" is the newest row at or before R for each tile. All of a revision's rows are committed in one transaction together with the new head revision.
-- **Reverting** never rewrites history. For each tile the upload touched, the server replays every upload that is currently not reverted, in order, and publishes the result as a new revision. Because replay starts from nothing, reverting an upload can't resurrect something that was reverted earlier.
+- **Tiles.** An upload is cut into one patch per touched tile (black pixels become transparent), the patch is composited over the tile's current image (or, if a newer export already covers the tile, the tile is replayed from every patch in export-date order), and the zoom-out pyramid above it is rebuilt. Tile images are lossless WebP stored by content hash. A tile's history is a list of `(tile, rev, blob)` rows, so "the map at revision R" is the newest row at or before R for each tile. All of a revision's rows are committed in one transaction together with the new head revision.
+- **Deleting** an upload does rewrite history, on purpose. For each tile the upload touched, the server replays, at every revision from the upload's own onwards, the uploads that were live then (oldest export first) without it, and stores a row wherever the result differs from the revision before. The zoomed-out tiles above are rebuilt from the rewritten rows, the upload and its patches are removed, and everything is swapped in by one transaction. The map's `epoch` is bumped and is part of the tile URLs and the preview cache key, so browsers and previews don't keep serving the old immutable tiles. Run `gc-blobs` afterwards to reclaim the files nothing refers to any more.
 - **Features** are append-only: a feature row only gives an identity; every edit, deletion and restore is a new revision. "The layer at revision R" is read by timestamp.
-- **Permissions** live in one module (`server/src/permissions.ts`) as pure functions with table-driven tests; routes never check roles themselves.
+- **Permissions** live in one module (`server/src/permissions.ts`) as pure functions with table-driven tests; routes ask it rather than comparing roles themselves.
 - **The map renderer** (`web/src/map`) keeps one cache slot per tile and revalidates it in place when the revision changes, so scrubbing the slider doesn't blank the screen. The tile level is chosen so tiles are never upscaled.
 
 ## Security notes

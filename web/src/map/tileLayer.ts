@@ -5,7 +5,7 @@ import {
 	tileRect,
 	type View,
 	visibleTiles,
-} from "./camera";
+} from "@aomc/shared/view";
 
 export type TileSource = (zoom: number, x: number, y: number) => string;
 
@@ -27,6 +27,8 @@ type Dest = { x0: number; y0: number; x1: number; y1: number };
 
 const RETRY_MS = 5000;
 const MAX_TILES_PER_FRAME = 600;
+const MAX_CACHE = 512;
+const MAX_CONCURRENT = 8;
 
 const key = (zoom: number, x: number, y: number) => `${zoom}/${x}/${y}`;
 
@@ -47,8 +49,6 @@ export class TileLayer {
 			tileSize: number;
 			maxZoom: number;
 			onChange: () => void;
-			maxCache?: number;
-			maxConcurrent?: number;
 		},
 	) {}
 
@@ -56,7 +56,7 @@ export class TileLayer {
 	 * keepPrevious: keep showing the images of the old source until the new ones arrive (e.g. the
 	 * revision changed). Pass false when the content is unrelated (another map or dimension).
 	 */
-	setSource(source: TileSource | null, keepPrevious = false) {
+	setSource(source: TileSource, keepPrevious = false) {
 		this.source = source;
 		this.sourceId++;
 		this.wanted.clear();
@@ -210,7 +210,6 @@ export class TileLayer {
 	}
 
 	private pump() {
-		const maxConcurrent = this.opts.maxConcurrent ?? 8;
 		const now = Date.now();
 
 		// Cancel requests that are no longer wanted or are for an older source.
@@ -247,7 +246,7 @@ export class TileLayer {
 		pending.sort((a, b) => a[1].priority - b[1].priority);
 
 		for (const [k, tile] of pending) {
-			if (this.inFlight >= maxConcurrent) break;
+			if (this.inFlight >= MAX_CONCURRENT) break;
 			this.start(k, tile);
 		}
 	}
@@ -300,16 +299,11 @@ export class TileLayer {
 	}
 
 	private evict() {
-		const max = this.opts.maxCache ?? 512;
 		for (const [k, entry] of this.cache) {
-			if (this.cache.size <= max) break;
+			if (this.cache.size <= MAX_CACHE) break;
 			if (entry.loading) continue;
 			entry.bitmap?.close();
 			this.cache.delete(k);
 		}
-	}
-
-	dispose() {
-		this.clear();
 	}
 }

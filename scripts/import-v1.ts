@@ -1,5 +1,5 @@
 import { existsSync } from "node:fs";
-import { readdir, readFile, rename, writeFile } from "node:fs/promises";
+import { readdir, readFile, rename, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { parseArgs } from "node:util";
 
@@ -13,8 +13,6 @@ import { parseArgs } from "node:util";
 export type ImportOptions = {
 	url: string;
 	token: string;
-	/** Slug of the target map. */
-	map: string;
 	/** v1 output directory (contains one folder per dimension). */
 	src: string;
 	batch?: number;
@@ -26,6 +24,8 @@ export type ImportOptions = {
 	/** v1 folder name -> dimension slug, when they differ. */
 	dimMap?: Record<string, string>;
 	pollMs?: number;
+	/** Wait between retries when the server rate-limits uploads. */
+	retryMs?: number;
 	fetch?: typeof fetch;
 	log?: (message: string) => void;
 };
@@ -36,17 +36,14 @@ export type ImportResult = {
 	batches: number;
 };
 
-type State = { version: 1; done: Record<string, string[]> };
+type State = { done: Record<string, string[]> };
 
 const TILE_NAME = /^(-?\d+)_(-?\d+)\.png$/;
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 async function loadState(path: string | undefined): Promise<State> {
-	if (!path || !existsSync(path)) return { version: 1, done: {} };
-	const parsed = JSON.parse(await readFile(path, "utf8")) as State;
-	if (parsed.version !== 1)
-		throw new Error(`unknown state file version in ${path}`);
-	return parsed;
+	if (!path || !existsSync(path)) return { done: {} };
+	return JSON.parse(await readFile(path, "utf8")) as State;
 }
 
 async function saveState(path: string | undefined, state: State) {
@@ -63,24 +60,15 @@ export async function runImport(opts: ImportOptions): Promise<ImportResult> {
 	const batchSize = opts.batch ?? 200;
 	const maxBytes = opts.maxBatchBytes ?? 100 * 1024 * 1024;
 	const pollMs = opts.pollMs ?? 1500;
+	const maxPolls = Math.ceil((30 * 60_000) / pollMs);
 
-	const mapRes = await f(`${base}/api/maps/${encodeURIComponent(opts.map)}`, {
-		headers: auth,
-	});
+	const mapRes = await f(`${base}/api/map`, { headers: auth });
 	if (!mapRes.ok)
-		throw new Error(`cannot open map "${opts.map}" (HTTP ${mapRes.status})`);
+		throw new Error(`cannot open the map (HTTP ${mapRes.status})`);
 	const map = (await mapRes.json()) as {
-		map: { tileSize: number };
 		role: string;
 		dimensions: { slug: string }[];
 	};
-	if (map.role === "viewer")
-		throw new Error("this token's user may not upload to that map");
-	if (map.map.tileSize !== 512) {
-		log(
-			`warning: the map's tile size is ${map.map.tileSize}; v1 tiles are 512 blocks, so tiles will be re-cut`,
-		);
-	}
 	const known = new Set(map.dimensions.map((d) => d.slug));
 
 	const folders = (await readdir(opts.src, { withFileTypes: true }))
@@ -98,7 +86,7 @@ export async function runImport(opts: ImportOptions): Promise<ImportResult> {
 		const slug = opts.dimMap?.[folder] ?? folder;
 		if (!known.has(slug)) {
 			throw new Error(
-				`dimension "${slug}" does not exist on map "${opts.map}"; add it in Manage > Dimensions first`,
+				`dimension "${slug}" does not exist on the map; add it in Manage > Dimensions first`,
 			);
 		}
 		const dir = join(opts.src, folder, "0");
@@ -111,22 +99,25 @@ export async function runImport(opts: ImportOptions): Promise<ImportResult> {
 			`${folder}: ${files.length} tiles, ${files.length - todo.length} already done`,
 		);
 
-		// Batches are bounded by file count and by total size.
-		const batches: { name: string; bytes: Uint8Array }[][] = [];
-		let current: { name: string; bytes: Uint8Array }[] = [];
+		// Batches are bounded by file count and by total size (read from disk only when uploading).
+		const sizes = await Promise.all(
+			todo.map(async (name) => (await stat(join(dir, name))).size),
+		);
+		const batches: string[][] = [];
+		let current: string[] = [];
 		let size = 0;
-		for (const name of todo) {
-			const bytes = new Uint8Array(await readFile(join(dir, name)));
+		for (const [i, name] of todo.entries()) {
+			const bytes = sizes[i] as number;
 			if (
 				current.length > 0 &&
-				(current.length >= batchSize || size + bytes.length > maxBytes)
+				(current.length >= batchSize || size + bytes > maxBytes)
 			) {
 				batches.push(current);
 				current = [];
 				size = 0;
 			}
-			current.push({ name, bytes });
-			size += bytes.length;
+			current.push(name);
+			size += bytes;
 		}
 		if (current.length > 0) batches.push(current);
 
@@ -135,26 +126,21 @@ export async function runImport(opts: ImportOptions): Promise<ImportResult> {
 			result.batches++;
 			if (outcome === "empty") result.skipped += batch.length;
 			else result.uploaded += batch.length;
-			state.done[folder] = [
-				...(state.done[folder] ?? []),
-				...batch.map((b) => b.name),
-			];
+			state.done[folder] = [...(state.done[folder] ?? []), ...batch];
 			await saveState(opts.statePath, state);
 			log(
 				`${folder}: batch ${i + 1}/${batches.length} ${outcome} (${batch.length} tiles)`,
 			);
 		}
 
-		async function uploadBatch(
-			batch: { name: string; bytes: Uint8Array }[],
-		): Promise<"done" | "empty"> {
+		async function uploadBatch(batch: string[]): Promise<"done" | "empty"> {
 			const form = new FormData();
-			for (const { name, bytes } of batch)
-				form.append("files[]", new File([bytes as BlobPart], name));
+			for (const name of batch)
+				form.append("files[]", new File([Bun.file(join(dir, name))], name));
 			form.append(
 				"coords",
 				JSON.stringify(
-					batch.map(({ name }) => {
+					batch.map((name) => {
 						const m = TILE_NAME.exec(name) as RegExpExecArray;
 						return { x: Number(m[1]), z: Number(m[2]) };
 					}),
@@ -164,7 +150,7 @@ export async function runImport(opts: ImportOptions): Promise<ImportResult> {
 			let revisionId = 0;
 			for (let attempt = 0; ; attempt++) {
 				const res = await f(
-					`${base}/api/maps/${encodeURIComponent(opts.map)}/dimensions/${encodeURIComponent(slug)}/uploads`,
+					`${base}/api/dimensions/${encodeURIComponent(slug)}/uploads`,
 					{
 						method: "POST",
 						headers: auth,
@@ -177,8 +163,8 @@ export async function runImport(opts: ImportOptions): Promise<ImportResult> {
 					break;
 				}
 				if (res.status === 429 && attempt < 20) {
-					log("rate limited, waiting 15 s");
-					await sleep(15_000);
+					log("rate limited, waiting");
+					await sleep(opts.retryMs ?? 15_000);
 					continue;
 				}
 				const body = (await res.json().catch(() => ({}))) as {
@@ -194,7 +180,9 @@ export async function runImport(opts: ImportOptions): Promise<ImportResult> {
 				);
 			}
 
-			for (;;) {
+			for (let polls = 0; ; polls++) {
+				if (polls >= maxPolls)
+					throw new Error(`revision ${revisionId} did not finish in time`);
 				await sleep(pollMs);
 				const r = await f(`${base}/api/revisions/${revisionId}`, {
 					headers: auth,
@@ -226,7 +214,6 @@ if (import.meta.main) {
 		options: {
 			url: { type: "string" },
 			token: { type: "string", default: process.env.AOMC_TOKEN },
-			map: { type: "string" },
 			src: { type: "string" },
 			batch: { type: "string", default: "200" },
 			state: { type: "string" },
@@ -234,9 +221,9 @@ if (import.meta.main) {
 			"dim-map": { type: "string", multiple: true },
 		},
 	});
-	if (!values.url || !values.token || !values.map || !values.src) {
+	if (!values.url || !values.token || !values.src) {
 		console.error(
-			"usage: bun scripts/import-v1.ts --url https://map.example.com --token aomc_... --map aomc --src /path/to/v1/data/output\n" +
+			"usage: bun scripts/import-v1.ts --url https://map.example.com --token aomc_... --src /path/to/v1/data/output\n" +
 				"       [--batch 200] [--state import-state.json] [--dims overworld,nether] [--dim-map v1name=slug]\n" +
 				"       (the token can also come from the AOMC_TOKEN environment variable)",
 		);
@@ -251,7 +238,6 @@ if (import.meta.main) {
 		const r = await runImport({
 			url: values.url,
 			token: values.token,
-			map: values.map,
 			src: values.src,
 			batch: Number(values.batch),
 			statePath: values.state ?? "import-state.json",

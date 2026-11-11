@@ -1,6 +1,6 @@
-import { and, desc, eq, lte } from "drizzle-orm";
+import { and, asc, desc, eq, lte, sql } from "drizzle-orm";
 import type { Db } from "../db/client";
-import { maps, revisions, tileVersions, uploadPatches } from "../db/schema";
+import { mapInfo, revisions, tileVersions, uploadPatches } from "../db/schema";
 import type { TileWrite } from "./pyramid";
 
 export type Bbox = { minX: number; minZ: number; maxX: number; maxZ: number };
@@ -44,6 +44,48 @@ export async function tileHashAt(
 	);
 }
 
+/** When an upload counts as made: its export time, or else when it was uploaded. */
+export const effectiveTime = sql<number>`coalesce(${revisions.exportedAt}, ${revisions.createdAt})`;
+
+export type TilePatch = {
+	id: number;
+	reverted: boolean;
+	hash: string;
+	/** `effectiveTime` of the upload. */
+	at: number;
+};
+
+/**
+ * Every patch of every finished upload that touched a tile, oldest first. Overlapping patches
+ * are applied in this order, so the newest export is on top however late it was uploaded.
+ */
+export function tilePatches(
+	db: Db,
+	dimensionId: number,
+	x: number,
+	y: number,
+): Promise<TilePatch[]> {
+	return db
+		.select({
+			id: revisions.id,
+			reverted: revisions.reverted,
+			hash: uploadPatches.blobHash,
+			at: effectiveTime,
+		})
+		.from(uploadPatches)
+		.innerJoin(revisions, eq(revisions.id, uploadPatches.revisionId))
+		.where(
+			and(
+				eq(revisions.dimensionId, dimensionId),
+				eq(revisions.kind, "upload"),
+				eq(revisions.status, "done"),
+				eq(uploadPatches.tileX, x),
+				eq(uploadPatches.tileY, y),
+			),
+		)
+		.orderBy(asc(effectiveTime), asc(revisions.id));
+}
+
 /**
  * Publishes a finished revision atomically: tile versions, patches, the revision row and the
  * map's head_rev all become visible together, or not at all.
@@ -51,23 +93,17 @@ export async function tileHashAt(
 export function commitRevision(
 	db: Db,
 	opts: {
-		mapId: number;
 		revisionId: number;
 		rev: number;
 		dimensionId: number;
 		writes: TileWrite[];
 		patches?: { x: number; y: number; hash: string }[];
 		bbox: Bbox | null;
-		setReverted?: { revisionId: number; reverted: boolean };
 	},
 ) {
-	const { mapId, revisionId, rev, dimensionId } = opts;
+	const { revisionId, rev, dimensionId } = opts;
 	db.transaction((tx) => {
-		const map = tx
-			.select({ headRev: maps.headRev })
-			.from(maps)
-			.where(eq(maps.id, mapId))
-			.get();
+		const map = tx.select({ headRev: mapInfo.headRev }).from(mapInfo).get();
 		if (!map || map.headRev !== rev - 1)
 			throw new Error("map head moved during processing");
 
@@ -99,12 +135,6 @@ export function commitRevision(
 				)
 				.run();
 		}
-		if (opts.setReverted) {
-			tx.update(revisions)
-				.set({ reverted: opts.setReverted.reverted })
-				.where(eq(revisions.id, opts.setReverted.revisionId))
-				.run();
-		}
 		tx.update(revisions)
 			.set({
 				rev,
@@ -118,7 +148,7 @@ export function commitRevision(
 			})
 			.where(eq(revisions.id, revisionId))
 			.run();
-		tx.update(maps).set({ headRev: rev }).where(eq(maps.id, mapId)).run();
+		tx.update(mapInfo).set({ headRev: rev }).run();
 	});
 }
 

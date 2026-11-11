@@ -68,7 +68,7 @@ export function authRoutes(fetchFn: DiscordFetch = fetch) {
 				console.error(err);
 				return c.json({ error: "discord login failed" }, 502);
 			}
-			await upsertUser(c.var.db, profile);
+			upsertUser(c.var.db, profile);
 			const session = await createSession(c.var.db, profile.id);
 			setCookie(c, SESSION_COOKIE, session, {
 				httpOnly: true,

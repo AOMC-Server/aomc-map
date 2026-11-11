@@ -1,18 +1,16 @@
 import { MAX_COORD } from "@aomc/shared/schemas";
 import { MIN_ZOOM } from "@aomc/shared/view";
-import { eq } from "drizzle-orm";
 import { z } from "zod";
 import type { Db } from "./db/client";
-import { dimensions, maps } from "./db/schema";
+import { dimensions } from "./db/schema";
 import type { Env } from "./env";
-import { type Actor, loadMapAccess } from "./permissions";
 import type { PreviewParams } from "./preview";
+import type { MapRow } from "./types";
 
 const coord = z.coerce.number().int().min(-MAX_COORD).max(MAX_COORD);
 
 /** The view parameters shared by /api/preview.png and the page's share tags. */
 export const viewQuerySchema = z.object({
-	map: z.string().max(40).optional(),
 	dim: z.string().max(40).optional(),
 	x: coord.optional(),
 	z: coord.optional(),
@@ -23,40 +21,24 @@ export type ViewQuery = z.infer<typeof viewQuerySchema>;
 
 export type PreviewTarget = {
 	mapName: string;
-	mapSlug: string;
 	dimensionName: string;
 	dimensionSlug: string;
-	mapId: number;
 	params: PreviewParams;
 };
 
 /**
- * Resolves a view query to a concrete map, dimension, position and revision for the given actor.
- * Returns null when the map or dimension does not exist (callers answer 404).
+ * Resolves a view query to a concrete dimension, position and revision.
+ * Returns null when the dimension does not exist (callers answer 404).
  */
 export async function resolvePreviewTarget(
 	db: Db,
 	env: Env,
-	actor: Actor,
+	map: MapRow,
 	q: ViewQuery,
 ): Promise<PreviewTarget | null> {
-	let slug = q.map;
-	if (!slug) {
-		const [first] = await db
-			.select({ slug: maps.slug })
-			.from(maps)
-			.orderBy(maps.id)
-			.limit(1);
-		slug = first?.slug;
-	}
-	if (!slug) return null;
-	const access = await loadMapAccess(db, actor, slug);
-	if (!access) return null;
-
 	const dims = await db
 		.select()
 		.from(dimensions)
-		.where(eq(dimensions.mapId, access.map.id))
 		.orderBy(dimensions.sortOrder, dimensions.id);
 	const dim = q.dim
 		? dims.find((d) => d.slug === q.dim)
@@ -67,19 +49,18 @@ export async function resolvePreviewTarget(
 		Math.round(Math.min(Math.max(q.zoom ?? 2, MIN_ZOOM), env.MAX_ZOOM) * 100) /
 		100;
 	return {
-		mapName: access.map.name,
-		mapSlug: access.map.slug,
+		mapName: map.name,
 		dimensionName: dim.name,
 		dimensionSlug: dim.slug,
-		mapId: access.map.id,
 		params: {
 			dimensionId: dim.id,
-			tileSize: access.map.tileSize,
+			tileSize: map.tileSize,
 			maxZoom: env.MAX_ZOOM,
 			x: q.x ?? 0,
 			z: q.z ?? 0,
 			zoom,
-			rev: Math.min(q.rev ?? access.map.headRev, access.map.headRev),
+			rev: Math.min(q.rev ?? map.headRev, map.headRev),
+			epoch: map.epoch,
 		},
 	};
 }

@@ -21,11 +21,14 @@ RUN bun run --cwd web build
 FROM oven/bun:1
 WORKDIR /app
 ENV NODE_ENV=production DATA_DIR=/data PORT=3000
-COPY --from=deps /app/node_modules node_modules
 COPY package.json ./
 COPY server server
 COPY shared shared
 COPY scripts scripts
+# Bun links workspace dependencies through each package's own node_modules.
+COPY --from=deps /app/node_modules node_modules
+COPY --from=deps /app/server/node_modules server/node_modules
+COPY --from=deps /app/shared/node_modules shared/node_modules
 COPY --from=web /app/web/dist web/dist
 RUN mkdir /data && chown bun:bun /data
 USER bun

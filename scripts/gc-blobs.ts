@@ -1,16 +1,9 @@
 import { Database } from "bun:sqlite";
 import { existsSync } from "node:fs";
 import { readdir, rm, stat } from "node:fs/promises";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { parseArgs } from "node:util";
-
-async function* walk(dir: string): AsyncGenerator<string> {
-	for (const entry of await readdir(dir, { withFileTypes: true })) {
-		const path = join(dir, entry.name);
-		if (entry.isDirectory()) yield* walk(path);
-		else yield path;
-	}
-}
+import { isBlobHash } from "../server/src/tiles/blobstore";
 
 export type GcResult = {
 	total: number;
@@ -23,10 +16,11 @@ export type GcResult = {
 
 /**
  * Finds blobs that no tile version and no upload patch points to (left behind by failed jobs or
- * reverted-then-superseded work) and optionally deletes them.
+ * deleted uploads) and optionally deletes them.
  *
  * Refuses to delete while jobs are pending: a running job writes its blobs before the database row
- * that references them. Files younger than `minAgeMs` are always kept for the same reason.
+ * that references them. Files younger than `minAgeMs` are always kept for the same reason; the
+ * blob store refreshes a blob's age whenever a job reuses it, so an old orphan is not at risk.
  */
 export async function gcBlobs(opts: {
 	dataDir: string;
@@ -79,9 +73,10 @@ export async function gcBlobs(opts: {
 	const blobsDir = join(opts.dataDir, "blobs");
 	if (!existsSync(blobsDir)) return result;
 
-	for await (const file of walk(blobsDir)) {
-		const name = file.slice(file.lastIndexOf("/") + 1);
-		const isBlob = /^[0-9a-f]{64}\.webp$/.test(name);
+	for (const rel of await readdir(blobsDir, { recursive: true })) {
+		const file = join(blobsDir, rel);
+		const name = basename(rel);
+		const isBlob = name.endsWith(".webp") && isBlobHash(name.slice(0, -5));
 		const isTemp = name.endsWith(".tmp");
 		if (!isBlob && !isTemp) continue;
 		if (isBlob) result.total++;
