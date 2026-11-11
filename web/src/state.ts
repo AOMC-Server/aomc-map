@@ -71,8 +71,8 @@ export const isolatedUpload = signal<RevisionInfo | null>(null);
 
 /** Revisions of the dimension being viewed, newest first. */
 export const revisionsData = signal<RevisionInfo[]>([]);
-/** Area of a revision to outline on the map (hovered or selected in the upload log). */
-export const highlightBbox = signal<RevisionInfo["bbox"]>(null);
+/** Revision whose area is outlined on the map (hovered or selected in the upload log). */
+export const highlightedUpload = signal<RevisionInfo | null>(null);
 /** The upload pointed at in the history panel, and where: the other side highlights it too. */
 export const hoveredRevision = signal<{
 	id: number;

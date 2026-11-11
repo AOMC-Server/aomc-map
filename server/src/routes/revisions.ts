@@ -4,9 +4,15 @@ import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { requireUser, userOf } from "../auth/session";
 import type { Db } from "../db/client";
-import { dimensions, jobs, revisions, users } from "../db/schema";
+import {
+	dimensions,
+	jobs,
+	revisions,
+	uploadPatches,
+	users,
+} from "../db/schema";
 import { doc } from "../openapi";
-import { canDeleteUpload, canModerate } from "../permissions";
+import { canDeleteUpload, canModerate, loadMap } from "../permissions";
 import type { ProgressEvent } from "../progress";
 import type { AppEnv } from "../types";
 import { parseId } from "./util";
@@ -166,6 +172,30 @@ export const revisionRoutes = new Hono<AppEnv>()
 			const row = loadRevision(c.var.db, parseId(c.req.param("id")));
 			if (!row) return c.json({ error: "not found" }, 404);
 			return c.json({ revision: serialize(row, deleteAccess(c)) });
+		},
+	)
+	.get(
+		"/:id/tiles",
+		doc({
+			tag: "Revisions",
+			summary: "Tiles an upload covers",
+			description:
+				"The zoom 0 tiles (`[x, y]`, y along the z axis) the upload put map data in, which outline where it is more closely than its `bbox`. Each spans `tileSize` blocks. Empty for anything that is not a finished upload.",
+			fails: [404],
+		}),
+		async (c) => {
+			const { db } = c.var;
+			const id = parseId(c.req.param("id"));
+			if (!loadRevision(db, id)) return c.json({ error: "not found" }, 404);
+			const rows = await db
+				.select({ x: uploadPatches.tileX, y: uploadPatches.tileY })
+				.from(uploadPatches)
+				.where(eq(uploadPatches.revisionId, id));
+			const { tileSize } = await loadMap(db);
+			return c.json({
+				tileSize,
+				tiles: rows.map((r) => [r.x, r.y] as [number, number]),
+			});
 		},
 	)
 	.get(

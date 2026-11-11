@@ -8,7 +8,7 @@ import {
 	currentMap,
 	dimSlug,
 	effectiveRev,
-	highlightBbox,
+	highlightedUpload,
 	hoveredRevision,
 	isolatedUpload,
 	type RevisionInfo,
@@ -46,7 +46,7 @@ const inFlight = (r: RevisionInfo) =>
 function showRevision(r: RevisionInfo) {
 	if (r.rev === null) return;
 	setRev(r.rev);
-	highlightBbox.value = r.bbox;
+	highlightedUpload.value = r;
 	if (r.bbox && !settings.value.historyInView)
 		mapView.value?.fitBounds(r.bbox, { padding: 120, closestZoom: 0 });
 }
@@ -214,7 +214,7 @@ export function HistoryPanel() {
 
 	useEffect(
 		() => () => {
-			highlightBbox.value = null;
+			highlightedUpload.value = null;
 			hoveredRevision.value = null;
 		},
 		[],

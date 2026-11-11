@@ -222,6 +222,27 @@ describe("progress and revisions API", () => {
 		expect((await t.app.request("/api/revisions/9999")).status).toBe(404);
 		expect((await t.app.request("/api/revisions/abc")).status).toBe(404);
 	});
+
+	test("tiles endpoint lists only the tiles an upload covers", async () => {
+		const t = await bootTiles();
+		const res = await postUpload(t, t.editor, [
+			{ name: "a_x0_z0.png", data: await solid(T, T, RED) },
+			{ name: "b_x160_z-80.png", data: await solid(T, T, BLUE) },
+		]);
+		const { revisionId } = (await res.json()) as { revisionId: number };
+		await t.services.worker.run();
+		const body = await (
+			await t.app.request(`/api/revisions/${revisionId}/tiles`)
+		).json();
+		expect(body.tileSize).toBe(T);
+		expect(
+			(body.tiles as [number, number][]).sort((a, b) => a[0] - b[0]),
+		).toEqual([
+			[0, 0],
+			[10, -5],
+		]);
+		expect((await t.app.request("/api/revisions/9999/tiles")).status).toBe(404);
+	});
 });
 
 describe("tile and blob routes", () => {

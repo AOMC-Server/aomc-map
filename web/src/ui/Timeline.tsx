@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { setRev } from "../controller";
 import {
 	currentMap,
-	highlightBbox,
+	highlightedUpload,
 	hoveredRevision,
 	type RevisionInfo,
 	rev,
@@ -33,7 +33,7 @@ const SNAP_PX = 7;
 /** Points at an upload from the timeline or the log: both highlight it and the map outlines it. */
 export function pointAt(r: RevisionInfo | null, from: "timeline" | "log") {
 	hoveredRevision.value = r ? { id: r.id, from } : null;
-	highlightBbox.value = r?.bbox ?? null;
+	highlightedUpload.value = r;
 }
 
 const markerHeight = (r: RevisionInfo) =>

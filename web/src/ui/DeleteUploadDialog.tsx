@@ -1,7 +1,7 @@
 import { signal } from "@preact/signals";
 import { mapView } from "../controller";
 import { deleteUpload } from "../revisions";
-import { highlightBbox, type RevisionInfo, user } from "../state";
+import { highlightedUpload, type RevisionInfo, user } from "../state";
 import { formatTime } from "./format";
 import { Modal } from "./Modal";
 
@@ -10,7 +10,7 @@ export const deleteUploadFor = signal<RevisionInfo | null>(null);
 
 const close = () => {
 	deleteUploadFor.value = null;
-	highlightBbox.value = null;
+	highlightedUpload.value = null;
 };
 
 /** Asks before deleting an upload for good, with what it is and where. */
@@ -73,7 +73,7 @@ export function DeleteUploadDialog() {
 						type="button"
 						class="btn"
 						onClick={() => {
-							highlightBbox.value = box;
+							highlightedUpload.value = r;
 							mapView.value?.fitBounds(box, { padding: 120, closestZoom: 0 });
 						}}
 					>
