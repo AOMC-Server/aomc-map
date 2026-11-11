@@ -16,6 +16,7 @@ import { doc } from "../openapi";
 import { canEdit } from "../permissions";
 import { failRevision } from "../tiles/history";
 import type { AppEnv } from "../types";
+import { isModClient } from "../uploadClient";
 
 /** `path` is where the file came from (folders included); it carries the export date. */
 type Entry = { name: string; path: string; data: Uint8Array };
@@ -27,7 +28,7 @@ export const uploadRoutes = new Hono<AppEnv>().post(
 		tag: "Uploads",
 		summary: "Upload Xaero exports",
 		description:
-			"Send PNG files or ZIPs as multipart/form-data. Coordinates come from `_x<X>_z<Z>` in file names unless `coords` is given. Processing runs in the background: poll `GET /api/revisions/{id}` or stream its events. An upload with several export dates creates one revision per date.",
+			"Send PNG files or ZIPs as multipart/form-data. Coordinates come from `_x<X>_z<Z>` in file names unless `coords` is given. An upload from the in-game mod is recognised by its `User-Agent` (see `MOD_USER_AGENTS`; by default AOMC Webmapper and AOMC Visited) and counted separately in the statistics. Processing runs in the background: poll `GET /api/revisions/{id}` or stream its events. An upload with several export dates creates one revision per date.",
 		ok: {
 			202: "Accepted. `revisionId` is the last revision, `revisionIds` all of them, oldest first",
 		},
@@ -237,6 +238,7 @@ export const uploadRoutes = new Hono<AppEnv>().post(
 				(a ?? Number.POSITIVE_INFINITY) - (b ?? Number.POSITIVE_INFINITY),
 		);
 
+		const viaMod = isModClient(c.req.header("User-Agent"), env.MOD_USER_AGENTS);
 		const revisionIds: number[] = [];
 		try {
 			for (const [exportedAt, group] of ordered) {
@@ -248,6 +250,7 @@ export const uploadRoutes = new Hono<AppEnv>().post(
 						authorId: user.id,
 						fileCount: group.length,
 						exportedAt,
+						viaMod,
 					})
 					.returning({ id: revisions.id });
 				revisionIds.push((revision as { id: number }).id);

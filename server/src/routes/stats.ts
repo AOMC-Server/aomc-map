@@ -18,6 +18,11 @@ type FeatureType = "pin" | "line" | "polygon";
 
 export type UserStats = {
 	uploads: number;
+	/** Of which sent by the in-game mod; with the volume and the distinct ground it uploaded. */
+	modUploads: number;
+	modUploadedBlocks: number;
+	modAreaTiles: number;
+	modAreaBlocks: number;
 	tiles: number;
 	/** Every tile uploaded, repeats included, as blocks². */
 	uploadedBlocks: number;
@@ -31,6 +36,10 @@ export type UserStats = {
 
 const emptyStats = (): UserStats => ({
 	uploads: 0,
+	modUploads: 0,
+	modUploadedBlocks: 0,
+	modAreaTiles: 0,
+	modAreaBlocks: 0,
 	tiles: 0,
 	uploadedBlocks: 0,
 	areaTiles: 0,
@@ -77,10 +86,17 @@ function collect(db: Db, s: Scope): Map<string, UserStats> {
 	const uploads = db.all<{
 		userId: string;
 		uploads: number;
+		modUploads: number;
+		modTiles: number;
+		modArea: number;
 		tiles: number;
 		area: number;
 	}>(sql`
-		SELECT r.author_id AS userId, COUNT(DISTINCT r.id) AS uploads, COUNT(p.revision_id) AS tiles,
+		SELECT r.author_id AS userId, COUNT(DISTINCT r.id) AS uploads,
+			COUNT(DISTINCT CASE WHEN r.via_mod = 1 THEN r.id END) AS modUploads,
+			COUNT(CASE WHEN r.via_mod = 1 THEN p.revision_id END) AS modTiles,
+			COUNT(DISTINCT CASE WHEN r.via_mod = 1 THEN r.dimension_id || ':' || p.tile_x || ':' || p.tile_y END) AS modArea,
+			COUNT(p.revision_id) AS tiles,
 			COUNT(DISTINCT r.dimension_id || ':' || p.tile_x || ':' || p.tile_y) AS area
 		FROM revisions r LEFT JOIN upload_patches p ON p.revision_id = r.id
 		WHERE r.kind = 'upload' AND r.status = 'done' AND r.reverted = 0
@@ -89,6 +105,10 @@ function collect(db: Db, s: Scope): Map<string, UserStats> {
 	for (const r of uploads) {
 		const row = get(r.userId);
 		row.uploads = r.uploads;
+		row.modUploads = r.modUploads;
+		row.modUploadedBlocks = r.modTiles * s.tileSize * s.tileSize;
+		row.modAreaTiles = r.modArea;
+		row.modAreaBlocks = r.modArea * s.tileSize * s.tileSize;
 		row.tiles = r.tiles;
 		row.uploadedBlocks = r.tiles * s.tileSize * s.tileSize;
 		row.areaTiles = r.area;
@@ -128,6 +148,8 @@ function totalsOf(db: Db, s: Scope, rows: UserStats[]): UserStats {
 	const total = emptyStats();
 	for (const r of rows) {
 		total.uploads += r.uploads;
+		total.modUploads += r.modUploads;
+		total.modUploadedBlocks += r.modUploadedBlocks;
 		total.tiles += r.tiles;
 		total.uploadedBlocks += r.uploadedBlocks;
 		total.featuresCreated += r.featuresCreated;
@@ -136,15 +158,18 @@ function totalsOf(db: Db, s: Scope, rows: UserStats[]): UserStats {
 		total.featureEdits += r.featureEdits;
 		total.layersCreated += r.layersCreated;
 	}
-	const [area] = db.all<{ area: number }>(sql`
-		SELECT COUNT(*) AS area FROM (
-			SELECT DISTINCT r.dimension_id, p.tile_x, p.tile_y
+	const [area] = db.all<{ area: number; modArea: number }>(sql`
+		SELECT COUNT(*) AS area, COALESCE(SUM(viaMod), 0) AS modArea FROM (
+			SELECT r.dimension_id, p.tile_x, p.tile_y, MAX(r.via_mod) AS viaMod
 			FROM revisions r JOIN upload_patches p ON p.revision_id = r.id
 			WHERE r.kind = 'upload' AND r.status = 'done' AND r.reverted = 0
 				AND COALESCE(r.completed_at, r.created_at) >= ${s.since}
+			GROUP BY r.dimension_id, p.tile_x, p.tile_y
 		)`);
 	total.areaTiles = area?.area ?? 0;
 	total.areaBlocks = total.areaTiles * s.tileSize * s.tileSize;
+	total.modAreaTiles = area?.modArea ?? 0;
+	total.modAreaBlocks = total.modAreaTiles * s.tileSize * s.tileSize;
 	return total;
 }
 
@@ -217,7 +242,7 @@ export const statsRoutes = new Hono<AppEnv>().get(
 		tag: "Stats",
 		summary: "Contribution statistics and leaderboard",
 		description:
-			"Public. `me` is your own activity (null when not logged in) and includes private layers; `leaderboard` and `totals` (everyone combined) only count public layers. `areaHistory` is the mapped area over time, for the whole map and for you, by the date the uploaded data was exported. `range` is `all` (default), `30d` or `7d`.",
+			"Public. `me` is your own activity (null when not logged in) and includes private layers; `leaderboard` and `totals` (everyone combined) only count public layers. `modUploads`, `modUploadedBlocks` (volume, repeats counted) and `modAreaTiles`/`modAreaBlocks` (distinct ground) are the part sent by the in-game mod (AOMC Webmapper, or whatever `MOD_USER_AGENTS` lists); it is also counted in the other numbers. `areaHistory` is the mapped area over time, for the whole map and for you, by the date the uploaded data was exported. `range` is `all` (default), `30d` or `7d`.",
 		fails: [400],
 	}),
 	validator("query", statsQuerySchema),

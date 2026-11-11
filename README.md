@@ -69,28 +69,29 @@ Coming from Node: `npm install` is `bun install`, `npm run x` is `bun run x`, `n
 
 All settings are environment variables (see `.env.example`).
 
-| Variable                                     | Default                 | Meaning                                                                       |
-| -------------------------------------------- | ----------------------- | ----------------------------------------------------------------------------- |
-| `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` |                         | Discord OAuth credentials                                                     |
-| `SESSION_SECRET`                             | dev value               | signs the OAuth state cookie; required when `PUBLIC_URL` is https             |
-| `PUBLIC_URL`                                 | `http://localhost:3000` | public address; used for cookies, the Origin check, invite links and previews |
-| `SETUP_MAP_NAME`                             | `AOMC`                  | name of the map created on first boot                                         |
-| `SETUP_OWNER_DISCORD_IDS`                    |                         | comma-separated Discord ids that become owners when they first log in         |
-| `PORT`                                       | `3000`                  | listen port                                                                   |
-| `DATA_DIR`                                   | `./data`                | database, blobs, preview cache (`/data` in Docker)                            |
-| `DEFAULT_TILE_SIZE`                          | `512`                   | blocks per tile edge; fixed when the map is created on first boot             |
-| `MAX_ZOOM`                                   | `8`                     | zoom-out levels above 1:1                                                     |
-| `MAX_UPLOAD_BYTES`                           | 200 MB                  | per upload request                                                            |
-| `MAX_IMAGE_DIM`                              | `4096`                  | longest edge of one uploaded image                                            |
-| `MAX_FILES_PER_UPLOAD`                       | `2000`                  | files per request                                                             |
-| `UPLOAD_RATE_LIMIT`                          | `30`                    | upload requests per user per minute                                           |
-| `PREVIEW_CACHE_MAX`                          | `500`                   | link-preview images kept on disk                                              |
+| Variable                                     | Default                       | Meaning                                                                                    |
+| -------------------------------------------- | ----------------------------- | ------------------------------------------------------------------------------------------ |
+| `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET` |                               | Discord OAuth credentials                                                                  |
+| `SESSION_SECRET`                             | dev value                     | signs the OAuth state cookie; required when `PUBLIC_URL` is https                          |
+| `PUBLIC_URL`                                 | `http://localhost:3000`       | public address; used for cookies, the Origin check, invite links and previews              |
+| `SETUP_MAP_NAME`                             | `AOMC`                        | name of the map created on first boot                                                      |
+| `SETUP_OWNER_DISCORD_IDS`                    |                               | comma-separated Discord ids that become owners when they first log in                      |
+| `PORT`                                       | `3000`                        | listen port                                                                                |
+| `DATA_DIR`                                   | `./data`                      | database, blobs, preview cache (`/data` in Docker)                                         |
+| `DEFAULT_TILE_SIZE`                          | `512`                         | blocks per tile edge; fixed when the map is created on first boot                          |
+| `MAX_ZOOM`                                   | `8`                           | zoom-out levels above 1:1                                                                  |
+| `MAX_UPLOAD_BYTES`                           | 200 MB                        | per upload request                                                                         |
+| `MAX_IMAGE_DIM`                              | `4096`                        | longest edge of one uploaded image                                                         |
+| `MAX_FILES_PER_UPLOAD`                       | `2000`                        | files per request                                                                          |
+| `UPLOAD_RATE_LIMIT`                          | `30`                          | upload requests per user per minute                                                        |
+| `PREVIEW_CACHE_MAX`                          | `500`                         | link-preview images kept on disk                                                           |
+| `MOD_USER_AGENTS`                            | `AOMC Webmapper,AOMC Visited` | User-Agents (comma separated, `*` wildcard) that mark an upload as sent by the in-game mod |
 
 ## Using the map
 
 **Viewer.** `/?dim=<slug>&x=&z=&zoom=&rev=` is kept in the address bar, so every view is a shareable link (`rev` is omitted at the latest revision). `embed=1` hides all UI for iframes. Zoom 0 is one block per pixel, negative zooms in (down to -6, 64 pixels per block), positive zooms out. Drag or touch to pan, wheel or pinch to zoom, double-click to zoom in, arrow keys and `+`/`-`. The hotbar at the bottom holds _Layers_, _History_, _Measure_ (click points to measure a path; Shift snaps to straight lines, Esc clears), _Upload_ and, for moderators, _Manage_; the number keys 1 to 5 select them.
 
-**Uploading.** Use _Upload_ in the hotbar, or the API (below). In Xaero's World Map: turn resource packs off, drag with the right mouse button over an area, export as PNG with **Multiple Unscaled Images** on, then upload the images (or a ZIP of them). File names contain `_x<X>_z<Z>` (the block coordinates of the top-left corner). Pure black pixels mean "no data" and never overwrite anything. Processing runs in a background queue, one job at a time; you can close the dialog while it works.
+**Uploading.** Use _Upload_ in the hotbar, or the API (below). In Xaero's World Map: turn resource packs off, drag with the right mouse button over an area, export as PNG with **Multiple Unscaled Images** on, then upload the images (or a ZIP of them). File names contain `_x<X>_z<Z>` (the block coordinates of the top-left corner). Pure black pixels mean "no data" and never overwrite anything. Processing runs in a background queue, one job at a time; you can close the dialog while it works. Uploads from the in-game mod (AOMC Webmapper, or AOMC Visited in older versions) are recognised by its `User-Agent` header (see `MOD_USER_AGENTS`) and counted in one separate statistic as well as in the normal ones. Anyone can send that header, so treat the number as a statistic, not proof; uploads made before this was tracked are not marked.
 
 **Old exports.** Xaero names every export with the time it was made (`2026-02-10_15.06.41_x-384_z-3776.png`, or a folder `2026-02-10_15.06.41/` holding the tiles). The upload reads that date from the file or folder name (the dialog accepts whole folders, and ZIPs with folders inside), makes one revision per export, and layers the exports by date: where they overlap, the newest export is on top however late it was uploaded, so importing an old export only fills in what is missing and never covers newer data. Files with no date count as made at upload time. The history panel shows the export date next to the upload time. Dates are used as written in the name (no time zone), and one from the future counts as now.
 
@@ -130,7 +131,7 @@ curl -H "Authorization: Bearer aomc_…" \
 # -> {"revisionId": 1, "revisionIds": [1]}   poll GET /api/revisions/1, or stream GET /api/revisions/1/events (SSE)
 ```
 
-An upload may also carry `coords`, a JSON array of `{x, z}` aligned with the files (after ZIP expansion), which overrides the file names. ZIP entries are read by base name only for coordinates. The export date comes from the file name, from the path of an entry inside a ZIP, or from `paths`, a JSON array of strings aligned with the uploaded files (before ZIP expansion) naming where each came from, e.g. `"2026-02-10_15.06.41/0_0_x-1248_z-1472.png"`. An upload with several export dates creates one revision per date, oldest first (`revisionIds`, in order; `revisionId` is the last).
+The in-game mod is recognised by its `User-Agent` header (`MOD_USER_AGENTS`; by default `AOMC Webmapper`, and `AOMC Visited` for older versions). Such uploads are flagged `viaMod` on their revision and counted together in one statistic (`modUploads`), besides the normal ones. An upload may also carry `coords`, a JSON array of `{x, z}` aligned with the files (after ZIP expansion), which overrides the file names. ZIP entries are read by base name only for coordinates. The export date comes from the file name, from the path of an entry inside a ZIP, or from `paths`, a JSON array of strings aligned with the uploaded files (before ZIP expansion) naming where each came from, e.g. `"2026-02-10_15.06.41/0_0_x-1248_z-1472.png"`. An upload with several export dates creates one revision per date, oldest first (`revisionIds`, in order; `revisionId` is the last).
 
 | Area      | Endpoints                                                                                                                                                                                                                          |
 | --------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -141,6 +142,8 @@ An upload may also carry `coords`, a JSON array of `{x, z}` aligned with the fil
 | Layers    | `GET /api/layers?dim=&at=<rev>`, `POST /api/layers`, `PATCH/DELETE /api/layers/:id`, `POST /api/layers/:id/features`, `GET /export`, `POST /import[?replace=1]`                                                                    |
 | Features  | `PATCH/DELETE /api/features/:id`, `GET …/history`, `POST …/restore/:revisionId`                                                                                                                                                    |
 | Sharing   | `GET/POST /api/invites` (map), `/api/layers/:id/invites`, `GET /api/invites/:token`, `POST …/accept`, `DELETE /api/invites/:id`, `…/layers/:id/members`                                                                            |
+| Stats     | `GET /api/stats?range=all\|30d\|7d` (public): your stats, everyone's combined, the leaderboard and the mapped area over time, including what the in-game mod sent (`modUploads`, `modUploadedBlocks`, `modAreaBlocks`)             |
+| Admin     | `GET /api/admin/stats?range=1h\|6h\|24h\|7d\|30d\|90d\|all` (owners): storage over time, network traffic by kind and by requesting domain, and a server overview                                                                   |
 | Images    | `GET /blobs/<hash>.webp`, `GET /api/preview.png`                                                                                                                                                                                   |
 
 ## Link previews

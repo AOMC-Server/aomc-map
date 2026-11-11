@@ -50,6 +50,13 @@
       "when": 1794375901282,
       "tag": "0006_storage_traffic",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1794379085090,
+      "tag": "0007_upload_via_mod",
+      "breakpoints": true
     }
   ]
 }

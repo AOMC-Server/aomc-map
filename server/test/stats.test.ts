@@ -1,12 +1,14 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { featureRevisions, layers, revisions } from "../src/db/schema";
+import { isModClient } from "../src/uploadClient";
 import type { Auth, TileApp } from "./helpers";
 import {
 	bootTiles,
 	call,
 	cleanupTempDirs,
 	erase,
+	postUpload,
 	RED,
 	solid,
 	T,
@@ -138,6 +140,96 @@ describe("stats", () => {
 		const anon = await stats(t, null);
 		expect(anon.body.areaHistory.at(-1).myBlocks).toBeNull();
 		expect((await stats(await bootTiles(), null)).body.areaHistory).toEqual([]);
+	});
+
+	test("uploads from the AOMC Webmapper mod are counted separately, and still as uploads", async () => {
+		const t = await bootTiles();
+		await upload(t, await solid(T, T, RED), 0, 0);
+		const send = async (agent: string | undefined, user = t.editor) => {
+			const res = await postUpload(
+				t,
+				user,
+				[{ name: "f.png", data: await solid(T, T, RED) }],
+				{
+					coords: [{ x: T * 8, z: 0 }],
+					headers: agent ? { "User-Agent": agent } : {},
+				},
+			);
+			expect(res.status).toBe(202);
+			await t.services.worker.run();
+			return ((await res.json()) as { revisionId: number }).revisionId;
+		};
+		const viaMod = await send("AOMC Webmapper/1.2.0 (Fabric 1.21)");
+		await send("Mozilla/5.0 Firefox");
+		await send("aomc-visited/0.9", t.mod); // the mod's older name
+
+		const res = await stats(t, t.editor);
+		expect(res.body.me).toMatchObject({
+			uploads: 3,
+			modUploads: 1,
+			modUploadedBlocks: T * T,
+			modAreaTiles: 1,
+			modAreaBlocks: T * T,
+			// The first, ordinary upload and the two at x = 8 tiles, one of them by the mod.
+			tiles: 3,
+			areaTiles: 2,
+		});
+		expect(entry(res.body, "editor")).toMatchObject({ modUploads: 1 });
+		expect(entry(res.body, "mod")).toMatchObject({
+			uploads: 1,
+			modUploads: 1,
+			modUploadedBlocks: T * T,
+			modAreaBlocks: T * T,
+		});
+		// Both mod uploads covered the same tile: uploaded twice, mapped once.
+		expect(res.body.totals).toMatchObject({
+			uploads: 4,
+			modUploads: 2,
+			modUploadedBlocks: 2 * T * T,
+			modAreaTiles: 1,
+			modAreaBlocks: T * T,
+			areaTiles: 2,
+		});
+
+		const revision = await call(t, null, "GET", `/api/revisions/${viaMod}`);
+		expect(revision.body.revision.viaMod).toBe(true);
+	});
+
+	test("the mod is recognised by its User-Agent, as configured", async () => {
+		const defaults = ["AOMC Webmapper", "AOMC Visited"];
+		for (const agent of [
+			"AOMC Webmapper/1.0",
+			"aomc-webmapper",
+			"AOMC_Visited 2.1 (Java 21)",
+			"Java-http-client AOMCWebmapper/3",
+		])
+			expect(isModClient(agent, defaults)).toBe(true);
+		for (const agent of [undefined, "", "Mozilla/5.0", "curl/8", "AOMC Map"])
+			expect(isModClient(agent, defaults)).toBe(false);
+
+		expect(isModClient("MyMod/2", ["mymod"])).toBe(true);
+		expect(isModClient("Fabric MyMod 2.0", ["my*2"])).toBe(true);
+		expect(isModClient("AOMC Webmapper", ["Other"])).toBe(false);
+		// An empty or wildcard-only pattern must not match everything.
+		expect(isModClient("anything", ["", "*", " "])).toBe(false);
+		expect(isModClient("anything", [])).toBe(false);
+	});
+
+	test("MOD_USER_AGENTS changes what counts", async () => {
+		const t = await bootTiles({ MOD_USER_AGENTS: "Custom Mod, Old Mod" });
+		expect(t.env.MOD_USER_AGENTS).toEqual(["Custom Mod", "Old Mod"]);
+		for (const agent of ["Custom Mod/1", "old-mod/3", "AOMC Webmapper/1"]) {
+			const res = await postUpload(
+				t,
+				t.editor,
+				[{ name: "f.png", data: await solid(T, T, RED) }],
+				{ coords: [{ x: 0, z: 0 }], headers: { "User-Agent": agent } },
+			);
+			expect(res.status).toBe(202);
+			await t.services.worker.run();
+		}
+		const res = await stats(t, t.editor);
+		expect(res.body.me).toMatchObject({ uploads: 3, modUploads: 2 });
 	});
 
 	test("deleted and failed uploads are not counted", async () => {

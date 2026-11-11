@@ -2104,6 +2104,10 @@ input[type="range"]:disabled {
 	border: 0;
 }
 
+.stats-group {
+	margin: 18px 0 2px;
+}
+
 .stats-account {
 	margin-bottom: 12px;
 }

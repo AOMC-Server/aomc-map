@@ -21,6 +21,8 @@ const RANGE_NAMES: Record<StatsRange, string> = {
 type Column = {
 	key:
 		| "uploads"
+		| "modUploads"
+		| "modAreaTiles"
 		| "tiles"
 		| "areaTiles"
 		| "featuresCreated"
@@ -39,6 +41,16 @@ const COLUMNS: Column[] = [
 	},
 	{ key: "areaTiles", label: "Area", hint: "Distinct ground uploaded" },
 	{
+		key: "modUploads",
+		label: "Webmapper uploads",
+		hint: "Uploads sent by the AOMC Webmapper mod (also counted in Uploads)",
+	},
+	{
+		key: "modAreaTiles",
+		label: "Webmapper area",
+		hint: "Distinct ground the AOMC Webmapper mod mapped (also counted in Area)",
+	},
+	{
 		key: "featuresCreated",
 		label: "Features",
 		hint: "Pins, lines and areas created",
@@ -53,15 +65,15 @@ const COLUMNS: Column[] = [
 
 const number = (n: number) => n.toLocaleString();
 
-/** Square blocks, in km² once it gets large (a block is a metre). */
+/** An area of square blocks in km² (a block is a metre). */
 function formatArea(blocks: number): string {
-	if (blocks >= 1_000_000)
-		return `${(blocks / 1_000_000).toLocaleString(undefined, { maximumFractionDigits: 2 })} km²`;
-	return `${number(blocks)} blocks²`;
+	return `${(blocks / 1_000_000).toLocaleString(undefined, { maximumFractionDigits: 2 })} km²`;
 }
 
 function cell(s: UserStats, key: Column["key"]): string {
-	return key === "areaTiles" ? formatArea(s.areaBlocks) : number(s[key]);
+	if (key === "areaTiles") return formatArea(s.areaBlocks);
+	if (key === "modAreaTiles") return formatArea(s.modAreaBlocks);
+	return number(s[key]);
 }
 
 function readRange(): StatsRange {
@@ -71,33 +83,19 @@ function readRange(): StatsRange {
 		: "all";
 }
 
-function StatTiles(props: { stats: UserStats }) {
-	const s = props.stats;
-	const byType = s.featuresByType;
-	const tiles: { label: string; value: string; hint?: string }[] = [
-		{ label: "Uploads", value: number(s.uploads) },
-		{ label: "Tiles uploaded", value: number(s.tiles) },
-		{
-			label: "Area uploaded",
-			value: formatArea(s.uploadedBlocks),
-			hint: "Total volume, counting ground that was uploaded again",
-		},
-		{
-			label: "Area mapped",
-			value: formatArea(s.areaBlocks),
-			hint: `${number(s.areaTiles)} distinct tiles`,
-		},
-		{
-			label: "Features created",
-			value: number(s.featuresCreated),
-			hint: `${number(byType.pin)} pins · ${number(byType.line)} lines · ${number(byType.polygon)} areas`,
-		},
-		{ label: "Feature edits", value: number(s.featureEdits) },
-		{ label: "Layers created", value: number(s.layersCreated) },
-	];
+type StatTab = "me" | "global";
+
+const STAT_TABS: { id: StatTab; label: string }[] = [
+	{ id: "me", label: "Your stats" },
+	{ id: "global", label: "Global stats" },
+];
+
+type Tile = { label: string; value: string; hint?: string };
+
+function TileGrid(props: { tiles: Tile[] }) {
 	return (
 		<div class="stats-grid">
-			{tiles.map((t) => (
+			{props.tiles.map((t) => (
 				<div key={t.label} class="stats-tile">
 					<div class="label">{t.label}</div>
 					<div class="stats-value">{t.value}</div>
@@ -105,6 +103,62 @@ function StatTiles(props: { stats: UserStats }) {
 				</div>
 			))}
 		</div>
+	);
+}
+
+/**
+ * The contributions, then the part of them sent by the AOMC Webmapper mod. `note` is about the
+ * contributions (the mod cannot touch layers), so it goes between the two.
+ */
+function StatTiles(props: { stats: UserStats; note: string }) {
+	const s = props.stats;
+	const byType = s.featuresByType;
+	return (
+		<>
+			<TileGrid
+				tiles={[
+					{ label: "Uploads", value: number(s.uploads) },
+					{ label: "Tiles uploaded", value: number(s.tiles) },
+					{
+						label: "Area uploaded",
+						value: formatArea(s.uploadedBlocks),
+						hint: "Total volume, counting ground that was uploaded again",
+					},
+					{
+						label: "Area mapped",
+						value: formatArea(s.areaBlocks),
+						hint: `${number(s.areaTiles)} distinct tiles`,
+					},
+					{
+						label: "Features created",
+						value: number(s.featuresCreated),
+						hint: `${number(byType.pin)} pins · ${number(byType.line)} lines · ${number(byType.polygon)} areas`,
+					},
+					{ label: "Feature edits", value: number(s.featureEdits) },
+					{ label: "Layers created", value: number(s.layersCreated) },
+				]}
+			/>
+			<p class="muted hint">{props.note}</p>
+			<h3 class="stats-group">AOMC Webmapper</h3>
+			<p class="muted hint">
+				The part of the above that was sent by the in-game mod.
+			</p>
+			<TileGrid
+				tiles={[
+					{ label: "AOMC Webmapper uploads", value: number(s.modUploads) },
+					{
+						label: "Area uploaded by AOMC Webmapper",
+						value: formatArea(s.modUploadedBlocks),
+						hint: "Total volume, counting ground that was uploaded again",
+					},
+					{
+						label: "Area mapped by AOMC Webmapper",
+						value: formatArea(s.modAreaBlocks),
+						hint: `${number(s.modAreaTiles)} distinct tiles`,
+					},
+				]}
+			/>
+		</>
 	);
 }
 
@@ -224,6 +278,7 @@ export function StatsPage() {
 	const [range, setRange] = useState<StatsRange>(readRange);
 	const [data, setData] = useState<StatsBody | null>(null);
 	const [error, setError] = useState<string | null>(null);
+	const [picked, setPicked] = useState<StatTab | null>(null);
 
 	useEffect(() => {
 		void loadUser();
@@ -249,6 +304,8 @@ export function StatsPage() {
 	}, [range]);
 
 	const u = user.value;
+	// Until one is picked, show your own stats when logged in and the global ones otherwise.
+	const tab: StatTab = picked ?? (data && !data.me ? "global" : "me");
 	return (
 		<Page title="Statistics">
 			<RangePicker
@@ -259,10 +316,30 @@ export function StatsPage() {
 			/>
 			{error && <p class="muted">Could not load the statistics: {error}</p>}
 
+			<div class="tabs tabbar" role="tablist">
+				{STAT_TABS.map((t) => (
+					<button
+						key={t.id}
+						type="button"
+						role="tab"
+						aria-selected={t.id === tab}
+						class={`plain tab ${t.id === tab ? "active" : ""}`}
+						onClick={() => setPicked(t.id)}
+					>
+						{t.label}
+					</button>
+				))}
+			</div>
+
 			<section class="page-section">
-				<h2>Your stats</h2>
+				<h2>{tab === "me" ? "Your stats" : "Global stats"}</h2>
 				{!data ? (
 					<p class="muted">Loading…</p>
+				) : tab === "global" ? (
+					<StatTiles
+						stats={data.totals}
+						note="Everyone's contributions combined. Private layers are not counted."
+					/>
 				) : data.me && u ? (
 					<>
 						<div class="account-card stats-account">
@@ -277,8 +354,7 @@ export function StatsPage() {
 							)}
 							<div>{u.username}</div>
 						</div>
-						<StatTiles stats={data.me} />
-						<p class="muted hint">Includes your private layers.</p>
+						<StatTiles stats={data.me} note="Includes your private layers." />
 					</>
 				) : (
 					<>
@@ -287,20 +363,6 @@ export function StatsPage() {
 							Log in with Discord
 						</a>
 					</>
-				)}
-			</section>
-
-			<section class="page-section">
-				<h2>Global stats</h2>
-				{data ? (
-					<>
-						<StatTiles stats={data.totals} />
-						<p class="muted hint">
-							Everyone's contributions combined. Private layers are not counted.
-						</p>
-					</>
-				) : (
-					<p class="muted">Loading…</p>
 				)}
 			</section>
 

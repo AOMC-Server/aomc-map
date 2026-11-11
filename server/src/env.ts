@@ -30,6 +30,16 @@ const envSchema = z.object({
 				.map((v) => v.trim())
 				.filter(Boolean),
 		),
+	// User-Agents (comma separated, `*` is a wildcard) that mark an upload as sent by the in-game mod
+	MOD_USER_AGENTS: z
+		.string()
+		.default("AOMC Webmapper,AOMC Visited")
+		.transform((s) =>
+			s
+				.split(",")
+				.map((v) => v.trim())
+				.filter(Boolean),
+		),
 });
 
 export type Env = z.infer<typeof envSchema>;

@@ -206,6 +206,9 @@ function overview(db: Db, now: number) {
 			uploadsDone: n(
 				sql`SELECT COUNT(*) AS n FROM revisions WHERE kind = 'upload' AND status = 'done'`,
 			),
+			uploadsViaMod: n(
+				sql`SELECT COUNT(*) AS n FROM revisions WHERE kind = 'upload' AND status = 'done' AND via_mod = 1`,
+			),
 			uploadsFailed: n(
 				sql`SELECT COUNT(*) AS n FROM revisions WHERE kind = 'upload' AND status = 'failed'`,
 			),

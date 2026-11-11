@@ -170,6 +170,7 @@ export async function postUpload(
 		coords?: { x: number; z: number }[];
 		paths?: string[];
 		field?: string;
+		headers?: Record<string, string>;
 	} = {},
 ) {
 	const form = new FormData();
@@ -184,7 +185,7 @@ export async function postUpload(
 	return t.app.request(`/api/dimensions/${opts.dim ?? "overworld"}/uploads`, {
 		method: "POST",
 		body: form,
-		headers: user?.auth ?? {},
+		headers: { ...(user?.auth ?? {}), ...opts.headers },
 	});
 }
 

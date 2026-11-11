@@ -25,6 +25,7 @@ const revisionFields = {
 	bboxMaxX: revisions.bboxMaxX,
 	bboxMaxZ: revisions.bboxMaxZ,
 	fileCount: revisions.fileCount,
+	viaMod: revisions.viaMod,
 	reverted: revisions.reverted,
 	createdAt: revisions.createdAt,
 	exportedAt: revisions.exportedAt,
@@ -61,6 +62,8 @@ export const revisionRoutes = new Hono<AppEnv>()
 		doc({
 			tag: "Revisions",
 			summary: "List revisions, newest first",
+			description:
+				"`viaMod` is true for uploads sent by the in-game mod (recognised by its `User-Agent`, see `MOD_USER_AGENTS`).",
 			query: { limit: "At most this many (1 to 1000, default 200)" },
 		}),
 		async (c) => {
@@ -79,7 +82,13 @@ export const revisionRoutes = new Hono<AppEnv>()
 	)
 	.get(
 		"/:id",
-		doc({ tag: "Revisions", summary: "Get a revision", fails: [404] }),
+		doc({
+			tag: "Revisions",
+			summary: "Get a revision",
+			description:
+				"`viaMod` is true for uploads sent by the in-game mod (recognised by its `User-Agent`, see `MOD_USER_AGENTS`).",
+			fails: [404],
+		}),
 		(c) => {
 			const row = loadRevision(c.var.db, parseId(c.req.param("id")));
 			if (!row) return c.json({ error: "not found" }, 404);

@@ -1,0 +1,1 @@
+ALTER TABLE `revisions` ADD `via_mod` integer DEFAULT false NOT NULL;

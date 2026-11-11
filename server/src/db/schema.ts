@@ -108,6 +108,8 @@ export const revisions = sqliteTable("revisions", {
 	bboxMaxX: integer("bbox_max_x"),
 	bboxMaxZ: integer("bbox_max_z"),
 	fileCount: integer("file_count").notNull().default(0),
+	/** Sent by the in-game mod (its User-Agent matched MOD_USER_AGENTS); for statistics only. */
+	viaMod: bool("via_mod").notNull().default(false),
 	reverted: bool("reverted").notNull().default(false),
 	createdAt: createdAt(),
 	/** When the uploaded export was made (from its file name); null = when it was uploaded. */

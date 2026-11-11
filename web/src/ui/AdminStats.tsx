@@ -373,7 +373,7 @@ function Overview(props: { data: Body }) {
 					{
 						label: "Uploads",
 						value: number(o.map.uploadsDone),
-						hint: `${number(o.map.uploadsFailed)} failed`,
+						hint: `${number(o.map.uploadsViaMod)} via the mod, ${number(o.map.uploadsFailed)} failed`,
 					},
 					{
 						label: "Layers",
