@@ -61,6 +61,8 @@ export type LayerData = {
 	sortOrder: number;
 	createdBy: string;
 	canEdit: boolean;
+	/** May manage who can see and edit this layer (members, invite links). */
+	canManage: boolean;
 	features: FeatureData[];
 };
 
@@ -87,6 +89,26 @@ export const layersData = signal<LayerData[]>([]);
 export const layerOverrides = signal<Map<number, boolean>>(new Map());
 export const layerPanelOpen = signal(false);
 export const historyPanelOpen = signal(false);
+export const mapPanelOpen = signal(false);
+
+export type SidePanelName = "layers" | "history" | "map";
+
+/** One side panel at a time; opening the one that is already open closes it. */
+export function toggleSidePanel(name: SidePanelName) {
+	const was = {
+		layers: layerPanelOpen,
+		history: historyPanelOpen,
+		map: mapPanelOpen,
+	}[name].value;
+	layerPanelOpen.value = false;
+	historyPanelOpen.value = false;
+	mapPanelOpen.value = false;
+	if (!was) {
+		({ layers: layerPanelOpen, history: historyPanelOpen, map: mapPanelOpen })[
+			name
+		].value = true;
+	}
+}
 
 export type RevisionInfo = {
 	id: number;
@@ -152,6 +174,16 @@ export const canEditMap = computed(() => {
 export const isModerator = computed(() => {
 	const role = currentMap.value?.role;
 	return user.value !== null && (role === "moderator" || role === "owner");
+});
+
+/** Owners manage everything; moderators of the main map manage its dimensions. */
+export const canAdminister = computed(() => {
+	const d = currentMap.value;
+	return (
+		user.value !== null &&
+		d !== null &&
+		(d.role === "owner" || (d.role === "moderator" && d.map.isDefault))
+	);
 });
 
 export const effectiveRev = computed(() => {

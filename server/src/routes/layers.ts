@@ -27,18 +27,21 @@ import {
 	canCreateLayers,
 	canDeleteLayer,
 	canEditLayer,
+	canManageLayerMembers,
 	canViewLayer,
 	loadLayerAccess,
 	loadMapAccess,
 } from "../permissions";
 import type { AppEnv } from "../types";
+import { layerInviteRoutes } from "./invites";
+import { layerMemberRoutes } from "./layerMembers";
 
 const parseId = (value: string | undefined) =>
 	/^\d+$/.test(value ?? "") ? Number(value) : Number.NaN;
 
 type LayerRow = typeof layers.$inferSelect;
 
-function serializeLayer(layer: LayerRow, canEdit: boolean) {
+function serializeLayer(layer: LayerRow, canEdit: boolean, canManage: boolean) {
 	return {
 		id: layer.id,
 		dimensionId: layer.dimensionId,
@@ -49,6 +52,7 @@ function serializeLayer(layer: LayerRow, canEdit: boolean) {
 		sortOrder: layer.sortOrder,
 		createdBy: layer.createdBy,
 		canEdit,
+		canManage,
 	};
 }
 
@@ -156,6 +160,7 @@ export const mapLayerRoutes = new Hono<AppEnv>()
 				...serializeLayer(
 					l,
 					canEditLayer(access.role, l, layerRoles.get(l.id) ?? null),
+					canManageLayerMembers(user, access.role, l),
 				),
 				features: byLayer.get(l.id) ?? [],
 			})),
@@ -210,7 +215,7 @@ export const mapLayerRoutes = new Hono<AppEnv>()
 			return row;
 		});
 		return c.json(
-			{ layer: { ...serializeLayer(layer, true), features: [] } },
+			{ layer: { ...serializeLayer(layer, true, true), features: [] } },
 			201,
 		);
 	});
@@ -253,7 +258,13 @@ export const layerRoutes = new Hono<AppEnv>()
 					.values({ layerId: updated.id, userId: user.id, role: "editor" })
 					.onConflictDoNothing();
 			}
-			return c.json({ layer: serializeLayer(updated as LayerRow, true) });
+			return c.json({
+				layer: serializeLayer(
+					updated as LayerRow,
+					true,
+					canManageLayerMembers(user, found.role, updated as LayerRow),
+				),
+			});
 		},
 	)
 	.delete("/:id", requireUser, async (c) => {
@@ -383,4 +394,6 @@ export const layerRoutes = new Hono<AppEnv>()
 				201,
 			);
 		},
-	);
+	)
+	.route("/:id/members", layerMemberRoutes)
+	.route("/:id/invites", layerInviteRoutes);

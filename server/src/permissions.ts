@@ -76,6 +76,20 @@ export function canEditLayer(
 	return canModerate(role) || layerRole === "editor";
 }
 
+export const canManageInvites = (role: Role | null) => atLeast(role, "owner");
+
+/** Who may add or remove the members of a private layer and hand out its invite links. */
+export function canManageLayerMembers(
+	actor: Actor,
+	role: Role | null,
+	layer: LayerInfo,
+): boolean {
+	if (canModerate(role)) return true;
+	return (
+		actor !== null && actor.id === layer.createdBy && canEditFeatures(role)
+	);
+}
+
 export function canDeleteLayer(
 	actor: Actor,
 	role: Role | null,

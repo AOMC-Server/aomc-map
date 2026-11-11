@@ -2,13 +2,16 @@ import { useEffect, useRef } from "preact/hooks";
 import { selectDimension, selectMap } from "../controller";
 import {
 	activeTool,
+	canAdminister,
 	currentMap,
 	dimSlug,
 	historyPanelOpen,
 	layerPanelOpen,
+	mapPanelOpen,
 	maps,
 	rev,
 	type Tool,
+	toggleSidePanel,
 	visibleDimensions,
 } from "../state";
 import { uploadBusy, uploadOpen } from "../upload";
@@ -57,21 +60,26 @@ export function Toolbar() {
 
 	return (
 		<header class="toolbar" ref={ref}>
-			<select
-				class="map-select"
-				aria-label="Map"
-				value={detail?.map.slug}
-				onChange={(e) =>
-					selectMap(e.currentTarget.value, { dim: dimSlug.value })
-				}
-			>
-				{maps.value.map((m) => (
-					<option key={m.slug} value={m.slug}>
-						{m.name}
-						{m.visibility === "private" ? " (private)" : ""}
-					</option>
-				))}
-			</select>
+			{/* Maps are not user-creatable, so most installs have just one; only show a picker for several. */}
+			{maps.value.length > 1 ? (
+				<select
+					class="map-select"
+					aria-label="Map"
+					value={detail?.map.slug}
+					onChange={(e) =>
+						selectMap(e.currentTarget.value, { dim: dimSlug.value })
+					}
+				>
+					{maps.value.map((m) => (
+						<option key={m.slug} value={m.slug}>
+							{m.name}
+							{m.visibility === "private" ? " (private)" : ""}
+						</option>
+					))}
+				</select>
+			) : (
+				<span class="map-title">{detail?.map.name}</span>
+			)}
 
 			<div class="group" role="tablist" aria-label="Dimension">
 				{dims.map((d) => (
@@ -92,10 +100,7 @@ export function Toolbar() {
 				type="button"
 				class={`btn ${layerPanelOpen.value ? "active" : ""}`}
 				aria-pressed={layerPanelOpen.value}
-				onClick={() => {
-					layerPanelOpen.value = !layerPanelOpen.value;
-					historyPanelOpen.value = false;
-				}}
+				onClick={() => toggleSidePanel("layers")}
 			>
 				Layers
 			</button>
@@ -104,13 +109,22 @@ export function Toolbar() {
 				type="button"
 				class={`btn ${historyPanelOpen.value || rev.value !== null ? "active" : ""}`}
 				aria-pressed={historyPanelOpen.value}
-				onClick={() => {
-					historyPanelOpen.value = !historyPanelOpen.value;
-					layerPanelOpen.value = false;
-				}}
+				onClick={() => toggleSidePanel("history")}
 			>
 				History
 			</button>
+
+			{canAdminister.value && (
+				<button
+					type="button"
+					class={`btn ${mapPanelOpen.value ? "active" : ""}`}
+					aria-pressed={mapPanelOpen.value}
+					title="Settings, dimensions, members and invite links"
+					onClick={() => toggleSidePanel("map")}
+				>
+					Manage
+				</button>
+			)}
 
 			<div class="group">
 				<ToolButton

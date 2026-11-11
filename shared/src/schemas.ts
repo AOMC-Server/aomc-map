@@ -29,14 +29,6 @@ const slugSchema = z
 	.max(40)
 	.regex(/^[a-z0-9][a-z0-9_-]*$/, "lowercase letters, digits, - and _ only");
 
-export const createMapSchema = z.object({
-	slug: slugSchema,
-	name: z.string().trim().min(1).max(100),
-	visibility: visibilitySchema.default("private"),
-	tileSize: tileSizeSchema.optional(),
-});
-export type CreateMap = z.infer<typeof createMapSchema>;
-
 export const updateMapSchema = z.object({
 	name: z.string().trim().min(1).max(100).optional(),
 	visibility: visibilitySchema.optional(),

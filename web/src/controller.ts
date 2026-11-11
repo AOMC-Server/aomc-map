@@ -116,6 +116,21 @@ function destroyMap() {
 }
 
 /** Re-reads the map so a new head revision shows up without a reload. */
+/** Re-reads the map after its settings or dimensions changed. */
+export async function reloadMap(): Promise<void> {
+	const current = currentMap.value;
+	if (!current) return;
+	const detail = await fetchDetail(current.map.slug);
+	if (!detail || currentMap.value !== current) return;
+	currentMap.value = detail;
+	await loadMaps();
+	// The dimension being viewed may have been archived.
+	const visible = detail.dimensions.filter((d) => !d.archived);
+	if (!visible.some((d) => d.slug === dimSlug.value)) {
+		dimSlug.value = visible[0]?.slug ?? null;
+	}
+}
+
 export async function refreshHead() {
 	const current = currentMap.value;
 	if (!current) return;

@@ -1,4 +1,4 @@
-import { createMapSchema, updateMapSchema } from "@aomc/shared";
+import { updateMapSchema } from "@aomc/shared";
 import { zValidator } from "@hono/zod-validator";
 import { and, eq, or } from "drizzle-orm";
 import { Hono } from "hono";
@@ -12,6 +12,7 @@ import {
 } from "../permissions";
 import type { AppEnv } from "../types";
 import { dimensionRoutes } from "./dimensions";
+import { mapInviteRoutes } from "./invites";
 import { mapLayerRoutes } from "./layers";
 import { memberRoutes } from "./members";
 import { mapRevisionRoutes } from "./revisions";
@@ -49,34 +50,6 @@ export const mapRoutes = new Hono<AppEnv>()
 			: eq(maps.visibility, "public");
 		const rows = await c.var.db.select(publicFields).from(maps).where(visible);
 		return c.json({ maps: rows });
-	})
-	.post("/", requireUser, zValidator("json", createMapSchema), async (c) => {
-		const body = c.req.valid("json");
-		const user = c.var.user!;
-		const [taken] = await c.var.db
-			.select({ id: maps.id })
-			.from(maps)
-			.where(eq(maps.slug, body.slug));
-		if (taken) return c.json({ error: "slug already in use" }, 409);
-
-		const map = c.var.db.transaction((tx) => {
-			const row = tx
-				.insert(maps)
-				.values({
-					slug: body.slug,
-					name: body.name,
-					visibility: body.visibility,
-					ownerId: user.id,
-					tileSize: body.tileSize ?? c.var.env.DEFAULT_TILE_SIZE,
-				})
-				.returning(publicFields)
-				.get();
-			tx.insert(mapMembers)
-				.values({ mapId: row.id, userId: user.id, role: "owner" })
-				.run();
-			return row;
-		});
-		return c.json({ map }, 201);
 	})
 	.get("/:slug", async (c) => {
 		const access = await loadMapAccess(
@@ -175,4 +148,5 @@ export const mapRoutes = new Hono<AppEnv>()
 	.route("/:slug/dimensions", dimensionRoutes)
 	.route("/:slug/members", memberRoutes)
 	.route("/:slug/revisions", mapRevisionRoutes)
-	.route("/:slug/layers", mapLayerRoutes);
+	.route("/:slug/layers", mapLayerRoutes)
+	.route("/:slug/invites", mapInviteRoutes);

@@ -6,6 +6,7 @@ import {
 	historyPanelOpen,
 	layerPanelOpen,
 	loadError,
+	mapPanelOpen,
 } from "../state";
 import { uploadOpen } from "../upload";
 import { FeatureEditor } from "./FeatureEditor";
@@ -13,6 +14,8 @@ import { FeatureHistory, featureHistoryFor } from "./FeatureHistory";
 import { HistoryBanner } from "./HistoryBanner";
 import { HistoryPanel } from "./HistoryPanel";
 import { LayerPanel } from "./LayerPanel";
+import { LayerSharing, layerSharingFor } from "./LayerSharing";
+import { MapPanel } from "./MapPanel";
 import { Popup } from "./Popup";
 import { StatusBar } from "./StatusBar";
 import { Toast } from "./Toast";
@@ -27,6 +30,7 @@ function SidePanel() {
 		return <FeatureEditor key={key} />;
 	}
 	if (historyPanelOpen.value) return <HistoryPanel />;
+	if (mapPanelOpen.value) return <MapPanel />;
 	return layerPanelOpen.value ? <LayerPanel /> : null;
 }
 
@@ -53,6 +57,7 @@ export function App() {
 					<Tooltip />
 					{uploadOpen.value && <UploadDialog />}
 					{featureHistoryFor.value && <FeatureHistory />}
+					{layerSharingFor.value && <LayerSharing />}
 				</>
 			)}
 			<Toast />

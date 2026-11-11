@@ -35,7 +35,7 @@ export function showNotice(text: string, kind: "error" | "info" = "info") {
 type Res = { ok: boolean; status: number; json(): Promise<unknown> };
 
 /** Runs an API call, reporting failures to the user. Returns the parsed body, or null on failure. */
-async function run<T>(call: () => Promise<Res>): Promise<T | null> {
+export async function run<T>(call: () => Promise<Res>): Promise<T | null> {
 	try {
 		const res = await call();
 		if (!res.ok) {

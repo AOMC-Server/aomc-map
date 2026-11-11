@@ -24,6 +24,7 @@ import {
 	toggleLayer,
 	user,
 } from "../state";
+import { layerSharingFor } from "./LayerSharing";
 
 const TYPE_LABEL = { pin: "Pin", line: "Line", polygon: "Area" } as const;
 const dyeLabel = (d: string) => d.replace("_", " ");
@@ -228,6 +229,18 @@ function LayerRow(props: { layer: LayerData }) {
 									>
 										Settings
 									</button>
+									{l.visibility === "private" && l.canManage && (
+										<button
+											type="button"
+											class="btn"
+											title="Who can see and edit this layer"
+											onClick={() => {
+												layerSharingFor.value = { layerId: l.id, name: l.name };
+											}}
+										>
+											Sharing
+										</button>
+									)}
 									<ImportButton layer={l} />
 								</>
 							)}

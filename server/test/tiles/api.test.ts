@@ -4,6 +4,7 @@ import { mapMembers } from "../../src/db/schema";
 import {
 	BLUE,
 	bootTiles,
+	insertMap,
 	makeUser,
 	png,
 	postUpload,
@@ -235,12 +236,12 @@ describe("private maps", () => {
 		const t = await bootTiles();
 		const owner = await makeUser(t.db, "owner");
 		const outsider = await makeUser(t.db, "outsider");
-		const created = await t.app.request("/api/maps", {
-			method: "POST",
-			body: JSON.stringify({ slug: "priv", name: "Priv", tileSize: T }),
-			headers: { ...owner.auth, "Content-Type": "application/json" },
+		await insertMap(t.db, {
+			slug: "priv",
+			name: "Priv",
+			tileSize: T,
+			ownerId: "owner",
 		});
-		expect(created.status).toBe(201);
 		return { t, owner, outsider };
 	}
 

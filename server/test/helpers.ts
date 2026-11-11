@@ -43,6 +43,36 @@ export async function makeSessionCookie(
 	return `aomc_session=${await createSession(db, userId)}`;
 }
 
+/** Extra maps are not creatable through the API; tests that need one insert it directly. */
+export async function insertMap(
+	db: ReturnType<typeof createDb>,
+	opts: {
+		slug: string;
+		name?: string;
+		visibility?: "public" | "private";
+		ownerId?: string;
+		tileSize?: number;
+	},
+) {
+	const [row] = await db
+		.insert(maps)
+		.values({
+			slug: opts.slug,
+			name: opts.name ?? opts.slug,
+			visibility: opts.visibility ?? "private",
+			ownerId: opts.ownerId ?? null,
+			tileSize: opts.tileSize ?? 512,
+		})
+		.returning({ id: maps.id });
+	const id = (row as { id: number }).id;
+	if (opts.ownerId) {
+		await db
+			.insert(mapMembers)
+			.values({ mapId: id, userId: opts.ownerId, role: "owner" });
+	}
+	return id;
+}
+
 export const json = (body: unknown) => ({
 	body: JSON.stringify(body),
 	headers: { "Content-Type": "application/json" },

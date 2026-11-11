@@ -3,7 +3,13 @@ import { eq } from "drizzle-orm";
 import { upsertUser } from "../src/auth/discord";
 import { mapMembers, maps, pendingOwners } from "../src/db/schema";
 import { runSetup } from "../src/setup";
-import { json, makeSessionCookie, makeTestApp, makeUser } from "./helpers";
+import {
+	insertMap,
+	json,
+	makeSessionCookie,
+	makeTestApp,
+	makeUser,
+} from "./helpers";
 
 async function boot(env: Record<string, string> = {}) {
 	const t = makeTestApp(env);
@@ -79,16 +85,16 @@ describe("auth", () => {
 		const { app, db } = await boot();
 		await makeUser(db, "1");
 		const cookie = await makeSessionCookie(db, "1");
-		const body = json({ slug: "m1", name: "M1" });
+		const body = json({ name: "script" });
 
-		const noOrigin = await app.request("/api/maps", {
+		const noOrigin = await app.request("/api/tokens", {
 			method: "POST",
 			...body,
 			headers: { ...body.headers, Cookie: cookie },
 		});
 		expect(noOrigin.status).toBe(403);
 
-		const ok = await app.request("/api/maps", {
+		const ok = await app.request("/api/tokens", {
 			method: "POST",
 			...body,
 			headers: {
@@ -240,15 +246,7 @@ describe("maps", () => {
 				headers: { ...u.auth, "Content-Type": "application/json" },
 			});
 
-		const created = await post(alice, "/api/maps", {
-			slug: "secret",
-			name: "Secret",
-		});
-		expect(created.status).toBe(201);
-		expect((await created.json()).map.visibility).toBe("private");
-		expect(
-			(await post(alice, "/api/maps", { slug: "secret", name: "Dup" })).status,
-		).toBe(409);
+		await insertMap(db, { slug: "secret", name: "Secret", ownerId: "1" });
 
 		expect((await app.request("/api/maps/secret")).status).toBe(404);
 		expect(
@@ -391,11 +389,7 @@ describe("maps", () => {
 		const { app, db } = await boot();
 		const alice = await makeUser(db, "1");
 		const h = { ...alice.auth, "Content-Type": "application/json" };
-		await app.request("/api/maps", {
-			method: "POST",
-			...json({ slug: "t", name: "T" }),
-			headers: h,
-		});
+		await insertMap(db, { slug: "t", ownerId: "1" });
 
 		const ok = await app.request("/api/maps/t", {
 			method: "PATCH",
@@ -414,14 +408,15 @@ describe("maps", () => {
 		expect(locked.status).toBe(409);
 	});
 
-	test("input is validated", async () => {
+	test("there is no endpoint for creating maps", async () => {
 		const { app, db } = await boot();
 		const alice = await makeUser(db, "1");
 		const res = await app.request("/api/maps", {
 			method: "POST",
-			...json({ slug: "Bad Slug!", name: "x" }),
+			...json({ slug: "mine", name: "Mine" }),
 			headers: { ...alice.auth, "Content-Type": "application/json" },
 		});
-		expect(res.status).toBe(400);
+		expect(res.status).toBe(404);
+		expect(await db.select().from(maps)).toHaveLength(1);
 	});
 });

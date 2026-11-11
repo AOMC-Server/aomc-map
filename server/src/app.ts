@@ -5,6 +5,7 @@ import type { Env } from "./env";
 import { authRoutes } from "./routes/auth";
 import { blobRoutes } from "./routes/blobs";
 import { featureRoutes } from "./routes/features";
+import { inviteRoutes } from "./routes/invites";
 import { layerRoutes } from "./routes/layers";
 import { mapRoutes } from "./routes/maps";
 import { meRoutes } from "./routes/me";
@@ -39,6 +40,7 @@ export function createApp({ db, env, services, fetch: fetchFn }: AppDeps) {
 			.route("/api/maps", mapRoutes)
 			.route("/api/revisions", revisionRoutes)
 			.route("/api/layers", layerRoutes)
+			.route("/api/invites", inviteRoutes)
 			.route("/api/features", featureRoutes)
 			.route(
 				"/",
