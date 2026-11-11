@@ -24,6 +24,7 @@ import {
 	popup,
 	type RevisionInfo,
 	rev,
+	tilesPaused,
 	user,
 	view,
 	visibleDimensions,
@@ -180,6 +181,11 @@ export async function boot(container: HTMLElement) {
 	effect(() =>
 		mv.setMotionScale(transitionFactor(settings.value.transitionSpeed)),
 	);
+	effect(() => {
+		const { debugRender, tileOutlines, chunkOutlines } = settings.value;
+		mv.setDebug({ debug: debugRender, tileOutlines, chunkOutlines });
+		mv.setTilesPaused(debugRender && tilesPaused.value);
+	});
 
 	let lastDim: string | null = null;
 	let lastOnly: number | null = null;

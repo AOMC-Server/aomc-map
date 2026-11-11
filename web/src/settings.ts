@@ -36,6 +36,12 @@ export type Settings = {
 	historyInView: boolean;
 	/** History panel: only your own uploads. */
 	historyMineOnly: boolean;
+	/** Map debugging: colour tiles by load state, label them and show renderer statistics. */
+	debugRender: boolean;
+	/** Draw the edges of the map tiles being shown. */
+	tileOutlines: boolean;
+	/** Draw the edges of Minecraft chunks (16×16 blocks). */
+	chunkOutlines: boolean;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -50,6 +56,9 @@ export const DEFAULT_SETTINGS: Settings = {
 	transitionSpeed: "normal",
 	historyInView: false,
 	historyMineOnly: false,
+	debugRender: false,
+	tileOutlines: false,
+	chunkOutlines: false,
 };
 
 /** Also read by the inline script in index.html, which sets the theme before first paint. */
@@ -76,6 +85,9 @@ export function parseSettings(raw: string | null): Settings {
 		"dimensionColours",
 		"historyInView",
 		"historyMineOnly",
+		"debugRender",
+		"tileOutlines",
+		"chunkOutlines",
 	] as const) {
 		if (typeof stored[key] === "boolean") result[key] = stored[key];
 	}

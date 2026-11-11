@@ -1201,6 +1201,11 @@ input[type="range"]:disabled {
 	color: var(--muted);
 }
 
+.debug .tile-pause {
+	margin-top: 4px;
+	pointer-events: auto;
+}
+
 .debug .measure {
 	color: var(--yellow);
 	pointer-events: auto;

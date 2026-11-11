@@ -4,9 +4,18 @@ import {
 	panBy,
 	type Size,
 	screenToBlock,
+	tileLevel,
 	type View,
 	zoomAt,
 } from "@aomc/shared/view";
+import {
+	type DebugOptions,
+	drawChunkGrid,
+	drawGrid,
+	drawHud,
+	drawTileDebug,
+	NO_DEBUG,
+} from "./debugLayer";
 import { FeatureLayer, type Hit, type RenderLayer } from "./featureLayer";
 import type { Bounds } from "./geometry";
 import { type DragSession, Input } from "./input";
@@ -61,6 +70,10 @@ export class MapView {
 	private baseCursor = "grab";
 	/** How long animations take relative to the default; 0 skips them. */
 	private motion = 1;
+	private tileSize: number;
+	private debug: DebugOptions = NO_DEBUG;
+	/** How long the previous frame took to draw (ms), for the debug panel. */
+	private lastDrawMs = 0;
 	/** Where an eased zoom (zoomBy) is heading, while one runs. */
 	private zoomGoal: {
 		zoom: number;
@@ -73,6 +86,7 @@ export class MapView {
 		opts: { tileSize: number; maxZoom: number; view?: Partial<View> },
 	) {
 		this.maxZoom = opts.maxZoom;
+		this.tileSize = opts.tileSize;
 		this.view = { ...DEFAULT_VIEW, ...stripUndefined(opts.view ?? {}) };
 		this.view.zoom = clampZoom(this.view.zoom, this.maxZoom);
 
@@ -101,6 +115,18 @@ export class MapView {
 	/** Scales the length of every camera animation (1 = default, 0 = none). */
 	setMotionScale(scale: number) {
 		this.motion = Math.max(scale, 0);
+	}
+
+	/** Debug drawing: tile states and statistics, tile outlines, chunk outlines. */
+	setDebug(options: DebugOptions) {
+		this.debug = { ...options };
+		this.tiles.collectDebug = options.debug;
+		this.renderer.invalidate();
+	}
+
+	/** Debugging: stop loading new tiles; panning and zooming keep working with what is loaded. */
+	setTilesPaused(paused: boolean) {
+		this.tiles.setPaused(paused);
 	}
 
 	getView(): View {
@@ -351,13 +377,55 @@ export class MapView {
 
 	private draw() {
 		if ((window.devicePixelRatio || 1) !== this.dpr) this.resize();
-		const { ctx, canvas, dpr } = this;
+		const began = performance.now();
+		const { ctx, canvas, dpr, view, size, debug } = this;
 		ctx.setTransform(1, 0, 0, 1, 0, 0);
 		ctx.clearRect(0, 0, canvas.width, canvas.height);
-		this.tiles.draw(ctx, this.view, this.size, dpr);
+		this.tiles.draw(ctx, view, size, dpr);
+		const tiles = this.tiles.debugInfo;
+		if (debug.debug && tiles) drawTileDebug(ctx, tiles, dpr);
+		if (debug.chunkOutlines) drawChunkGrid(ctx, view, size, dpr);
+		if (debug.tileOutlines) {
+			const level = tileLevel(view.zoom, dpr, this.maxZoom);
+			drawGrid(
+				ctx,
+				view,
+				size,
+				dpr,
+				this.tileSize * 2 ** level,
+				"rgba(255,0,255,0.8)",
+			);
+		}
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
-		this.features.draw(ctx, this.view, this.size);
+		this.features.draw(ctx, view, size);
 		for (const overlay of this.overlays) overlay(ctx, this);
+		if (debug.debug) this.drawDebugHud();
+		this.lastDrawMs = performance.now() - began;
+	}
+
+	private drawDebugHud() {
+		const { view, size, dpr } = this;
+		const tiles = this.tiles.debugInfo;
+		const counts = new Map<string, number>();
+		for (const t of tiles?.tiles ?? [])
+			counts.set(t.state, (counts.get(t.state) ?? 0) + 1);
+		const lines = [
+			`center  ${view.centerX.toFixed(1)}, ${view.centerZ.toFixed(1)}`,
+			`zoom    ${view.zoom.toFixed(3)}  (${(2 ** -view.zoom).toFixed(3)} px/block)`,
+			`level   ${tiles?.level ?? "-"} of ${this.maxZoom}  tile ${this.tileSize}`,
+			`canvas  ${Math.round(size.width)}×${Math.round(size.height)} @${dpr}x`,
+			`draw    ${this.lastDrawMs.toFixed(1)} ms (last frame)`,
+		];
+		if (tiles) {
+			lines.push(
+				`tiles   ${tiles.tiles.length} visible, ${tiles.cached} cached`,
+				`fetch   ${tiles.inFlight} loading, ${tiles.lookingUp} looking up${tiles.paused ? "  [PAUSED]" : ""}`,
+				`state   ${[...counts].map(([s, n]) => `${s} ${n}`).join(", ")}`,
+				"tint    stale=yellow ancestor=blue children=purple",
+				"        missing=red empty=grey",
+			);
+		}
+		drawHud(this.ctx, lines, 8, Math.min(120, size.height / 3));
 	}
 }
 

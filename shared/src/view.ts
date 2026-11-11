@@ -4,8 +4,8 @@ import { floorDiv } from "./coords";
 export type View = { centerX: number; centerZ: number; zoom: number };
 export type Size = { width: number; height: number };
 
-/** Most magnified view: 64 screen pixels per block. */
-export const MIN_ZOOM = -6;
+/** Most magnified view: 256 screen pixels per block. */
+export const MIN_ZOOM = -8;
 
 export const scaleOf = (zoom: number) => 2 ** -zoom;
 

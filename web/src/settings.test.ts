@@ -57,6 +57,18 @@ describe("parseSettings", () => {
 	});
 });
 
+test("debug toggles default off and are kept when stored", () => {
+	expect(DEFAULT_SETTINGS.debugRender).toBe(false);
+	expect(DEFAULT_SETTINGS.tileOutlines).toBe(false);
+	expect(DEFAULT_SETTINGS.chunkOutlines).toBe(false);
+	const s = parseSettings(
+		JSON.stringify({ debugRender: true, tileOutlines: true, chunkOutlines: 1 }),
+	);
+	expect(s.debugRender).toBe(true);
+	expect(s.tileOutlines).toBe(true);
+	expect(s.chunkOutlines).toBe(false);
+});
+
 describe("parsePosition", () => {
 	test("reads a saved position", () => {
 		const p = { dim: "nether", view: { centerX: 1, centerZ: -2, zoom: 0.5 } };

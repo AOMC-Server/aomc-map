@@ -190,6 +190,30 @@ function Preferences() {
 	);
 }
 
+function Debugging() {
+	return (
+		<section class="page-section">
+			<h2>Debugging</h2>
+			<p class="muted">Saved in this browser only.</p>
+			<Toggle
+				field="debugRender"
+				label="Debug render mode"
+				hint="Colour each map tile by how it was drawn (loaded, stale, stand-in, missing), label it, and show renderer statistics on the map."
+			/>
+			<Toggle
+				field="tileOutlines"
+				label="Show tile outlines"
+				hint="Draw the edges of the map tiles at the current zoom level."
+			/>
+			<Toggle
+				field="chunkOutlines"
+				label="Show chunk outlines"
+				hint="Draw the 16×16 block chunk grid from 1:1 zoom inwards. Zoom in further for chunk coordinates, then the block grid, then each block's coordinates."
+			/>
+		</section>
+	);
+}
+
 /** /settings: your preferences and API tokens. */
 export function SettingsPage() {
 	const [loaded, setLoaded] = useState(false);
@@ -223,6 +247,7 @@ export function SettingsPage() {
 
 			<Appearance />
 			<Preferences />
+			<Debugging />
 
 			{!loaded ? null : u ? (
 				<ApiTokens />

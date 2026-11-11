@@ -44,6 +44,8 @@ export const view = signal<View>({ centerX: 0, centerZ: 0, zoom: 2 });
 export const cursor = signal<{ x: number; z: number } | null>(null);
 export const activeTool = signal<Tool>("none");
 export const loadError = signal<string | null>(null);
+/** Debug render mode: no new tiles are loaded while set. Not saved. */
+export const tilesPaused = signal(false);
 
 export const notice = signal<{ text: string; kind: "error" | "info" } | null>(
 	null,

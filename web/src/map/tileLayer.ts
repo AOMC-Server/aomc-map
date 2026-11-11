@@ -43,6 +43,36 @@ type Entry = {
 type Wanted = { zoom: number; x: number; y: number; priority: number };
 type Dest = { x0: number; y0: number; x1: number; y1: number };
 
+/**
+ * What was drawn for a tile: its own current image (loaded), its own image from an older source
+ * (stale), nothing because it is empty, a stand-in from a coarser (ancestor) or finer (children)
+ * level, or nothing at all yet (missing).
+ */
+export type TileDrawState =
+	| "loaded"
+	| "stale"
+	| "empty"
+	| "ancestor"
+	| "children"
+	| "missing";
+
+/** The tiles of the last frame, for the debug view. Rectangles are in device pixels. */
+export type TileDebugInfo = {
+	level: number;
+	tiles: {
+		x: number;
+		y: number;
+		dest: Dest;
+		state: TileDrawState;
+		loading: boolean;
+		lookingUp: boolean;
+	}[];
+	cached: number;
+	inFlight: number;
+	lookingUp: number;
+	paused: boolean;
+};
+
 const RETRY_MS = 5000;
 const MAX_TILES_PER_FRAME = 600;
 const MAX_CACHE = 512;
@@ -74,6 +104,11 @@ export class TileLayer {
 	/** Tiles whose lookup is under way. */
 	private lookingUp = new Set<string>();
 	private lookupAbort = new AbortController();
+	/** Record what each tile drew, for the debug view (`debugInfo`). */
+	collectDebug = false;
+	debugInfo: TileDebugInfo | null = null;
+	/** Debugging: start no new lookups or loads, and keep drawing what is already there. */
+	private paused = false;
 
 	constructor(
 		private opts: {
@@ -98,6 +133,13 @@ export class TileLayer {
 		this.urls.clear();
 		this.lookingUp.clear();
 		if (!keepPrevious) this.clear();
+		this.opts.onChange();
+	}
+
+	setPaused(paused: boolean) {
+		if (this.paused === paused) return;
+		this.paused = paused;
+		// Redraw, which also requests whatever is now missing.
 		this.opts.onChange();
 	}
 
@@ -131,6 +173,7 @@ export class TileLayer {
 	}
 
 	draw(ctx: CanvasRenderingContext2D, view: View, size: Size, dpr: number) {
+		this.debugInfo = null;
 		if (!this.source) return;
 		const { tileSize: T, maxZoom } = this.opts;
 		ctx.imageSmoothingQuality = "high";
@@ -139,6 +182,7 @@ export class TileLayer {
 		const wanted = new Map<string, Wanted>();
 		const cx = (range.minX + range.maxX) / 2;
 		const cy = (range.minY + range.maxY) / 2;
+		const debug: TileDebugInfo["tiles"] | null = this.collectDebug ? [] : null;
 
 		let drawn = 0;
 		for (let ty = range.minY; ty <= range.maxY; ty++) {
@@ -152,12 +196,24 @@ export class TileLayer {
 					priority,
 				});
 				const rect = tileRect(view, size, level, T, tx, ty);
-				this.drawTile(ctx, level, tx, ty, {
+				const dest = {
 					x0: Math.round(rect.x * dpr),
 					y0: Math.round(rect.y * dpr),
 					x1: Math.round((rect.x + rect.w) * dpr),
 					y1: Math.round((rect.y + rect.h) * dpr),
-				});
+				};
+				const state = this.drawTile(ctx, level, tx, ty, dest);
+				if (debug) {
+					const k = key(level, tx, ty);
+					debug.push({
+						x: tx,
+						y: ty,
+						dest,
+						state,
+						loading: this.cache.get(k)?.loading !== undefined,
+						lookingUp: this.lookingUp.has(k),
+					});
+				}
 
 				// A coarser parent is cheap (1/4 the tiles) and gives a quick preview while zooming.
 				if (level < maxZoom) {
@@ -176,7 +232,17 @@ export class TileLayer {
 			}
 		}
 		this.wanted = wanted;
-		this.pump();
+		if (!this.paused) this.pump();
+		if (debug) {
+			this.debugInfo = {
+				level,
+				tiles: debug,
+				cached: this.cache.size,
+				inFlight: this.inFlight,
+				lookingUp: this.lookingUp.size,
+				paused: this.paused,
+			};
+		}
 	}
 
 	private drawTile(
@@ -185,7 +251,7 @@ export class TileLayer {
 		tx: number,
 		ty: number,
 		d: Dest,
-	) {
+	): TileDrawState {
 		const T = this.opts.tileSize;
 		const dw = d.x1 - d.x0;
 		const dh = d.y1 - d.y0;
@@ -195,10 +261,10 @@ export class TileLayer {
 			if (exact.bitmap) {
 				ctx.imageSmoothingEnabled = dw <= T;
 				ctx.drawImage(exact.bitmap, d.x0, d.y0, dw, dh);
-				return;
+				return this.fresh(exact) ? "loaded" : "stale";
 			}
 			// Known empty. If that is out of date, a fresher coarse tile may already show content.
-			if (this.fresh(exact)) return;
+			if (this.fresh(exact)) return "empty";
 		}
 
 		// Ancestors: draw the sub-rectangle of a coarser tile that covers this one.
@@ -209,7 +275,7 @@ export class TileLayer {
 			const entry = this.touch(key(level + up, ax, ay));
 			if (!this.known(entry)) continue;
 			if (!entry.bitmap) {
-				if (this.fresh(entry)) return;
+				if (this.fresh(entry)) return "empty";
 				continue;
 			}
 			const sw = T / n;
@@ -225,10 +291,11 @@ export class TileLayer {
 				dw,
 				dh,
 			);
-			return;
+			return "ancestor";
 		}
 
 		// Children: finer tiles that are already loaded (e.g. just zoomed out).
+		let state: TileDrawState = "missing";
 		if (level > 0) {
 			for (let j = 0; j < 2; j++) {
 				for (let i = 0; i < 2; i++) {
@@ -240,10 +307,12 @@ export class TileLayer {
 					const hy1 = d.y0 + Math.round((dh * (j + 1)) / 2);
 					ctx.imageSmoothingEnabled = hx1 - hx0 <= T;
 					ctx.drawImage(child.bitmap, hx0, hy0, hx1 - hx0, hy1 - hy0);
+					state = "children";
 				}
 			}
 		}
 		// An out-of-date empty tile with nothing better available: leave blank.
+		return state;
 	}
 
 	private pump() {

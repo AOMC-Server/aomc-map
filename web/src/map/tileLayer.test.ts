@@ -333,3 +333,23 @@ describe("TileLayer with a lookup", () => {
 		]);
 	});
 });
+
+describe("TileLayer pause", () => {
+	test("requests nothing while paused but keeps drawing what is loaded", async () => {
+		const { layer, frame } = makeLayer();
+		layer.setSource(rev(1));
+		frame();
+		await answerAll(labelOf);
+		expect(level0(frame())).toEqual(["r1:0/0/0", "r1:0/1/0"]);
+
+		layer.setPaused(true);
+		// Pan one tile to the right: tile 2 is new, tile 1 is still loaded.
+		const panned = frame({ ...view, centerX: 32 });
+		expect(pending).toHaveLength(0);
+		expect(level0(panned)).toEqual(["r1:0/1/0"]);
+
+		layer.setPaused(false);
+		frame({ ...view, centerX: 32 });
+		expect(pending.some((p) => p.url.includes("/0/2/0"))).toBe(true);
+	});
+});

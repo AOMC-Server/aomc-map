@@ -98,7 +98,7 @@ describe("convertView between dimensions", () => {
 	});
 
 	test("the zoom stays within the allowed range", () => {
-		expect(convertView({ ...at, zoom: -5 }, 1, 8, 8)?.zoom).toBe(-6);
+		expect(convertView({ ...at, zoom: -6 }, 1, 8, 8)?.zoom).toBe(-8);
 		expect(convertView({ ...at, zoom: 7 }, 8, 1, 8)?.zoom).toBe(8);
 	});
 
@@ -110,8 +110,8 @@ describe("convertView between dimensions", () => {
 });
 
 describe("clampZoom / tileLevel", () => {
-	test("clamps to [-6, max]", () => {
-		expect(clampZoom(-10, 8)).toBe(-6);
+	test("clamps to [-8, max]", () => {
+		expect(clampZoom(-10, 8)).toBe(-8);
 		expect(clampZoom(20, 8)).toBe(8);
 		expect(clampZoom(1.5, 8)).toBe(1.5);
 	});
@@ -129,7 +129,7 @@ describe("clampZoom / tileLevel", () => {
 
 	test("tile pixels are never larger than device pixels (no upscaling blur)", () => {
 		for (const dpr of [1, 1.25, 1.5, 2, 3]) {
-			for (let zoom = -6; zoom <= 8; zoom += 0.05) {
+			for (let zoom = -8; zoom <= 8; zoom += 0.05) {
 				const level = tileLevel(zoom, dpr, 12);
 				const devicePxPerTilePx = 2 ** (level - zoom) * dpr;
 				if (level > 0) expect(devicePxPerTilePx).toBeLessThanOrEqual(1 + 1e-6);

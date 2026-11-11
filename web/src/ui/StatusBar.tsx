@@ -1,5 +1,5 @@
 import { settings } from "../settings";
-import { currentScale, cursor, view } from "../state";
+import { currentScale, cursor, tilesPaused, view } from "../state";
 
 /** Human readable scale: "1 block = 4 px" when magnified, "1 px = 8 blocks" when zoomed out. */
 function describeScale(zoom: number): string {
@@ -24,7 +24,13 @@ export function StatusBar() {
 		prefs.showOverworldEquivalent && c && scale !== null && scale !== 1
 			? { x: Math.round(c.x * scale), z: Math.round(c.z * scale) }
 			: null;
-	if (!prefs.showCoordinates && !equivalent && !prefs.showScale) return null;
+	if (
+		!prefs.showCoordinates &&
+		!equivalent &&
+		!prefs.showScale &&
+		!prefs.debugRender
+	)
+		return null;
 	return (
 		<footer class="debug">
 			{prefs.showCoordinates && (
@@ -37,6 +43,19 @@ export function StatusBar() {
 			)}
 			{prefs.showScale && (
 				<span class="line scale">Zoom: {describeScale(view.value.zoom)}</span>
+			)}
+			{prefs.debugRender && (
+				<button
+					type="button"
+					class={`btn small tile-pause ${tilesPaused.value ? "active" : ""}`}
+					aria-pressed={tilesPaused.value}
+					title="Stop loading new tiles; panning and zooming keep working with what is already loaded"
+					onClick={() => {
+						tilesPaused.value = !tilesPaused.value;
+					}}
+				>
+					{tilesPaused.value ? "Resume tile loading" : "Pause tile loading"}
+				</button>
 			)}
 		</footer>
 	);
