@@ -48,6 +48,14 @@ export const featureImportSchema = z
 	.array(featureInputSchema)
 	.max(MAX_FEATURES_PER_LAYER);
 
+/** New order of the layers of a dimension, or of the features of a layer, as ids. */
+export const reorderSchema = z.object({
+	ids: z.array(z.number().int().positive()).max(10_000),
+});
+export const reorderLayersSchema = reorderSchema.extend({
+	dimension: z.string().min(1),
+});
+
 export const layerVisibilitySchema = z.enum(["public", "private"]);
 
 export const createLayerSchema = z.object({

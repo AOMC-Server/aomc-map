@@ -11,6 +11,44 @@ export function segmentLengths(points: Point[]): number[] {
 	return out;
 }
 
+/** The segments of a path as index pairs; `closed` also joins the last point back to the first. */
+export function segmentIndices(
+	count: number,
+	closed = false,
+): [number, number][] {
+	const out: [number, number][] = [];
+	for (let i = 1; i < count; i++) out.push([i - 1, i]);
+	if (closed && count > 2) out.push([count - 1, 0]);
+	return out;
+}
+
+/** Length of the path through the points, in blocks; `closed` adds the way back to the start. */
+export function pathLength(points: Point[], closed = false): number {
+	let total = 0;
+	for (const [a, b] of segmentIndices(points.length, closed)) {
+		const p = points[a] as Point;
+		const q = points[b] as Point;
+		total += Math.hypot(q.x - p.x, q.z - p.z);
+	}
+	return total;
+}
+
+/** Area enclosed by the points (shoelace formula), in square blocks; 0 for fewer than three. */
+export function polygonArea(points: Point[]): number {
+	let sum = 0;
+	for (const [a, b] of segmentIndices(points.length, true)) {
+		const p = points[a] as Point;
+		const q = points[b] as Point;
+		sum += p.x * q.z - q.x * p.z;
+	}
+	return Math.abs(sum) / 2;
+}
+
+/** The block halfway between two points, rounded down to a whole block. */
+export function midpoint(a: Point, b: Point): Point {
+	return { x: Math.floor((a.x + b.x) / 2), z: Math.floor((a.z + b.z) / 2) };
+}
+
 const COMPASS = [
 	"north",
 	"north-east",

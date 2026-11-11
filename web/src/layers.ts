@@ -84,3 +84,31 @@ export function importFeatures(
 		}),
 	);
 }
+
+/** Moves the layers of the dimension into the given order. The list shows it at once; a failure restores the real order. */
+export async function reorderLayers(ids: number[]) {
+	const dimension = dimSlug.value;
+	if (!dimension) return;
+	const byId = new Map(layersData.value.map((l) => [l.id, l]));
+	layersData.value = ids.flatMap((id) => byId.get(id) ?? []);
+	const out = await run(() =>
+		api.api.layers.reorder.$post({ json: { dimension, ids } }),
+	);
+	if (!out) await loadLayers();
+}
+
+/** Moves the features of a layer into the given order, like `reorderLayers`. */
+export async function reorderFeatures(layerId: number, ids: number[]) {
+	layersData.value = layersData.value.map((l) => {
+		if (l.id !== layerId) return l;
+		const byId = new Map(l.features.map((f) => [f.id, f]));
+		return { ...l, features: ids.flatMap((id) => byId.get(id) ?? []) };
+	});
+	const out = await run(() =>
+		api.api.layers[":id"].features.reorder.$post({
+			param: { id: String(layerId) },
+			json: { ids },
+		}),
+	);
+	if (!out) await loadLayers();
+}

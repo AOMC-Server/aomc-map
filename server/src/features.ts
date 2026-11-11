@@ -71,9 +71,19 @@ export async function featuresOfLayers(
 				eq(featureRevisions.deleted, false),
 			),
 		)
-		.orderBy(features.id);
+		.orderBy(features.sortOrder, features.id);
 	for (const row of rows) byLayer.get(row.layerId)?.push(row);
 	return byLayer;
+}
+
+/** The `sortOrder` for a feature added to the end of a layer. */
+export function nextFeatureOrder(db: Pick<Db, "select">, layerId: number) {
+	const row = db
+		.select({ max: sql<number | null>`max(${features.sortOrder})` })
+		.from(features)
+		.where(eq(features.layerId, layerId))
+		.get();
+	return (row?.max ?? 0) + 1;
 }
 
 /** Latest revision of a feature, including deleted state. */

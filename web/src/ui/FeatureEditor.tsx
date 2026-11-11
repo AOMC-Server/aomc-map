@@ -5,7 +5,7 @@ import {
 	MAX_NAME,
 	MAX_POPUP,
 } from "@aomc/shared/features";
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { showNotice } from "../api";
 import { pointsOf, TYPE_LABEL } from "../featureInfo";
 import { createFeature, deleteFeature, updateFeature } from "../layers";
@@ -23,6 +23,7 @@ import {
 import { DyePicker } from "./DyePicker";
 import { Banner } from "./icons";
 import { Panel } from "./Panel";
+import { PointsList, ShapeStats } from "./PointsList";
 
 const TYPES: FeatureType[] = ["pin", "line", "polygon"];
 
@@ -38,13 +39,15 @@ function drawHint(
 ): string {
 	if (mode === "placed")
 		return type === "pin"
-			? "Drag the marker to move it."
-			: `${count} points. Drag a point to move it.`;
+			? "Drag the marker to move it, or type its coordinates."
+			: "Drag a point to move it, or drag a + on a segment to add one.";
 	if (type === "pin") return "Click the map to place the pin.";
 	const need = minPoints(type);
-	return count < need
-		? `Click the map to add points (${count}/${need} minimum).`
-		: `${count} points. Click to add more, then Finish (or press Enter).`;
+	if (count < need)
+		return `Click the map to add points (${count}/${need} minimum). Hold Shift to snap to straight lines.`;
+	return type === "line"
+		? "Click to add more points. Click the last point or press Enter to finish."
+		: "Click to add more points. Click the first point or press Enter to close the area.";
 }
 
 /** Side panel for creating or editing one feature. Geometry is placed on the map with the draw tool. */
@@ -61,6 +64,7 @@ export function FeatureEditor() {
 	const [text, setText] = useState(existing?.popup ?? "");
 	const [color, setColor] = useState<Dye | null>(existing?.color ?? null);
 	const [saving, setSaving] = useState(false);
+	const popupField = useRef<HTMLTextAreaElement>(null);
 
 	const cancelEditing = () => {
 		editor.value = null;
@@ -113,6 +117,30 @@ export function FeatureEditor() {
 		}
 		closeEditor();
 		popup.value = null;
+	};
+
+	/** Puts the selected popup text between `before` and `after` (or a placeholder if nothing is selected). */
+	const wrapSelection = (
+		before: string,
+		after: string,
+		placeholder: string,
+	) => {
+		const el = popupField.current;
+		if (!el) return;
+		const from = el.selectionStart;
+		const to = el.selectionEnd;
+		const selected = text.slice(from, to) || placeholder;
+		const next =
+			text.slice(0, from) + before + selected + after + text.slice(to);
+		if (next.length > MAX_POPUP) return;
+		setText(next);
+		requestAnimationFrame(() => {
+			el.focus();
+			el.setSelectionRange(
+				from + before.length,
+				from + before.length + selected.length,
+			);
+		});
 	};
 
 	const remove = async () => {
@@ -180,6 +208,7 @@ export function FeatureEditor() {
 			<div class="field draw-controls">
 				<span class="label">Location</span>
 				<p class="hint">{drawHint(type, points.length, d?.mode ?? "draw")}</p>
+				<ShapeStats />
 				<div class="group">
 					{d?.mode === "draw" && type !== "pin" && (
 						<button
@@ -202,11 +231,7 @@ export function FeatureEditor() {
 						</button>
 					)}
 				</div>
-				{type === "pin" && points[0] && (
-					<p class="hint">
-						x {points[0][0]}, z {points[0][1]}
-					</p>
-				)}
+				<PointsList />
 			</div>
 
 			<label class="field">
@@ -220,21 +245,47 @@ export function FeatureEditor() {
 				/>
 			</label>
 
-			<label class="field">
+			<div class="field">
 				<span class="label">
 					Popup{" "}
 					<small>
 						({text.length}/{MAX_POPUP})
 					</small>
 				</span>
+				<div class="format-bar">
+					<button
+						type="button"
+						class="btn small"
+						title="Bold (Ctrl+B)"
+						onClick={() => wrapSelection("**", "**", "bold text")}
+					>
+						<b>B</b>
+					</button>
+					<button
+						type="button"
+						class="btn small"
+						title="Link: select the text first, then put the address in the brackets"
+						onClick={() => wrapSelection("[", "](https://)", "link text")}
+					>
+						Link
+					</button>
+				</div>
 				<textarea
+					ref={popupField}
 					rows={4}
 					value={text}
 					maxLength={MAX_POPUP}
+					aria-label="Popup text"
 					onInput={(e) => setText(e.currentTarget.value)}
+					onKeyDown={(e) => {
+						if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "b") {
+							e.preventDefault();
+							wrapSelection("**", "**", "bold text");
+						}
+					}}
 					placeholder="**bold**, [links](https://example.com) and line breaks"
 				/>
-			</label>
+			</div>
 
 			<div class="field">
 				<span class="label">Colour</span>

@@ -2,6 +2,10 @@ import { describe, expect, test } from "bun:test";
 import {
 	facing,
 	formatDuration,
+	midpoint,
+	pathLength,
+	polygonArea,
+	segmentIndices,
 	segmentLengths,
 	snapToLine,
 } from "./measureMath";
@@ -60,5 +64,56 @@ describe("formatDuration", () => {
 		expect(formatDuration(44.6)).toBe("45s");
 		expect(formatDuration(185)).toBe("3m 05s");
 		expect(formatDuration(7620)).toBe("2h 07m");
+	});
+});
+
+describe("segmentIndices and pathLength", () => {
+	const square = [
+		{ x: 0, z: 0 },
+		{ x: 10, z: 0 },
+		{ x: 10, z: 10 },
+		{ x: 0, z: 10 },
+	];
+
+	test("a path has n-1 segments, a closed one joins the end to the start", () => {
+		expect(segmentIndices(3)).toEqual([
+			[0, 1],
+			[1, 2],
+		]);
+		expect(segmentIndices(3, true)).toEqual([
+			[0, 1],
+			[1, 2],
+			[2, 0],
+		]);
+		expect(segmentIndices(2, true)).toEqual([[0, 1]]);
+		expect(segmentIndices(1)).toEqual([]);
+	});
+
+	test("lengths, open and closed", () => {
+		expect(pathLength(square)).toBe(30);
+		expect(pathLength(square, true)).toBe(40);
+		expect(pathLength([{ x: 3, z: 4 }])).toBe(0);
+		expect(
+			pathLength(
+				[
+					{ x: 0, z: 0 },
+					{ x: 3, z: 4 },
+				],
+				true,
+			),
+		).toBe(5);
+	});
+
+	test("area does not depend on the direction, and is 0 without a surface", () => {
+		expect(polygonArea(square)).toBe(100);
+		expect(polygonArea([...square].reverse())).toBe(100);
+		expect(polygonArea(square.slice(0, 2))).toBe(0);
+	});
+});
+
+describe("midpoint", () => {
+	test("is the whole block halfway, rounding down", () => {
+		expect(midpoint({ x: 0, z: 0 }, { x: 10, z: 4 })).toEqual({ x: 5, z: 2 });
+		expect(midpoint({ x: -3, z: 0 }, { x: 0, z: 1 })).toEqual({ x: -2, z: 0 });
 	});
 });

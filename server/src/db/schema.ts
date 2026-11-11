@@ -182,6 +182,8 @@ export const features = sqliteTable("features", {
 	layerId: integer("layer_id")
 		.notNull()
 		.references(() => layers.id, { onDelete: "cascade" }),
+	/** Position in the layer (lower first). Not versioned: reordering is not an edit of the feature. */
+	sortOrder: integer("sort_order").notNull().default(0),
 	createdAt: createdAt(),
 });
 

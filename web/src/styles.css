@@ -1966,3 +1966,113 @@ input[type="range"]:disabled {
 .layer-actions .btn.primary {
 	flex-basis: 100%;
 }
+
+/* Feature editor: shape numbers, point list, popup formatting */
+.shape-stats {
+	margin: 6px 0;
+	font-size: 13px;
+	font-weight: 600;
+	color: var(--yellow);
+}
+
+.points-list {
+	list-style: none;
+	margin: 10px 0 0;
+	padding: 4px;
+	max-height: 200px;
+	overflow-y: auto;
+	background: var(--ink);
+}
+
+.points-list li {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	padding: 3px;
+}
+
+.points-list li:hover {
+	background: var(--s2);
+}
+
+.point-no {
+	flex: none;
+	min-width: 24px;
+	padding: 2px 4px;
+	font-size: 12px;
+	font-weight: 700;
+	text-align: center;
+	color: var(--muted);
+	background: var(--s1);
+}
+
+.coord-label {
+	flex: none;
+	font-size: 12px;
+	font-weight: 700;
+	text-transform: uppercase;
+	color: var(--muted);
+}
+
+.points-list .coord {
+	flex: 1;
+	min-width: 0;
+	min-height: 32px;
+	padding: 4px 8px;
+	font-variant-numeric: tabular-nums;
+}
+
+.points-list .btn.close {
+	flex: none;
+}
+
+.format-bar {
+	display: flex;
+	gap: 4px;
+	margin-bottom: 6px;
+}
+
+/* Reordering */
+.grip {
+	flex: none;
+	display: grid;
+	place-items: center;
+	width: 20px;
+	height: 32px;
+	margin-left: -4px;
+	cursor: grab;
+	touch-action: none;
+	user-select: none;
+}
+
+.grip-dots {
+	width: 8px;
+	height: 14px;
+	background:
+		radial-gradient(circle, var(--faint) 1.5px, transparent 2px) 0 0 / 4px
+		4.67px;
+}
+
+.grip:hover .grip-dots,
+.grip:focus-visible .grip-dots {
+	background:
+		radial-gradient(circle, #fff 1.5px, transparent 2px) 0 0 / 4px 4.67px;
+}
+
+.grip:focus-visible {
+	outline: 2px solid #fff;
+	outline-offset: -2px;
+}
+
+.sliding {
+	transition: transform 0.12s ease-out;
+}
+
+.dragging {
+	position: relative;
+	z-index: 2;
+	cursor: grabbing;
+	background: var(--s3);
+	box-shadow: var(--lift);
+	transition: none;
+}

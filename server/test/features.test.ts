@@ -795,3 +795,139 @@ describe("export and import", () => {
 		).toBe(201);
 	});
 });
+
+describe("reordering", () => {
+	const ids = (body: { features: { id: number }[] } | { id: number }[]) =>
+		(Array.isArray(body) ? body : body.features).map((f) => f.id);
+
+	async function listLayer(t: TileApp, layerId: number) {
+		const res = await call(t, t.editor, "GET", "/api/layers?dim=overworld");
+		return (
+			res.body.layers as { id: number; features: { id: number }[] }[]
+		).find((l) => l.id === layerId);
+	}
+
+	test("features are listed in the new order, and new ones go last", async () => {
+		const t = await bootTiles();
+		const layer = await makeLayer(t);
+		const add = async (x: number) =>
+			(
+				await call(
+					t,
+					t.editor,
+					"POST",
+					`/api/layers/${layer.id}/features`,
+					pin(x),
+				)
+			).body.feature.id as number;
+		const [a, b, c] = [await add(1), await add(2), await add(3)];
+		expect(ids((await listLayer(t, layer.id)) as never)).toEqual([a, b, c]);
+
+		const res = await call(
+			t,
+			t.editor,
+			"POST",
+			`/api/layers/${layer.id}/features/reorder`,
+			{ ids: [c, a, b] },
+		);
+		expect(res.status).toBe(200);
+		const d = await add(4);
+		expect(ids((await listLayer(t, layer.id)) as never)).toEqual([c, a, b, d]);
+	});
+
+	test("the list must be exactly the layer's features; viewers and anonymous users may not reorder", async () => {
+		const t = await bootTiles();
+		const layer = await makeLayer(t);
+		const post = (body: object, user: Auth = t.editor) =>
+			call(t, user, "POST", `/api/layers/${layer.id}/features/reorder`, body);
+		const a = (
+			await call(
+				t,
+				t.editor,
+				"POST",
+				`/api/layers/${layer.id}/features`,
+				pin(1),
+			)
+		).body.feature.id as number;
+		const b = (
+			await call(
+				t,
+				t.editor,
+				"POST",
+				`/api/layers/${layer.id}/features`,
+				pin(2),
+			)
+		).body.feature.id as number;
+		expect((await post({ ids: [a] })).status).toBe(409);
+		expect((await post({ ids: [a, a] })).status).toBe(409);
+		expect((await post({ ids: [a, b, 999] })).status).toBe(409);
+		expect((await post({ ids: "nope" })).status).toBe(400);
+		expect((await post({ ids: [b, a] }, null)).status).toBe(401);
+
+		// A deleted feature is not part of the list.
+		await call(t, t.editor, "DELETE", `/api/features/${a}`);
+		expect((await post({ ids: [b] })).status).toBe(200);
+	});
+
+	test("layers are listed in the new order, per dimension", async () => {
+		const t = await bootTiles();
+		const a = await makeLayer(t, t.editor, { name: "A" });
+		const b = await makeLayer(t, t.editor, { name: "B" });
+		const c = await makeLayer(t, t.editor, { name: "C" });
+		const order = async () =>
+			(
+				(await call(t, t.editor, "GET", "/api/layers?dim=overworld")).body
+					.layers as { name: string }[]
+			).map((l) => l.name);
+		expect(await order()).toEqual(["A", "B", "C"]);
+
+		const res = await call(t, t.editor, "POST", "/api/layers/reorder", {
+			dimension: "overworld",
+			ids: [c.id, a.id, b.id],
+		});
+		expect(res.status).toBe(200);
+		expect(await order()).toEqual(["C", "A", "B"]);
+
+		const bad = (body: object, user: Auth = t.editor) =>
+			call(t, user, "POST", "/api/layers/reorder", body);
+		expect((await bad({ dimension: "overworld", ids: [a.id] })).status).toBe(
+			409,
+		);
+		expect((await bad({ dimension: "nowhere", ids: [] })).status).toBe(404);
+		expect(
+			(await bad({ dimension: "overworld", ids: [a.id, b.id, c.id] }, null))
+				.status,
+		).toBe(401);
+	});
+
+	test("a private layer someone cannot see keeps its place when they reorder", async () => {
+		const t = await bootTiles();
+		const a = await makeLayer(t, t.editor, { name: "A" });
+		await makeLayer(t, t.editor, { name: "Secret", visibility: "private" });
+		const c = await makeLayer(t, t.editor, { name: "C" });
+		const namesFor = async (user: Auth) =>
+			(
+				(await call(t, user, "GET", "/api/layers?dim=overworld")).body
+					.layers as { name: string }[]
+			).map((l) => l.name);
+		expect(await namesFor(t.mod)).toEqual(["A", "Secret", "C"]);
+
+		// Another editor does not see "Secret", so they send only A and C.
+		const other = await makeUser(t.db, "other");
+		expect(await namesFor(other)).toEqual(["A", "C"]);
+		const res = await call(t, other, "POST", "/api/layers/reorder", {
+			dimension: "overworld",
+			ids: [c.id, a.id],
+		});
+		expect(res.status).toBe(200);
+		expect(await namesFor(other)).toEqual(["C", "A"]);
+		expect(await namesFor(t.mod)).toEqual(["C", "Secret", "A"]);
+
+		// A moderator sees every layer, so a list without "Secret" is out of date for them.
+		const incomplete = await call(t, t.mod, "POST", "/api/layers/reorder", {
+			dimension: "overworld",
+			ids: [a.id, c.id],
+		});
+		expect(incomplete.status).toBe(409);
+	});
+});

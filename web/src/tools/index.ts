@@ -2,8 +2,15 @@ import { effect } from "@preact/signals";
 import { isTyping } from "../map/input";
 import type { MapView } from "../map/MapView";
 import { activeTool, cursor, highlightBbox } from "../state";
-import { drawGeometry, drawing, grabDrawPoint, initDrawTool } from "./draw";
+import {
+	drawGeometry,
+	drawing,
+	focusedPoint,
+	grabDrawPoint,
+	initDrawTool,
+} from "./draw";
 import { initFeatureInteraction } from "./features";
+import { shiftHeld } from "./handles";
 import {
 	clearMeasure,
 	clickMeasure,
@@ -12,7 +19,6 @@ import {
 	hoverMeasure,
 	measureHover,
 	measurePoints,
-	setMeasureSnapping,
 	undoMeasure,
 } from "./measure";
 
@@ -47,6 +53,8 @@ export function initTools(map: MapView) {
 		measurePoints.value;
 		measureHover.value;
 		drawing.value;
+		focusedPoint.value;
+		shiftHeld.value;
 		map.invalidate();
 	});
 
@@ -72,9 +80,13 @@ export function initTools(map: MapView) {
 		}
 	});
 
-	const shift = (e: KeyboardEvent) => setMeasureSnapping(e.shiftKey);
+	const shift = (e: KeyboardEvent) => {
+		shiftHeld.value = e.shiftKey;
+	};
 	window.addEventListener("keyup", shift);
-	window.addEventListener("blur", () => setMeasureSnapping(false));
+	window.addEventListener("blur", () => {
+		shiftHeld.value = false;
+	});
 	window.addEventListener("keydown", (e) => {
 		shift(e);
 		if (isTyping(e.target) || drawing.value) return;

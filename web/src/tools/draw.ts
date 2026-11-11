@@ -1,14 +1,23 @@
 import type { FeatureType, Point } from "@aomc/shared/features";
 import { signal } from "@preact/signals";
-import { BLOCK_CENTER } from "../map/featureLayer";
 import { type DragSession, isTyping } from "../map/input";
 import type { MapView } from "../map/MapView";
+import { blockAt, blockCenter, nearestHandle, shiftHeld } from "./handles";
+import {
+	midpoint,
+	segmentIndices,
+	snapToLine,
+	type Point as XZ,
+} from "./measureMath";
+import { handleSquare, outlinedPath, plusHandle } from "./overlay";
 
 /**
  * Geometry placement for the feature editor.
  *
- * Click adds a vertex, dragging a vertex moves it, Enter finishes placing, Esc cancels,
- * Backspace removes the last vertex. A pin is a single vertex.
+ * Click adds a vertex (Shift snaps it to a straight line), dragging a vertex moves it, dragging
+ * the "+" on a segment inserts one, clicking the last vertex of a line or the first of an area
+ * finishes it, Enter finishes placing, Esc cancels, Backspace removes the last vertex. A pin is a
+ * single vertex.
  */
 export type DrawState = {
 	type: FeatureType;
@@ -18,6 +27,8 @@ export type DrawState = {
 };
 
 export const drawing = signal<DrawState | null>(null);
+/** The vertex being pointed at in the editor's list; it is drawn larger on the map. */
+export const focusedPoint = signal<number | null>(null);
 
 let onCancel: (() => void) | null = null;
 
@@ -37,9 +48,31 @@ export function startDraw(
 	};
 }
 
+/** Changes the kind of feature but keeps the points that still make sense (a line becomes an area, and back). */
 export function setDrawType(type: FeatureType) {
-	if (!drawing.value) return;
-	drawing.value = { type, points: [], mode: "draw" };
+	const d = drawing.value;
+	if (!d) return;
+	const points = type === "pin" ? d.points.slice(0, 1) : d.points;
+	const placed =
+		(d.mode === "placed" || type === "pin") && points.length >= minPoints(type);
+	drawing.value = { type, points, mode: placed ? "placed" : "draw" };
+}
+
+export function setPoint(index: number, point: Point) {
+	const d = drawing.value;
+	if (!d || index < 0 || index >= d.points.length) return;
+	const points = [...d.points];
+	points[index] = point;
+	drawing.value = { ...d, points };
+}
+
+export function removePoint(index: number) {
+	const d = drawing.value;
+	if (!d || index < 0 || index >= d.points.length) return;
+	const points = d.points.filter((_, i) => i !== index);
+	const placed = d.mode === "placed" && points.length >= minPoints(d.type);
+	focusedPoint.value = null;
+	drawing.value = { ...d, points, mode: placed ? "placed" : "draw" };
 }
 
 export function resumeDraw() {
@@ -64,6 +97,7 @@ export function undoPoint() {
 /** Stops drawing without telling anyone (the editor calls this when it closes). */
 export function stopDraw() {
 	drawing.value = null;
+	focusedPoint.value = null;
 	onCancel = null;
 }
 
@@ -73,20 +107,33 @@ function cancelDraw() {
 	cancel?.();
 }
 
-const HANDLE_RADIUS = 6;
-const GRAB_RADIUS = 12;
+const HANDLE = 6;
+const MID_RADIUS = 9;
+/** Segments shorter than this on screen get no "+" handle; it would sit on top of the vertices. */
+const MIN_MID_SEGMENT_PX = 40;
+/** A press on a vertex only drags once the pointer has moved this far; a smaller move is a click. */
+const DRAG_START_PX = 5;
 
-const toBlock = (map: MapView, sx: number, sy: number): Point => {
-	const b = map.screenToBlock(sx, sy);
-	return [Math.floor(b.x), Math.floor(b.z)];
-};
+const LINE = "#ffe866";
 
-/** Screen position of the pointer, for the rubber band line while placing vertices. */
-let pointer: { sx: number; sy: number } | null = null;
+// The geometry uses [x, z] pairs; the shared tool code uses { x, z }.
+const xz = ([x, z]: Point): XZ => ({ x, z });
+const pair = (p: XZ): Point => [p.x, p.z];
+
+const toBlock = (map: MapView, sx: number, sy: number): Point =>
+	pair(blockAt(map, sx, sy));
+const center = (map: MapView, p: Point) => blockCenter(map, xz(p));
+
+/** The block under the pointer, for the rubber band line while placing vertices. */
+let hover: Point | null = null;
+
+/** `p`, or with Shift held the nearest block on a straight line from `from`. */
+const snapped = (from: Point | undefined, p: Point): Point =>
+	shiftHeld.value && from ? pair(snapToLine(xz(from), xz(p))) : p;
 
 export function initDrawTool(map: MapView) {
 	map.on("move", (e) => {
-		pointer = e ? { sx: e.sx, sy: e.sy } : null;
+		hover = e ? toBlock(map, e.sx, e.sy) : null;
 		if (drawing.value?.mode === "draw") map.invalidate();
 	});
 	map.on("click", (e) => {
@@ -94,7 +141,11 @@ export function initDrawTool(map: MapView) {
 		if (d?.mode !== "draw") return;
 		const p = toBlock(map, e.sx, e.sy);
 		if (d.type === "pin") drawing.value = { ...d, points: [p], mode: "placed" };
-		else drawing.value = { ...d, points: [...d.points, p] };
+		else
+			drawing.value = {
+				...d,
+				points: [...d.points, snapped(d.points.at(-1), p)],
+			};
 	});
 
 	window.addEventListener("keydown", (e) => {
@@ -112,7 +163,55 @@ export function initDrawTool(map: MapView) {
 	});
 }
 
-/** Lets a vertex of the geometry being placed be dragged to a new block. */
+/** Dragging vertex `index`. A press that does not move is a click, which can finish the shape. */
+function vertexSession(
+	map: MapView,
+	index: number,
+	sx: number,
+	sy: number,
+	inserted: boolean,
+): DragSession {
+	let dragging = false;
+	return {
+		move(mx, my) {
+			if (!dragging) {
+				if (Math.hypot(mx - sx, my - sy) < DRAG_START_PX) return;
+				dragging = true;
+			}
+			const d = drawing.value;
+			const current = d?.points[index];
+			if (!d || !current) return;
+			const raw = toBlock(map, mx, my);
+			const next =
+				d.type === "pin"
+					? raw
+					: snapped(d.points[index - 1] ?? d.points[index + 1], raw);
+			if (next[0] === current[0] && next[1] === current[1]) return;
+			setPoint(index, next);
+		},
+		end() {
+			if (dragging || inserted) return;
+			const d = drawing.value;
+			if (d?.mode !== "draw") return;
+			const n = d.points.length;
+			if (
+				(d.type === "polygon" && index === 0 && n >= 3) ||
+				(d.type === "line" && index === n - 1 && n >= 2)
+			)
+				finishDraw();
+		},
+	};
+}
+
+/** Where the "+" of a segment is on screen, or null when the segment is too short for one. */
+function midHandle(map: MapView, a: Point, b: Point) {
+	const sa = center(map, a);
+	const sb = center(map, b);
+	if (Math.hypot(sb.x - sa.x, sb.y - sa.y) < MIN_MID_SEGMENT_PX) return null;
+	return blockCenter(map, midpoint(xz(a), xz(b)));
+}
+
+/** Lets a vertex be dragged, or a new one be pulled out of the "+" on a segment. */
 export function grabDrawPoint(
 	map: MapView,
 	sx: number,
@@ -120,73 +219,77 @@ export function grabDrawPoint(
 ): DragSession | null {
 	const d = drawing.value;
 	if (!d) return null;
-	let best = -1;
-	let bestDist = GRAB_RADIUS;
-	d.points.forEach(([x, z], i) => {
-		const s = map.blockToScreen(x + BLOCK_CENTER, z + BLOCK_CENTER);
-		const dist = Math.hypot(s.x - sx, s.y - sy);
-		if (dist <= bestDist) {
-			best = i;
-			bestDist = dist;
-		}
-	});
-	if (best < 0) return null;
-	const index = best;
-	return {
-		move(mx, my) {
-			const current = drawing.value;
-			if (!current) return;
-			const points = [...current.points];
-			points[index] = toBlock(map, mx, my);
-			drawing.value = { ...current, points };
-		},
-		end() {},
-	};
+
+	const vertex = nearestHandle(map, d.points.map(xz), sx, sy);
+	if (vertex >= 0) return vertexSession(map, vertex, sx, sy, false);
+	if (d.type === "pin") return null;
+
+	for (const [a, b] of segmentIndices(d.points.length, d.type === "polygon")) {
+		const pa = d.points[a] as Point;
+		const pb = d.points[b] as Point;
+		const mid = midHandle(map, pa, pb);
+		if (!mid || Math.hypot(mid.x - sx, mid.y - sy) > MID_RADIUS) continue;
+		// The closing segment of an area runs from the last vertex back to the first.
+		const at = b === 0 ? d.points.length : b;
+		const points = [...d.points];
+		points.splice(at, 0, pair(midpoint(xz(pa), xz(pb))));
+		drawing.value = { ...d, points };
+		return vertexSession(map, at, sx, sy, true);
+	}
+	return null;
 }
 
-/** Overlay: the geometry being placed, with vertex handles. */
+/** Overlay: the geometry being placed, with "+" handles to add vertices. */
 export function drawGeometry(ctx: CanvasRenderingContext2D, map: MapView) {
 	const d = drawing.value;
 	if (!d || d.points.length === 0) return;
-	const pts = d.points.map(([x, z]) =>
-		map.blockToScreen(x + BLOCK_CENTER, z + BLOCK_CENTER),
-	);
+	const pts = d.points.map((p) => center(map, p));
 	ctx.save();
 	ctx.lineJoin = "round";
 	ctx.lineCap = "round";
+
 	if (d.type !== "pin") {
-		ctx.beginPath();
-		for (const [i, p] of pts.entries()) {
-			if (i === 0) ctx.moveTo(p.x, p.y);
-			else ctx.lineTo(p.x, p.y);
-		}
-		if (d.type === "polygon" && d.mode === "placed") ctx.closePath();
-		ctx.strokeStyle = "#ffd23f";
-		ctx.lineWidth = 3;
-		ctx.stroke();
-		if (d.mode === "draw" && pointer) {
-			const last = pts[pts.length - 1];
-			if (last) {
-				ctx.setLineDash([6, 5]);
-				ctx.lineWidth = 2;
-				ctx.beginPath();
-				ctx.moveTo(last.x, last.y);
-				ctx.lineTo(pointer.sx, pointer.sy);
-				if (d.type === "polygon" && pts.length >= 2)
-					ctx.lineTo((pts[0] as { x: number }).x, (pts[0] as { y: number }).y);
-				ctx.stroke();
-				ctx.setLineDash([]);
+		const closed = d.type === "polygon" && d.mode === "placed";
+		if (d.type === "polygon" && pts.length >= 3) {
+			ctx.beginPath();
+			for (const [i, p] of pts.entries()) {
+				if (i === 0) ctx.moveTo(p.x, p.y);
+				else ctx.lineTo(p.x, p.y);
 			}
+			ctx.closePath();
+			ctx.fillStyle = "rgba(255, 232, 102, 0.16)";
+			ctx.fill();
+		}
+		outlinedPath(ctx, pts, { color: LINE, closed });
+
+		if (d.mode === "draw" && hover) {
+			const last = pts[pts.length - 1] as { x: number; y: number };
+			const aim = center(map, snapped(d.points.at(-1), hover));
+			const band = [last, aim];
+			if (d.type === "polygon" && pts.length >= 2)
+				band.push(pts[0] as typeof last);
+			outlinedPath(ctx, band, { color: LINE, width: 2, dashed: true });
+		}
+
+		for (const [a, b] of segmentIndices(
+			d.points.length,
+			d.type === "polygon",
+		)) {
+			const mid = midHandle(map, d.points[a] as Point, d.points[b] as Point);
+			if (mid) plusHandle(ctx, mid.x, mid.y);
 		}
 	}
+
 	pts.forEach((p, i) => {
-		ctx.beginPath();
-		ctx.arc(p.x, p.y, HANDLE_RADIUS, 0, Math.PI * 2);
-		ctx.fillStyle = i === 0 && d.type !== "pin" ? "#3fe08a" : "#fff";
-		ctx.fill();
-		ctx.lineWidth = 2;
-		ctx.strokeStyle = "#000";
-		ctx.stroke();
+		const focused = i === focusedPoint.value;
+		const first = i === 0 && d.type !== "pin";
+		handleSquare(
+			ctx,
+			p.x,
+			p.y,
+			focused ? HANDLE + 3 : HANDLE,
+			focused ? LINE : first ? "#52a535" : "#fff",
+		);
 	});
 	ctx.restore();
 }

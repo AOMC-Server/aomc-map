@@ -11,9 +11,12 @@ import {
 	deleteFeature,
 	deleteLayer,
 	importFeatures,
+	reorderFeatures,
+	reorderLayers,
 	updateLayer,
 } from "../layers";
 import { boundsOf } from "../map/geometry";
+import { moveItem } from "../reorder";
 import {
 	canEditMap,
 	editor,
@@ -29,6 +32,7 @@ import {
 	user,
 } from "../state";
 import { DyePicker } from "./DyePicker";
+import { Grip } from "./Grip";
 import { Banner } from "./icons";
 import { layerSharingFor } from "./LayerSharing";
 import { Panel } from "./Panel";
@@ -282,17 +286,37 @@ function LayerSettings(props: {
 	);
 }
 
-function LayerRow(props: { match: LayerMatch; filtering: boolean }) {
+function LayerRow(props: {
+	match: LayerMatch;
+	filtering: boolean;
+	/** Position among the layers, and how many there are; set when the layers can be reordered. */
+	position?: { index: number; count: number };
+	onMove: (from: number, to: number) => void;
+}) {
 	const l = props.match.layer;
 	const features = props.match.features;
 	const open = props.filtering || openLayers.value.has(l.id);
 	const [settingsOpen, setSettingsOpen] = useState(false);
 	const editable = l.canEdit && canEditMap.value;
 	const hidden = isLayerHidden(l);
+	// A search shows only some of the features, so their order cannot be changed meanwhile.
+	const featureOrder =
+		editable && !props.filtering && l.features.length > 1
+			? l.features.map((f) => f.id)
+			: null;
 
 	return (
 		<li class={`layer ${open ? "open" : ""} ${hidden ? "hidden" : ""}`}>
 			<div class="layer-head">
+				{props.position && (
+					<Grip
+						id={`layer-${l.id}`}
+						label={l.name}
+						index={props.position.index}
+						count={props.position.count}
+						onMove={props.onMove}
+					/>
+				)}
 				<input
 					type="checkbox"
 					checked={!hidden}
@@ -377,12 +401,26 @@ function LayerRow(props: { match: LayerMatch; filtering: boolean }) {
 
 					{!settingsOpen && (
 						<ul class="features">
-							{features.map((f) => (
+							{features.map((f, i) => (
 								<li
 									key={f.id}
 									onMouseEnter={() => hoverFeature(f.id)}
 									onMouseLeave={() => hoverFeature(null)}
 								>
+									{featureOrder && (
+										<Grip
+											id={`feature-${f.id}`}
+											label={f.name || TYPE_LABEL[f.type]}
+											index={i}
+											count={featureOrder.length}
+											onMove={(from, to) =>
+												void reorderFeatures(
+													l.id,
+													moveItem(featureOrder, from, to),
+												)
+											}
+										/>
+									)}
 									<button
 										type="button"
 										class="plain feature-link"
@@ -438,6 +476,7 @@ export function LayerPanel() {
 	const layers = layersData.value;
 	const filtering = query.trim() !== "";
 	const matches = searchLayers(layers, query);
+	const canReorder = canEditMap.value && !filtering && layers.length > 1;
 	const featureCount = matches.reduce((sum, m) => sum + m.features.length, 0);
 
 	// The row's hover highlight must not outlive the list.
@@ -503,8 +542,18 @@ export function LayerPanel() {
 				</div>
 			)}
 			<ul class="layers">
-				{matches.map((m) => (
-					<LayerRow key={m.layer.id} match={m} filtering={filtering} />
+				{matches.map((m, i) => (
+					<LayerRow
+						key={m.layer.id}
+						match={m}
+						filtering={filtering}
+						position={
+							canReorder ? { index: i, count: matches.length } : undefined
+						}
+						onMove={(from, to) =>
+							void reorderLayers(moveItem(layers, from, to).map((l) => l.id))
+						}
+					/>
 				))}
 			</ul>
 			{layers.length === 0 && (

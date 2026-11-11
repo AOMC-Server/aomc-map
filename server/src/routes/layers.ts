@@ -3,6 +3,8 @@ import {
 	featureImportSchema,
 	featureInputSchema,
 	MAX_FEATURES_PER_LAYER,
+	reorderLayersSchema,
+	reorderSchema,
 	updateLayerSchema,
 } from "@aomc/shared";
 import { zValidator } from "@hono/zod-validator";
@@ -22,8 +24,10 @@ import {
 	contentOf,
 	featuresOfLayers,
 	insertRevision,
+	nextFeatureOrder,
 	toView,
 } from "../features";
+import { assignOrder, sameSet } from "../order";
 import {
 	canEdit,
 	canEditLayer,
@@ -190,6 +194,47 @@ export const layerRoutes = new Hono<AppEnv>()
 			201,
 		);
 	})
+	.post(
+		"/reorder",
+		requireUser,
+		zValidator("json", reorderLayersSchema),
+		async (c) => {
+			const { db, role } = c.var;
+			const user = userOf(c);
+			if (!canEdit(role)) return c.json({ error: "forbidden" }, 403);
+			const body = c.req.valid("json");
+			const [dim] = await db
+				.select({ id: dimensions.id })
+				.from(dimensions)
+				.where(eq(dimensions.slug, body.dimension));
+			if (!dim) return c.json({ error: "dimension not found" }, 404);
+
+			const rows = await db
+				.select()
+				.from(layers)
+				.where(and(eq(layers.dimensionId, dim.id), isNull(layers.deletedAt)));
+			const memberships = await db
+				.select({ layerId: layerMembers.layerId, role: layerMembers.role })
+				.from(layerMembers)
+				.where(eq(layerMembers.userId, user.id));
+			const layerRoles = new Map(memberships.map((m) => [m.layerId, m.role]));
+			// Only the layers this user can see take part; the others keep their places.
+			const visible = rows.filter((l) =>
+				canViewLayer(role, l, layerRoles.get(l.id) ?? null),
+			);
+			if (!sameSet(visible, body.ids))
+				return c.json({ error: "the list of layers is out of date" }, 409);
+
+			db.transaction((tx) => {
+				for (const u of assignOrder(visible, body.ids))
+					tx.update(layers)
+						.set({ sortOrder: u.sortOrder })
+						.where(eq(layers.id, u.id))
+						.run();
+			});
+			return c.json({ ok: true });
+		},
+	)
 	.patch(
 		"/:id",
 		requireUser,
@@ -268,7 +313,10 @@ export const layerRoutes = new Hono<AppEnv>()
 			const view = db.transaction((tx) => {
 				const feature = tx
 					.insert(features)
-					.values({ layerId: found.layer.id })
+					.values({
+						layerId: found.layer.id,
+						sortOrder: nextFeatureOrder(tx, found.layer.id),
+					})
 					.returning()
 					.get();
 				return toView(
@@ -277,6 +325,40 @@ export const layerRoutes = new Hono<AppEnv>()
 				);
 			});
 			return c.json({ feature: view }, 201);
+		},
+	)
+	.post(
+		"/:id/features/reorder",
+		requireUser,
+		zValidator("json", reorderSchema),
+		async (c) => {
+			const { db } = c.var;
+			const found = await layerFor(c, c.req.param("id"));
+			if (!found) return c.json({ error: "not found" }, 404);
+			if (!canEditLayer(c.var.role, found.layer, found.layerRole))
+				return c.json({ error: "forbidden" }, 403);
+
+			const { ids } = c.req.valid("json");
+			const live = new Set(
+				(await layerFeatures(db, found.layer.id)).map((f) => f.id),
+			);
+			const current = (
+				await db
+					.select({ id: features.id, sortOrder: features.sortOrder })
+					.from(features)
+					.where(eq(features.layerId, found.layer.id))
+			).filter((f) => live.has(f.id));
+			if (!sameSet(current, ids))
+				return c.json({ error: "the list of features is out of date" }, 409);
+
+			db.transaction((tx) => {
+				for (const u of assignOrder(current, ids))
+					tx.update(features)
+						.set({ sortOrder: u.sortOrder })
+						.where(eq(features.id, u.id))
+						.run();
+			});
+			return c.json({ ok: true });
 		},
 	)
 	.get("/:id/export", async (c) => {
@@ -328,7 +410,10 @@ export const layerRoutes = new Hono<AppEnv>()
 				for (const item of items) {
 					const feature = tx
 						.insert(features)
-						.values({ layerId: found.layer.id })
+						.values({
+							layerId: found.layer.id,
+							sortOrder: nextFeatureOrder(tx, found.layer.id),
+						})
 						.returning()
 						.get();
 					insertRevision(tx, feature.id, user.id, item);
