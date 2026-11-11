@@ -1,7 +1,15 @@
-import type { Role } from "@aomc/shared";
+import {
+	atLeast,
+	canEdit,
+	canManage,
+	canModerate,
+	type Role,
+} from "@aomc/shared";
 import { and, eq, isNull } from "drizzle-orm";
 import type { Db } from "./db/client";
 import { layerMembers, layers, mapInfo, members } from "./db/schema";
+
+export { atLeast, canEdit, canManage, canModerate };
 
 export type Actor = { id: string } | null;
 export type LayerInfo = {
@@ -9,17 +17,6 @@ export type LayerInfo = {
 	createdBy: string;
 };
 export type LayerRole = "viewer" | "editor" | null;
-
-const RANK: Record<Role, number> = {
-	viewer: 0,
-	editor: 1,
-	moderator: 2,
-	owner: 3,
-};
-
-export function atLeast(role: Role, min: Role): boolean {
-	return RANK[role] >= RANK[min];
-}
 
 /**
  * The map is public: an explicit membership wins, otherwise a logged-in user is an editor and
@@ -29,13 +26,6 @@ export function effectiveRole(actor: Actor, membership: Role | null): Role {
 	if (membership) return membership;
 	return actor ? "editor" : "viewer";
 }
-
-/** Upload, draw, create layers. */
-export const canEdit = (role: Role) => atLeast(role, "editor");
-/** Delete uploads, restore features, manage dimensions, see every layer. */
-export const canModerate = (role: Role) => atLeast(role, "moderator");
-/** Members, invites and map settings. */
-export const canManage = (role: Role) => atLeast(role, "owner");
 
 /**
  * Delete an upload: moderators any, editors their own for `windowMs` after uploading it.
