@@ -136,7 +136,11 @@ export function ApiTokens() {
 				Tokens let scripts act as you. Send one as{" "}
 				<code>Authorization: Bearer &lt;token&gt;</code>. A token can do what
 				its scopes allow, and never more than your account can, so give it only
-				the scopes it needs and keep it secret.
+				the scopes it needs and keep it secret. See the{" "}
+				<a href="/scalar" target="_blank" rel="noopener">
+					API documentation
+				</a>{" "}
+				for the endpoints.
 			</p>
 
 			{created && (
