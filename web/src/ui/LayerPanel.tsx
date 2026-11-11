@@ -23,9 +23,10 @@ import {
 	currentMap,
 	editor,
 	type FeatureData,
+	isLayerFull,
 	isLayerHidden,
-	isModerator,
 	type LayerData,
+	layerLimitReached,
 	layersData,
 	popup,
 	setLayersHidden,
@@ -316,7 +317,7 @@ function LayerRow(props: {
 	const [settingsOpen, setSettingsOpen] = useState(false);
 	const editable = l.canEdit && canEditMap.value;
 	const maxFeatures = currentMap.value?.limits.maxFeaturesPerLayer;
-	const full = maxFeatures !== undefined && l.features.length >= maxFeatures;
+	const full = isLayerFull(l);
 	const hidden = isLayerHidden(l);
 	// A search shows only some of the features, so their order cannot be changed meanwhile.
 	const featureOrder =
@@ -502,12 +503,8 @@ export function LayerPanel() {
 	const filtering = query.trim() !== "";
 	const matches = searchLayers(layers, query);
 	const canReorder = canEditMap.value && !filtering && layers.length > 1;
-	// Counts this dimension only; the server enforces the limit over all of them.
 	const maxLayers = currentMap.value?.limits.maxLayersPerUser;
-	const layersFull =
-		maxLayers !== undefined &&
-		!isModerator.value &&
-		layers.filter((l) => l.createdBy === user.value?.id).length >= maxLayers;
+	const layersFull = layerLimitReached.value;
 	const featureCount = matches.reduce((sum, m) => sum + m.features.length, 0);
 
 	// The row's hover highlight must not outlive the list.

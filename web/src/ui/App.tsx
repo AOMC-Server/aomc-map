@@ -2,6 +2,7 @@ import { useEffect, useRef } from "preact/hooks";
 import { boot } from "../controller";
 import { activeTool, editor, embed, loadError, sidePanel } from "../state";
 import { uploadOpen } from "../upload";
+import { ContextMenu } from "./ContextMenu";
 import { DeleteUploadDialog, deleteUploadFor } from "./DeleteUploadDialog";
 import { FeatureEditor } from "./FeatureEditor";
 import { FeatureHistory, featureHistoryFor } from "./FeatureHistory";
@@ -21,7 +22,10 @@ import { UploadDialog } from "./UploadDialog";
 function SidePanel() {
 	const target = editor.value;
 	if (target) {
-		const key = `${target.mode}-${target.layerId}-${target.mode === "edit" ? target.featureId : 0}`;
+		const key =
+			target.mode === "edit"
+				? `edit-${target.layerId}-${target.featureId}`
+				: `create-${target.layerId}-${target.at?.join(",") ?? ""}`;
 		return <FeatureEditor key={key} />;
 	}
 	switch (sidePanel.value) {
@@ -64,6 +68,7 @@ export function App() {
 				<>
 					<Toolbar />
 					<SidePanel />
+					<ContextMenu />
 					<MeasureCard />
 					<HistoryBanner />
 					<StatusBar />

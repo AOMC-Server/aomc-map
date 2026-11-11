@@ -2037,6 +2037,109 @@ body.resizing {
 	padding: 12px;
 }
 
+/* Right-click menu of the map */
+.context-menu {
+	border-radius: var(--radius);
+	overflow: hidden;
+	position: absolute;
+	z-index: 7;
+	width: 264px;
+	max-width: calc(100vw - 16px);
+	display: flex;
+	flex-direction: column;
+	padding-bottom: 4px;
+	background: var(--s1);
+	border: var(--bw) solid var(--line);
+	box-shadow: var(--surface-shadow);
+}
+
+.menu-head {
+	display: flex;
+	align-items: center;
+	min-height: 34px;
+	padding: 4px 12px;
+	margin-bottom: 4px;
+	font-size: 13px;
+	color: var(--head-fg);
+	background: var(--head-bg);
+	border-bottom: var(--bw) solid var(--line);
+}
+
+.menu-coords {
+	font-weight: 700;
+	font-variant-numeric: tabular-nums;
+}
+
+.menu-back {
+	font-weight: 700;
+}
+
+.menu-item {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+	width: 100%;
+	min-height: 34px;
+	padding: 4px 12px;
+	text-align: left;
+}
+
+.menu-item:hover:not(:disabled),
+.menu-item:focus-visible {
+	background: var(--s2);
+	outline: none;
+}
+
+.menu-item:disabled {
+	color: var(--faint);
+	cursor: default;
+}
+
+.menu-label {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
+}
+
+.menu-more {
+	margin-left: auto;
+	font-size: 10px;
+	color: var(--muted);
+}
+
+.menu-scroll {
+	max-height: min(320px, 45vh);
+	overflow-y: auto;
+}
+
+.menu-new {
+	border-top: 1px solid var(--s2);
+}
+
+/* The cancel items sit apart from the actions above them. */
+.menu-cancel {
+	color: var(--err);
+}
+
+.menu-item:not(.menu-cancel) + .menu-cancel {
+	margin-top: 4px;
+	border-top: 1px solid var(--s2);
+}
+
+.menu-note {
+	padding: 4px 12px;
+	font-size: 13px;
+}
+
+.menu-form {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	padding: 4px 12px 8px;
+}
+
 /* Feature names in their dye colour, brightened to read on the dark header. */
 .dye-white {
 	color: color-mix(in srgb, #ffffff, var(--dye-shade));
@@ -3126,6 +3229,7 @@ body.resizing {
 	.invite-card,
 	.popup,
 	.measure-card,
+	.context-menu,
 	.preview-window {
 		padding: 3px;
 	}
@@ -3133,6 +3237,7 @@ body.resizing {
 	.panel-head,
 	.modal-head,
 	.popup h3,
+	.menu-head,
 	.preview-head {
 		min-height: 0;
 		padding: 4px 4px 4px 8px;
@@ -3271,6 +3376,7 @@ body.resizing {
 	.invite-card,
 	.popup,
 	.measure-card,
+	.context-menu,
 	.preview-window {
 		border: 3px solid var(--chrome);
 		border-radius: 8px 8px 0 0;
@@ -3279,6 +3385,7 @@ body.resizing {
 	.panel-head,
 	.modal-head,
 	.popup h3,
+	.menu-head,
 	.page-head,
 	.preview-head {
 		text-shadow: 1px 1px 0 color-mix(in srgb, var(--chrome), #000 55%);
@@ -3382,6 +3489,7 @@ body.resizing {
 	.panel,
 	.popup,
 	.measure-card,
+	.context-menu,
 	.bossbar,
 	.toast,
 	.load-error {

@@ -75,9 +75,10 @@ export function FeatureEditor() {
 	};
 
 	useEffect(() => {
+		const at = target?.mode === "create" ? target.at : undefined;
 		startDraw(
 			existing?.type ?? "pin",
-			existing ? pointsOf(existing) : [],
+			existing ? pointsOf(existing) : at ? [at] : [],
 			cancelEditing,
 		);
 		return () => stopDraw();

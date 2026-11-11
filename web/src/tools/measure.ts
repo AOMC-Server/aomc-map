@@ -1,6 +1,7 @@
 import { computed, signal } from "@preact/signals";
 import type { DragSession } from "../map/input";
 import type { MapView } from "../map/MapView";
+import { activeTool } from "../state";
 import { blockAt, blockCenter, nearestHandle, shiftHeld } from "./handles";
 import {
 	facing,
@@ -71,6 +72,12 @@ export const measureStats = computed<MeasureStats | null>(() => {
 
 export function clickMeasure(p: Point) {
 	measurePoints.value = [...measurePoints.value, snapped(p)];
+}
+
+/** Starts a new measurement with its first point at `p`. */
+export function measureFrom(p: Point) {
+	activeTool.value = "measure";
+	measurePoints.value = [p];
 }
 
 export function undoMeasure() {

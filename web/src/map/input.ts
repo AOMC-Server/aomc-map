@@ -20,11 +20,13 @@ export function isTyping(target: EventTarget | null): boolean {
 	);
 }
 
-/** True for key events the UI owns: aimed at a text field, or inside a panel, dialog or popup. */
+/** True for key events the UI owns: aimed at a text field, or inside a panel, dialog, popup or menu. */
 export function isUiKeyTarget(target: EventTarget | null): boolean {
 	return (
 		isTyping(target) ||
-		!!(target as Element | null)?.closest?.(".panel, .modal, .popup")
+		!!(target as Element | null)?.closest?.(
+			".panel, .modal, .popup, .context-menu",
+		)
 	);
 }
 
@@ -80,7 +82,7 @@ export class Input {
 		});
 		el.addEventListener("wheel", this.wheel, { passive: false });
 		el.addEventListener("dblclick", this.dblclick);
-		el.addEventListener("contextmenu", (e) => e.preventDefault());
+		el.addEventListener("contextmenu", this.contextmenu);
 		window.addEventListener("keydown", this.key);
 	}
 
@@ -317,6 +319,20 @@ export class Input {
 			notched ? 80 : 30,
 			notched ? ZOOM_GRID : undefined,
 		);
+	};
+
+	/**
+	 * A right click, or a long press on touch screens. The press that opened it (a long press, or
+	 * Ctrl+click on a Mac) must not also count as a click when it lifts.
+	 */
+	private contextmenu = (e: MouseEvent) => {
+		e.preventDefault();
+		// Not in the middle of dragging or pinching the map.
+		if (this.session || this.pointers.size > 1) return;
+		if (this.pointers.size === 1 && this.moved) return;
+		this.start = null;
+		const p = this.local(e);
+		this.map.contextMenu(p.x, p.y);
 	};
 
 	private dblclick = (e: MouseEvent) => {

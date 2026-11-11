@@ -36,6 +36,8 @@ type ScreenPoint = { x: number; y: number };
 export type MapEvents = {
 	click: MapPointer & { hit: Hit | null };
 	move: MapPointer | null;
+	/** A right click, or a long press on a touch screen. */
+	contextmenu: MapPointer;
 	/** Fires when the feature (or cluster) under the mouse changes. */
 	hover: { hit: Hit | null; sx: number; sy: number };
 	viewchange: View;
@@ -83,6 +85,7 @@ export class MapView {
 	} = {
 		click: new Set(),
 		move: new Set(),
+		contextmenu: new Set(),
 		hover: new Set(),
 		viewchange: new Set(),
 		preloadprogress: new Set(),
@@ -289,6 +292,10 @@ export class MapView {
 			this.emit("move", e);
 			this.updateHover(hit, sx, sy);
 		}
+	}
+
+	contextMenu(sx: number, sy: number) {
+		this.emit("contextmenu", { ...this.screenToBlock(sx, sy), sx, sy });
 	}
 
 	pointerLeft() {

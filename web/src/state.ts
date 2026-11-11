@@ -118,8 +118,19 @@ export const hoverInfo = signal<{
 	sy: number;
 } | null>(null);
 
+/**
+ * The right-click menu: the block it is for, and the exact position clicked (fractional block
+ * coordinates) that it is anchored to, so it follows the map when it zooms.
+ */
+export const contextMenu = signal<{
+	x: number;
+	z: number;
+	anchor: { x: number; z: number };
+} | null>(null);
+
 export type EditorTarget =
-	| { mode: "create"; layerId: number }
+	/** `at`: start with a pin placed on this block. */
+	| { mode: "create"; layerId: number; at?: Point }
 	| { mode: "edit"; layerId: number; featureId: number };
 export const editor = signal<EditorTarget | null>(null);
 
@@ -134,6 +145,22 @@ export const isModerator = computed(() => {
 	const role = currentMap.value?.role;
 	return role !== undefined && canModerate(role);
 });
+
+/** The user has created as many layers as one person may. Counts this dimension only; the server enforces the limit over all of them. */
+export const layerLimitReached = computed(() => {
+	const max = currentMap.value?.limits.maxLayersPerUser;
+	return (
+		max !== undefined &&
+		!isModerator.value &&
+		layersData.value.filter((l) => l.createdBy === user.value?.id).length >= max
+	);
+});
+
+/** The layer holds as many features as a layer may. */
+export const isLayerFull = (l: LayerData) => {
+	const max = currentMap.value?.limits.maxFeaturesPerLayer;
+	return max !== undefined && l.features.length >= max;
+};
 
 export const effectiveRev = computed(() => {
 	const head = currentMap.value?.map.headRev ?? 0;

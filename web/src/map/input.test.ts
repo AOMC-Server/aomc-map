@@ -51,6 +51,7 @@ beforeEach(() => {
 		cancelAnimation() {},
 		pointer: (...a: unknown[]) => calls.push(["pointer", ...a]),
 		pointerLeft() {},
+		contextMenu: (...a: unknown[]) => calls.push(["contextMenu", ...a]),
 		getView: (): View => views.at(-1) ?? { centerX: 0, centerZ: 0, zoom: 0 },
 		setView: (v: View) => views.push(v),
 		clampZoom: (z: number) => z,
@@ -171,6 +172,44 @@ describe("drag sessions", () => {
 		pointer("down", 1, 10, 10);
 		pointer("cancel", 1, 10, 10);
 		expect(sessionCalls).toEqual(["cancel"]);
+	});
+});
+
+describe("context menu", () => {
+	const menu = (x: number, y: number) =>
+		fire("contextmenu", { clientX: x, clientY: y });
+
+	test("a right click opens the menu where it was", () => {
+		const e = menu(30, 40);
+		expect(e.defaultPrevented).toBe(true);
+		expect(calls).toEqual([["contextMenu", 30, 40]]);
+	});
+
+	test("a right click after a drag still opens the menu", () => {
+		pointer("down", 1, 10, 10);
+		pointer("move", 1, 40, 40);
+		pointer("up", 1, 40, 40);
+		calls.length = 0;
+		menu(30, 40);
+		expect(calls).toEqual([["contextMenu", 30, 40]]);
+	});
+
+	test("the long press that opened it is not also a click", () => {
+		pointer("down", 1, 10, 10);
+		menu(10, 10);
+		pointer("up", 1, 10, 10);
+		expect(calls).toEqual([["contextMenu", 10, 10]]);
+	});
+
+	test("not while dragging the map or a point", () => {
+		pointer("down", 1, 10, 10);
+		pointer("move", 1, 40, 40);
+		menu(40, 40);
+		pointer("up", 1, 40, 40);
+		session = spy();
+		pointer("down", 2, 10, 10);
+		menu(10, 10);
+		expect(calls.filter((c) => c[0] === "contextMenu")).toEqual([]);
 	});
 });
 

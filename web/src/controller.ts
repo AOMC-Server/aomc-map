@@ -12,6 +12,7 @@ import {
 	transitionFactor,
 } from "./settings";
 import {
+	contextMenu,
 	currentMap,
 	dimSlug,
 	editor,
@@ -81,6 +82,7 @@ export async function loadPageData(): Promise<boolean> {
 }
 
 function closeFeatureUi() {
+	contextMenu.value = null;
 	stopDraw();
 	editor.value = null;
 	popup.value = null;
