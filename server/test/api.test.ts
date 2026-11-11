@@ -665,6 +665,64 @@ describe("map", () => {
 		expect((await themes()).mining).toBe("nether");
 	});
 
+	test("dimension xaero id is guessed from the theme, can be chosen, changed, and is validated", async () => {
+		const t = boot();
+		runSetup(t.db, t.env);
+		const mod = await makeUser(t.db, "3");
+		await addMember(t, "3", "moderator");
+		const ids = async () =>
+			Object.fromEntries(
+				(await call(t, null, "GET", "/api/map")).body.dimensions.map(
+					(d: { slug: string; xaeroDimension: string }) => [
+						d.slug,
+						d.xaeroDimension,
+					],
+				),
+			);
+
+		await call(t, mod, "POST", "/api/dimensions", {
+			slug: "mining",
+			name: "M",
+		});
+		await call(t, mod, "POST", "/api/dimensions", {
+			slug: "void",
+			name: "V",
+			theme: "end",
+		});
+		await call(t, mod, "POST", "/api/dimensions", {
+			slug: "aether",
+			name: "A",
+			xaeroDimension: "dim%aether$the_aether",
+		});
+		expect(await ids()).toEqual({
+			overworld: "dim%0",
+			nether: "dim%-1",
+			the_end: "dim%1",
+			mining: "dim%0",
+			void: "dim%1",
+			aether: "dim%aether$the_aether",
+		});
+
+		expect(
+			(
+				await call(t, mod, "PATCH", "/api/dimensions/mining", {
+					xaeroDimension: "dim%7",
+				})
+			).status,
+		).toBe(200);
+		expect((await ids()).mining).toBe("dim%7");
+		for (const bad of ["", "dim:0", "dim %0", 5]) {
+			expect(
+				(
+					await call(t, mod, "PATCH", "/api/dimensions/mining", {
+						xaeroDimension: bad,
+					})
+				).status,
+			).toBe(400);
+		}
+		expect((await ids()).mining).toBe("dim%7");
+	});
+
 	test("dimension spawn preload defaults, can be set, turned off, and is validated", async () => {
 		const t = boot();
 		runSetup(t.db, t.env);

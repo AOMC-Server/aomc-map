@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "preact/hooks";
-import { selectDimension } from "../controller";
+import { mapView, selectDimension } from "../controller";
+import { DEFAULT_VIEW } from "../map/MapView";
 import { currentMap, dimSlug, visibleDimensions } from "../state";
 import { BlockIcon } from "./icons";
 import { LoginButton } from "./LoginButton";
@@ -38,9 +39,18 @@ export function Toolbar() {
 								type="button"
 								role="tab"
 								aria-selected={active}
-								title={d.name}
+								title={
+									active
+										? `${d.name} (double-click to go back to 0, 0)`
+										: d.name
+								}
 								class={`btn dim ${active ? "active" : ""}`}
 								onClick={() => selectDimension(d.slug)}
+								onDblClick={() => {
+									const mv = mapView.value;
+									if (d.slug !== dimSlug.value || !mv) return;
+									mv.tweenTo(DEFAULT_VIEW, 450);
+								}}
 							>
 								<BlockIcon theme={d.theme} />
 								<span class="dim-name">{d.name}</span>

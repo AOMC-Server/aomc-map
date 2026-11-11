@@ -20,7 +20,7 @@ import { stopDraw } from "../tools/draw";
 import { measureFrom } from "../tools/measure";
 import { DyePicker } from "./DyePicker";
 import { Banner } from "./icons";
-import { copyText } from "./shareCommon";
+import { copyText, copyWaypoint } from "./shareCommon";
 
 /** Space kept between the menu and the edges of the map. */
 const MARGIN = 8;
@@ -217,6 +217,18 @@ export function ContextMenu() {
 						}}
 					>
 						Copy coordinates
+					</button>
+					<button
+						type="button"
+						role="menuitem"
+						class="plain menu-item"
+						title="Copy a waypoint for Xaero's Minimap; paste it in Minecraft chat to share it"
+						onClick={() => {
+							close();
+							copyWaypoint({ name: "Waypoint", x, z, color: "white" });
+						}}
+					>
+						Copy waypoint
 					</button>
 					<button
 						type="button"

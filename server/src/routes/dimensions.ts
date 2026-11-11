@@ -1,6 +1,7 @@
 import {
 	createDimensionSchema,
 	guessDimensionTheme,
+	guessXaeroDimension,
 	updateDimensionSchema,
 } from "@aomc/shared";
 import { eq } from "drizzle-orm";
@@ -38,6 +39,7 @@ export const dimensionRoutes = new Hono<AppEnv>()
 				.from(dimensions);
 			if (existing.length >= 50)
 				return c.json({ error: "too many dimensions" }, 400);
+			const theme = body.theme ?? guessDimensionTheme(body.slug);
 			try {
 				const [dimension] = await db
 					.insert(dimensions)
@@ -45,8 +47,9 @@ export const dimensionRoutes = new Hono<AppEnv>()
 						slug: body.slug,
 						name: body.name,
 						scale: body.scale ?? null,
-						theme: body.theme ?? guessDimensionTheme(body.slug),
+						theme,
 						preload: body.preload,
+						xaeroDimension: body.xaeroDimension ?? guessXaeroDimension(theme),
 						sortOrder: nextSortOrder(existing),
 					})
 					.returning();

@@ -1839,18 +1839,21 @@ body.resizing {
 	font-weight: 400;
 }
 
-.delete-facts {
+.delete-facts,
+.share-summary {
 	display: grid;
 	grid-template-columns: auto 1fr;
 	gap: 4px 14px;
 	margin: 0 0 12px;
 }
 
-.delete-facts dt {
+.delete-facts dt,
+.share-summary dt {
 	color: var(--muted);
 }
 
-.delete-facts dd {
+.delete-facts dd,
+.share-summary dd {
 	margin: 0;
 }
 
@@ -2018,23 +2021,73 @@ body.resizing {
 }
 
 .popup-meta {
+	display: flex;
+	align-items: baseline;
+	gap: 12px;
 	padding: 10px 12px 0;
 	font-size: 13px;
 	color: var(--muted);
 }
 
-.popup-text {
-	max-height: 40vh;
-	overflow-y: auto;
-	padding: 6px 12px 0;
-	word-break: break-word;
+.popup-kind {
+	flex: 1;
+	min-width: 0;
+	overflow: hidden;
+	text-overflow: ellipsis;
+	white-space: nowrap;
 }
 
+/* The coordinates of the spot; clicking copies them. */
+.popup-coords {
+	flex: none;
+	font-weight: 700;
+	font-variant-numeric: tabular-nums;
+	text-decoration: underline dotted;
+	text-underline-offset: 3px;
+}
+
+.popup-coords:hover,
+.popup-coords:focus-visible {
+	color: var(--text);
+}
+
+/* Long texts scroll inside the popup instead of stretching it over the map. */
+.popup-text {
+	max-height: min(30vh, 220px);
+	overflow-y: auto;
+	margin: 8px 0 0;
+	padding: 0 12px 10px;
+	word-break: break-word;
+	overscroll-behavior: contain;
+}
+
+.popup-footer {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	margin-top: 10px;
+	padding: 10px 12px 12px;
+	border-top: 1px solid var(--s2);
+}
+
+.popup-text + .popup-footer {
+	margin-top: 0;
+}
+
+/* Each row of buttons shares its width equally, so the rows line up. */
 .popup-actions {
 	display: flex;
-	flex-wrap: wrap;
 	gap: 6px;
-	padding: 12px;
+}
+
+.popup-actions .btn {
+	flex: 1 1 0;
+	min-width: 0;
+	padding-inline: 6px;
+}
+
+.popup-actions .btn:active {
+	padding-inline: 6px;
 }
 
 /* Right-click menu of the map */
@@ -2378,6 +2431,10 @@ body.resizing {
 	width: 80px;
 }
 
+.dim-scale .xaero-input {
+	width: 160px;
+}
+
 .add-member,
 .add-dimension,
 .link-row {
@@ -2434,6 +2491,10 @@ body.resizing {
 
 .new-link p {
 	margin-top: 0;
+}
+
+.share-link {
+	margin-top: 12px;
 }
 
 .invite-list li.revoked,

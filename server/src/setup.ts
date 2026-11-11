@@ -5,9 +5,27 @@ import type { Env } from "./env";
 
 /** scale: overworld blocks per block of that dimension; null = coordinates are unrelated. */
 const DEFAULT_DIMENSIONS = [
-	{ slug: "overworld", name: "Overworld", scale: 1, theme: "overworld" },
-	{ slug: "nether", name: "Nether", scale: 8, theme: "nether" },
-	{ slug: "the_end", name: "The End", scale: null, theme: "end" },
+	{
+		slug: "overworld",
+		name: "Overworld",
+		scale: 1,
+		theme: "overworld",
+		xaeroDimension: "dim%0",
+	},
+	{
+		slug: "nether",
+		name: "Nether",
+		scale: 8,
+		theme: "nether",
+		xaeroDimension: "dim%-1",
+	},
+	{
+		slug: "the_end",
+		name: "The End",
+		scale: null,
+		theme: "end",
+		xaeroDimension: "dim%1",
+	},
 ] as const;
 
 /** Creates the map on first run. Safe to call on every boot. */

@@ -8,6 +8,7 @@ import {
 	guessDimensionTheme,
 	MAX_COORD,
 	type PreloadRing,
+	xaeroDimensionSchema,
 } from "@aomc/shared/schemas";
 import type { ComponentChildren } from "preact";
 import { useState } from "preact/hooks";
@@ -267,6 +268,7 @@ function DimensionRow(props: {
 	const { d, all, index } = props;
 	const [name, setName] = useState(d.name);
 	const [scale, setScale] = useState(formatScale(d.scale));
+	const [xaero, setXaero] = useState(d.xaeroDimension);
 	const prev = all[index - 1];
 	const next = all[index + 1];
 
@@ -333,6 +335,32 @@ function DimensionRow(props: {
 						}
 					/>
 				</div>
+				<label
+					class="dim-scale"
+					title="How Xaero's Minimap names this dimension in shared waypoints: dim%0 overworld, dim%-1 Nether, dim%1 End"
+				>
+					<span class="muted">Xaero id</span>
+					<input
+						type="text"
+						class="xaero-input"
+						value={xaero}
+						aria-label={`Xaero dimension id of ${d.slug}`}
+						onInput={(e) => setXaero(e.currentTarget.value)}
+						onBlur={() => {
+							const parsed = xaeroDimensionSchema.safeParse(xaero);
+							if (!parsed.success || parsed.data === d.xaeroDimension) {
+								setXaero(d.xaeroDimension);
+								return;
+							}
+							props.run(() =>
+								updateDimension(d.slug, { xaeroDimension: parsed.data }),
+							);
+						}}
+						onKeyDown={(e) => {
+							if (e.key === "Enter") e.currentTarget.blur();
+						}}
+					/>
+				</label>
 				<PreloadEditor d={d} busy={props.busy} run={props.run} />
 			</div>
 			<div class="group">
@@ -444,6 +472,12 @@ function DimensionsTab() {
 				while it is shown.
 			</p>
 			<p class="muted">
+				<b>Xaero id</b> is how Xaero's Minimap names the dimension, used in the
+				waypoints people copy from the map: <code>dim%0</code> for the
+				overworld, <code>dim%-1</code> for the Nether and <code>dim%1</code> for
+				the End.
+			</p>
+			<p class="muted">
 				<b>Preload around spawn</b> loads low resolution images of the area
 				around 0, 0 in the background, so there is always something to show
 				there while the detailed images load. Each ring keeps one resolution
@@ -453,7 +487,7 @@ function DimensionsTab() {
 			<ul class="dimension-list">
 				{dims.map((d, i) => (
 					<DimensionRow
-						key={`${d.slug}:${d.name}:${d.sortOrder}:${d.scale}`}
+						key={`${d.slug}:${d.name}:${d.sortOrder}:${d.scale}:${d.xaeroDimension}`}
 						d={d}
 						index={i}
 						all={dims}

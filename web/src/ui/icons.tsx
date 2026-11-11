@@ -22,6 +22,9 @@ const PALETTE: Record<string, string> = {
 	a: "#4cd05a",
 	O: "#7a3f12",
 	o: "#c4692a",
+	t: "#105247",
+	T: "#2a8f7e",
+	e: "#7fe0c8",
 };
 
 /** A round item (clock, compass): outline and rim around a 10×10 face, cropped to a circle. */
@@ -128,6 +131,26 @@ const ICONS = {
 			"..........kaaak.",
 			"..........kaaak.",
 			"..........kkkkk.",
+			"................",
+		],
+	],
+	pearl: [
+		[
+			"................",
+			"................",
+			"......kkkk......",
+			"....kkTTTTkk....",
+			"...kTTeeTTTTk...",
+			"...kTewweTTTk...",
+			"..kTTewweTTTtk..",
+			"..kTTTeeTTTTtk..",
+			"..kTTTTTTTTttk..",
+			"..kTTTTTTTTttk..",
+			"...kTTTTTTttk...",
+			"...ktTTTTtttk...",
+			"....kkttttkk....",
+			"......kkkk......",
+			"................",
 			"................",
 		],
 	],

@@ -28,6 +28,8 @@ export function createRateLimiter(limit: number, windowMs = MINUTE) {
 export const WRITE_RATE_LIMIT = 120;
 /** Link-preview renders per client per minute (cached pictures are free). */
 export const PREVIEW_RATE_LIMIT = 30;
+/** Short links made per client per minute. */
+export const SHORT_LINK_RATE_LIMIT = 30;
 
 export const limitWrites = createMiddleware<AppEnv>(async (c, next) => {
 	const { user, svc } = c.var;

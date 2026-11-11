@@ -15,7 +15,6 @@ import {
 	reorderLayers,
 	updateLayer,
 } from "../layers";
-import { BLOCK_CENTER } from "../map/featureLayer";
 import { boundsOf } from "../map/geometry";
 import { moveItem } from "../reorder";
 import {
@@ -28,13 +27,13 @@ import {
 	type LayerData,
 	layerLimitReached,
 	layersData,
-	popup,
 	setLayersHidden,
 	showOnlyLayer,
 	sidePanel,
 	toggleLayer,
 	user,
 } from "../state";
+import { openFeaturePopup } from "../tools/features";
 import { DyePicker } from "./DyePicker";
 import { Grip } from "./Grip";
 import { Banner } from "./icons";
@@ -70,14 +69,8 @@ function goTo(f: FeatureData) {
 	const mv = mapView.value;
 	if (!mv) return;
 	reveal(f.layerId);
-	const b = boundsOf(pointsOf(f));
-	mv.fitBounds(b, { padding: 140 });
-	popup.value = {
-		featureId: f.id,
-		layerId: f.layerId,
-		x: (b.minX + b.maxX) / 2 + BLOCK_CENTER,
-		z: (b.minZ + b.maxZ) / 2 + BLOCK_CENTER,
-	};
+	mv.fitBounds(boundsOf(pointsOf(f)), { padding: 140 });
+	openFeaturePopup(f);
 }
 
 function LayerForm(props: {

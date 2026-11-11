@@ -108,6 +108,8 @@ export const dimensions = sqliteTable("dimensions", {
 		.$type<PreloadRing[]>()
 		.notNull()
 		.default(DEFAULT_PRELOAD),
+	/** How Xaero's Minimap names the dimension in shared waypoints; see xaeroDimensionSchema. */
+	xaeroDimension: text("xaero_dimension").notNull().default("dim%0"),
 	createdAt: createdAt(),
 });
 
@@ -271,6 +273,16 @@ export const invites = sqliteTable("invites", {
 	maxUses: integer("max_uses"),
 	uses: integer("uses").notNull().default(0),
 	revoked: bool("revoked").notNull().default(false),
+});
+
+/** Short links to a view of the map: /s/<code> redirects to /?<query>. */
+export const shortLinks = sqliteTable("short_links", {
+	code: text("code").primaryKey(),
+	/** The view's query string, without the "?"; one link per view. */
+	query: text("query").notNull().unique(),
+	/** null: made by an anonymous visitor. */
+	createdBy: text("created_by").references(() => users.id),
+	createdAt: createdAt(),
 });
 
 export const jobs = sqliteTable("jobs", {

@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { MIN_ZOOM } from "./view";
 
 export const roleSchema = z.enum(["viewer", "editor", "moderator", "owner"]);
 export type Role = z.infer<typeof roleSchema>;
@@ -52,6 +53,24 @@ export function guessDimensionTheme(slug: string): DimensionTheme {
 }
 
 /**
+ * How Xaero's Minimap names the dimension in a shared waypoint ("Internal-<id>"): dim%0 for the
+ * overworld, dim%-1 for the Nether, dim%1 for the End. A colon would end the field early.
+ */
+export const xaeroDimensionSchema = z
+	.string()
+	.trim()
+	.min(1)
+	.max(100)
+	.regex(/^[^:\s]+$/, "no colons or spaces");
+
+/** The Xaero dimension id a dimension most likely has, from its theme. */
+export function guessXaeroDimension(theme: DimensionTheme): string {
+	if (theme === "nether") return "dim%-1";
+	if (theme === "end") return "dim%1";
+	return "dim%0";
+}
+
+/**
  * Low resolution tiles around spawn (0, 0) that viewers load in the background and keep, so
  * there is always something to show there. Tile level n is 1/2^n resolution; radius is in blocks
  * of the dimension.
@@ -77,6 +96,8 @@ export const createDimensionSchema = z.object({
 	theme: dimensionThemeSchema.optional(),
 	/** Defaults to DEFAULT_PRELOAD. */
 	preload: dimensionPreloadSchema.optional(),
+	/** Defaults to a guess from the theme. */
+	xaeroDimension: xaeroDimensionSchema.optional(),
 });
 
 export const updateDimensionSchema = z
@@ -87,8 +108,29 @@ export const updateDimensionSchema = z
 		scale: dimensionScaleSchema.optional(),
 		theme: dimensionThemeSchema.optional(),
 		preload: dimensionPreloadSchema.optional(),
+		xaeroDimension: xaeroDimensionSchema.optional(),
 	})
 	.refine(nonEmpty, "nothing to update");
+
+/** Most layers a shared view can list. */
+export const MAX_SHARED_LAYERS = 500;
+
+/**
+ * A view saved behind a short link: where the camera is, in which dimension, as of which
+ * revision (none: the latest), and which layers are shown (none listed: each layer's default).
+ */
+export const shareViewSchema = z.object({
+	dim: slugSchema,
+	x: blockCoord,
+	z: blockCoord,
+	zoom: z.number().finite().min(MIN_ZOOM).max(64),
+	rev: z.number().int().min(0).optional(),
+	layers: z
+		.array(z.number().int().positive())
+		.max(MAX_SHARED_LAYERS)
+		.optional(),
+});
+export type ShareView = z.infer<typeof shareViewSchema>;
 
 /** Roles stored for a member. Everyone logged in is an editor and everyone else a viewer without one. */
 export const memberRoleSchema = z.enum(["moderator", "owner"]);

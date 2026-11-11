@@ -27,6 +27,7 @@ import {
 	preloadProgress,
 	type RevisionInfo,
 	rev,
+	sharedLayers,
 	tilesPaused,
 	user,
 	view,
@@ -120,6 +121,8 @@ export function selectDimension(slug: string) {
 	closeFeatureUi();
 	// An upload is only shown alone in its own dimension.
 	isolatedUpload.value = null;
+	// The layers of a shared link belong to its dimension.
+	if (slug !== from) sharedLayers.value = null;
 	dimSlug.value = slug;
 }
 
@@ -175,6 +178,7 @@ export async function refreshMap(): Promise<void> {
 	// The dimension being viewed may have been archived.
 	const visible = visibleDimensions.value;
 	if (!visible.some((d) => d.slug === dimSlug.value)) {
+		sharedLayers.value = null;
 		dimSlug.value = visible[0]?.slug ?? null;
 	}
 }
@@ -208,6 +212,8 @@ export async function boot(container: HTMLElement) {
 		dims[0]?.slug ??
 		null;
 	dimSlug.value = startDim;
+	if (initial.layers && startDim === initial.dim)
+		sharedLayers.value = new Set(initial.layers);
 	const startView = saved && saved.dim === startDim ? saved.view : initial.view;
 	setRev(initial.rev);
 

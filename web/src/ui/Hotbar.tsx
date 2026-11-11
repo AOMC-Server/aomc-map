@@ -10,6 +10,7 @@ import {
 } from "../state";
 import { uploadBusy, uploadOpen, uploadState } from "../upload";
 import { type IconName, PixelIcon } from "./icons";
+import { shareOpen } from "./ShareDialog";
 
 /** One side panel at a time; opening the one that is already open closes it. */
 const toggle = (name: SidePanelName) => {
@@ -96,10 +97,20 @@ export function Hotbar() {
 			},
 			extra: busy && <DurabilityBar value={uploadProgress()} />,
 		},
+		{
+			key: "5",
+			icon: "pearl",
+			label: "Share",
+			hint: "A short link to this place, zoom and layers",
+			active: shareOpen.value,
+			run: () => {
+				shareOpen.value = true;
+			},
+		},
 	];
 	if (isModerator.value)
 		slots.push({
-			key: "5",
+			key: "6",
 			icon: "command",
 			label: "Manage",
 			hint: "Settings, dimensions, members and invites",

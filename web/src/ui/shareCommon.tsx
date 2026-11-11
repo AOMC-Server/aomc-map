@@ -1,5 +1,8 @@
+import type { Dye } from "@aomc/shared/colors";
 import type { ComponentChildren } from "preact";
 import { showNotice } from "../api";
+import { currentMap, dimSlug } from "../state";
+import { xaeroWaypoint } from "../waypoint";
 
 /** Copies text to the clipboard, telling the user whether it worked. */
 export async function copyText(text: string, done: string) {
@@ -12,6 +15,23 @@ export async function copyText(text: string, done: string) {
 			"error",
 		);
 	}
+}
+
+/** Copies a Xaero's Minimap waypoint for a block of the dimension being viewed. */
+export function copyWaypoint(w: {
+	name: string;
+	x: number;
+	z: number;
+	color: Dye;
+}) {
+	const dim = currentMap.value?.dimensions.find(
+		(d) => d.slug === dimSlug.value,
+	);
+	if (!dim) return;
+	void copyText(
+		xaeroWaypoint({ ...w, dimension: dim.xaeroDimension }),
+		"Waypoint copied. Paste it in Minecraft chat to share it.",
+	);
 }
 
 export type ExpiryOption = { label: string; value: number | null };

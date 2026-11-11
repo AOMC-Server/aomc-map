@@ -37,7 +37,7 @@ export type MapEvents = {
 	click: MapPointer & { hit: Hit | null };
 	move: MapPointer | null;
 	/** A right click, or a long press on a touch screen. */
-	contextmenu: MapPointer;
+	contextmenu: MapPointer & { hit: Hit | null };
 	/** Fires when the feature (or cluster) under the mouse changes. */
 	hover: { hit: Hit | null; sx: number; sy: number };
 	viewchange: View;
@@ -47,7 +47,8 @@ export type MapEvents = {
 export type DragHandler = (sx: number, sy: number) => DragSession | null;
 export type Overlay = (ctx: CanvasRenderingContext2D, map: MapView) => void;
 
-const DEFAULT_VIEW: View = { centerX: 0, centerZ: 0, zoom: 2 };
+/** Where the map starts when nothing says otherwise: spawn, at the default zoom. */
+export const DEFAULT_VIEW: View = { centerX: 0, centerZ: 0, zoom: 2 };
 /** How many zoom levels an eased zoom may be heading beyond the current view. */
 const MAX_ZOOM_LEAD = 2;
 /**
@@ -295,7 +296,12 @@ export class MapView {
 	}
 
 	contextMenu(sx: number, sy: number) {
-		this.emit("contextmenu", { ...this.screenToBlock(sx, sy), sx, sy });
+		this.emit("contextmenu", {
+			...this.screenToBlock(sx, sy),
+			sx,
+			sy,
+			hit: this.hitTest(sx, sy),
+		});
 	}
 
 	pointerLeft() {

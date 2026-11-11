@@ -82,8 +82,15 @@ export const hoveredRevision = signal<{
 	from: "timeline" | "log";
 } | null>(null);
 
+/**
+ * The layers a shared link shows; the dimension's other layers are hidden. Replaces the layers'
+ * own defaults until another dimension is opened. null: no shared link.
+ */
+export const sharedLayers = signal<ReadonlySet<number> | null>(null);
+
 export const isLayerHidden = (l: LayerData) =>
-	layerOverrides.value.get(l.id) ?? l.hiddenByDefault;
+	layerOverrides.value.get(l.id) ??
+	(sharedLayers.value ? !sharedLayers.value.has(l.id) : l.hiddenByDefault);
 
 export function toggleLayer(l: LayerData) {
 	const next = new Map(layerOverrides.value);
@@ -105,12 +112,17 @@ export function showOnlyLayer(only: LayerData) {
 	layerOverrides.value = next;
 }
 
-/** The clicked feature whose popup is open, with the block position the popup is anchored to. */
+/**
+ * The clicked feature whose popup is open, with the position the popup is anchored to
+ * (fractional block coordinates) and the block its actions (copy, measure) are about: the pin,
+ * or the spot clicked on a line or area.
+ */
 export const popup = signal<{
 	featureId: number;
 	layerId: number;
 	x: number;
 	z: number;
+	at: { x: number; z: number };
 } | null>(null);
 export const hoverInfo = signal<{
 	text: string;

@@ -8,6 +8,7 @@ describe("url state", () => {
 			view: { centerX: -12, centerZ: 340, zoom: 1.5 },
 			rev: 7,
 			embed: true,
+			layers: null,
 		});
 	});
 
@@ -17,7 +18,14 @@ describe("url state", () => {
 			view: { centerX: undefined, centerZ: undefined, zoom: undefined },
 			rev: null,
 			embed: false,
+			layers: null,
 		});
+	});
+
+	test("parses the layers of a shared view", () => {
+		expect(parseUrl("?layers=3,1,x,-2,1.5,7").layers).toEqual([3, 1, 7]);
+		// Listed but empty: no layer is shown, which differs from not listed.
+		expect(parseUrl("?layers=").layers).toEqual([]);
 	});
 
 	test("ignores the old map parameter", () => {

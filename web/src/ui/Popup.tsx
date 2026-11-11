@@ -1,10 +1,12 @@
 import { mapView } from "../controller";
 import { featureTitle, TYPE_LABEL } from "../featureInfo";
 import { deleteFeature } from "../layers";
-import { canEditMap, editor, layersData, popup, view } from "../state";
+import { canEditMap, editor, embed, layersData, popup, view } from "../state";
+import { measureFrom } from "../tools/measure";
 import { featureHistoryFor } from "./FeatureHistory";
 import { Banner } from "./icons";
 import { PopupText } from "./PopupText";
+import { copyText, copyWaypoint } from "./shareCommon";
 
 /** DOM popup for the clicked feature, anchored to the map position and following pans and zooms. */
 export function Popup() {
@@ -26,6 +28,7 @@ export function Popup() {
 		: at.y - (feature.type === "pin" ? 34 : 12);
 	const dye = feature.color ?? layer.color;
 	const editable = layer.canEdit && canEditMap.value;
+	const spot = p.at;
 
 	return (
 		<div
@@ -47,12 +50,49 @@ export function Popup() {
 				{featureTitle(feature)}
 			</h3>
 			<div class="popup-meta">
-				{TYPE_LABEL[feature.type]} · {layer.name}
+				<span class="popup-kind">
+					{TYPE_LABEL[feature.type]} · {layer.name}
+				</span>
+				<button
+					type="button"
+					class="plain popup-coords"
+					title="Copy the coordinates (x, z)"
+					onClick={() =>
+						void copyText(`${spot.x}, ${spot.z}`, `Copied ${spot.x}, ${spot.z}`)
+					}
+				>
+					{spot.x}, {spot.z}
+				</button>
 			</div>
 			{feature.popup && <PopupText text={feature.popup} />}
-			<div class="popup-actions">
-				{editable && (
-					<>
+			<div class="popup-footer">
+				<div class="popup-actions">
+					<button
+						type="button"
+						class="btn small"
+						title="Copy a waypoint for Xaero's Minimap; paste it in Minecraft chat to share it"
+						onClick={() =>
+							copyWaypoint({ name: feature.name, ...spot, color: dye })
+						}
+					>
+						Copy waypoint
+					</button>
+					{!embed.value && (
+						<button
+							type="button"
+							class="btn small"
+							title="Measure from here"
+							onClick={() => {
+								popup.value = null;
+								measureFrom(spot);
+							}}
+						>
+							Measure
+						</button>
+					)}
+				</div>
+				<div class="popup-actions">
+					{editable && (
 						<button
 							type="button"
 							class="btn small"
@@ -67,6 +107,20 @@ export function Popup() {
 						>
 							Edit
 						</button>
+					)}
+					<button
+						type="button"
+						class="btn small"
+						onClick={() => {
+							featureHistoryFor.value = {
+								featureId: feature.id,
+								title: featureTitle(feature),
+							};
+						}}
+					>
+						History
+					</button>
+					{editable && (
 						<button
 							type="button"
 							class="btn small danger"
@@ -78,20 +132,8 @@ export function Popup() {
 						>
 							Delete
 						</button>
-					</>
-				)}
-				<button
-					type="button"
-					class="btn small"
-					onClick={() => {
-						featureHistoryFor.value = {
-							featureId: feature.id,
-							title: featureTitle(feature),
-						};
-					}}
-				>
-					History
-				</button>
+					)}
+				</div>
 			</div>
 		</div>
 	);

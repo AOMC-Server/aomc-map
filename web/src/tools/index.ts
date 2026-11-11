@@ -1,7 +1,7 @@
 import { effect } from "@preact/signals";
 import { isUiKeyTarget } from "../map/input";
 import type { MapView } from "../map/MapView";
-import { activeTool, contextMenu, cursor, highlightedUpload } from "../state";
+import { activeTool, cursor, highlightedUpload } from "../state";
 import { areasLoaded, type Edge, type Rect, uploadArea } from "../uploadArea";
 import {
 	drawGeometry,
@@ -104,9 +104,6 @@ export function initTools(map: MapView) {
 		// A new object would repaint the map on every pointer move, even within one block.
 		if (!samePoint(block, cursor.value)) cursor.value = block;
 		if (activeTool.value === "measure") hoverMeasure(cursor.value);
-	});
-	map.on("contextmenu", (e) => {
-		contextMenu.value = { ...floorBlock(e), anchor: { x: e.x, z: e.z } };
 	});
 	map.on("click", (e) => {
 		if (drawing.value) return;

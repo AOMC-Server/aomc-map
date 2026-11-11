@@ -1,11 +1,44 @@
+import type { FeatureType } from "@aomc/shared/features";
 import { effect } from "@preact/signals";
 import { pointsOf } from "../featureInfo";
 import { BLOCK_CENTER, MIN_CLUSTER_LEVEL } from "../map/featureLayer";
+import { boundsOf } from "../map/geometry";
 import type { MapView } from "../map/MapView";
-import { activeTool, editor, hoverInfo, popup } from "../state";
+import { activeTool, contextMenu, editor, hoverInfo, popup } from "../state";
 import { drawing } from "./draw";
+import { floorBlock } from "./handles";
 
-/** Hover tooltips, click popups, cluster zoom and selection highlighting for features. */
+/**
+ * Opens the popup of a feature. A pin's popup sits on the pin; a line's or area's on the spot
+ * that was clicked, or without one in the middle of its bounds.
+ */
+export function openFeaturePopup(
+	f: { id: number; layerId: number; type: FeatureType; geometry: unknown },
+	clicked?: { x: number; z: number },
+) {
+	const points = pointsOf(f);
+	const [first] = points;
+	let anchor: { x: number; z: number };
+	if (f.type === "pin" && first)
+		anchor = { x: first[0] + BLOCK_CENTER, z: first[1] + BLOCK_CENTER };
+	else if (clicked) anchor = clicked;
+	else {
+		const b = boundsOf(points);
+		anchor = {
+			x: (b.minX + b.maxX) / 2 + BLOCK_CENTER,
+			z: (b.minZ + b.maxZ) / 2 + BLOCK_CENTER,
+		};
+	}
+	contextMenu.value = null;
+	popup.value = {
+		featureId: f.id,
+		layerId: f.layerId,
+		...anchor,
+		at: floorBlock(anchor),
+	};
+}
+
+/** Hover tooltips, click popups, the right-click menu, cluster zoom and selection highlighting. */
 export function initFeatureInteraction(map: MapView) {
 	const busy = () => activeTool.value !== "none" || drawing.value !== null;
 
@@ -39,13 +72,16 @@ export function initFeatureInteraction(map: MapView) {
 			});
 			return;
 		}
-		const f = hit.feature;
-		const [first] = pointsOf(f);
-		const anchor =
-			f.type === "pin" && first
-				? { x: first[0] + BLOCK_CENTER, z: first[1] + BLOCK_CENTER }
-				: { x: e.x, z: e.z };
-		popup.value = { featureId: f.id, layerId: f.layerId, ...anchor };
+		openFeaturePopup(hit.feature, e);
+	});
+	// A right click on a feature opens the same popup as a click; anywhere else, the map's menu.
+	map.on("contextmenu", (e) => {
+		if (!busy() && e.hit?.kind === "feature") {
+			openFeaturePopup(e.hit.feature, e);
+			return;
+		}
+		popup.value = null;
+		contextMenu.value = { ...floorBlock(e), anchor: { x: e.x, z: e.z } };
 	});
 	effect(() => {
 		const selected =

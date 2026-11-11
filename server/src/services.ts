@@ -8,6 +8,7 @@ import { createProgressBus } from "./progress";
 import {
 	createRateLimiter,
 	PREVIEW_RATE_LIMIT,
+	SHORT_LINK_RATE_LIMIT,
 	WRITE_RATE_LIMIT,
 } from "./ratelimit";
 import { createBlobStore } from "./tiles/blobstore";
@@ -24,6 +25,7 @@ export function createServices(db: Db, env: Env) {
 	const limiter = createRateLimiter(env.UPLOAD_RATE_LIMIT);
 	const writeLimiter = createRateLimiter(WRITE_RATE_LIMIT);
 	const previewLimiter = createRateLimiter(PREVIEW_RATE_LIMIT);
+	const linkLimiter = createRateLimiter(SHORT_LINK_RATE_LIMIT);
 	const preview = createPreviewService({
 		cacheDir: previewCacheDir(env.DATA_DIR),
 		maxCached: env.PREVIEW_CACHE_MAX,
@@ -36,6 +38,7 @@ export function createServices(db: Db, env: Env) {
 		limiter,
 		writeLimiter,
 		previewLimiter,
+		linkLimiter,
 		preview,
 		traffic,
 	};

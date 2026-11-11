@@ -176,6 +176,7 @@ export const updateDimension = (
 		scale?: number | null;
 		theme?: DimensionTheme;
 		preload?: PreloadRing[];
+		xaeroDimension?: string;
 	},
 ) =>
 	mapChange(() =>

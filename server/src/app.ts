@@ -19,6 +19,7 @@ import { dimensionRoutes } from "./routes/dimensions";
 import { featureRoutes } from "./routes/features";
 import { inviteRoutes } from "./routes/invites";
 import { layerRoutes } from "./routes/layers";
+import { linkRoutes, shortLinkRedirect } from "./routes/links";
 import { mapRoutes } from "./routes/map";
 import { meRoutes } from "./routes/me";
 import { memberRoutes } from "./routes/members";
@@ -85,6 +86,8 @@ export function createApp({ db, env, services, fetch: fetchFn }: AppDeps) {
 		.route("/api/preview.png", previewRoutes)
 		.route("/api/features", featureRoutes)
 		.route("/api/stats", statsRoutes)
+		.route("/api/links", linkRoutes)
+		.route("/s", shortLinkRedirect)
 		.route("/api/admin", adminRoutes)
 		.get("/api/asyncapi.json", (c) => c.json(asyncApiDocument(env)))
 		.route("/scalar", docsRoutes)

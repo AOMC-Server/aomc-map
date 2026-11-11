@@ -13,6 +13,7 @@ import { LayerPanel } from "./LayerPanel";
 import { LayerSharing, layerSharingFor } from "./LayerSharing";
 import { MeasureCard } from "./MeasureCard";
 import { Popup } from "./Popup";
+import { ShareDialog, shareOpen } from "./ShareDialog";
 import { StatusBar } from "./StatusBar";
 import { Toast } from "./Toast";
 import { Toolbar } from "./Toolbar";
@@ -75,6 +76,7 @@ export function App() {
 					<Hotbar />
 					<Tooltip />
 					{uploadOpen.value && <UploadDialog />}
+					{shareOpen.value && <ShareDialog />}
 					{featureHistoryFor.value && <FeatureHistory />}
 					{layerSharingFor.value && <LayerSharing />}
 					{deleteUploadFor.value && <DeleteUploadDialog />}

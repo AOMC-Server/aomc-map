@@ -5,6 +5,8 @@ export type UrlState = {
 	view: Partial<View>;
 	rev: number | null;
 	embed: boolean;
+	/** The layers a shared link shows, or null to show each layer's default. */
+	layers: number[] | null;
 };
 
 const num = (value: string | null): number | undefined => {
@@ -12,6 +14,17 @@ const num = (value: string | null): number | undefined => {
 	const n = Number(value);
 	return Number.isFinite(n) ? n : undefined;
 };
+
+/** "1,2,3" to [1, 2, 3], skipping anything that is not a layer id; "" is no layers at all. */
+function parseLayers(value: string | null): number[] | null {
+	if (value === null) return null;
+	return value
+		.split(",")
+		.map((s) => num(s))
+		.filter(
+			(n): n is number => n !== undefined && Number.isInteger(n) && n > 0,
+		);
+}
 
 export function parseUrl(search: string): UrlState {
 	const q = new URLSearchParams(search);
@@ -25,6 +38,7 @@ export function parseUrl(search: string): UrlState {
 		},
 		rev: rev !== undefined && Number.isInteger(rev) && rev >= 0 ? rev : null,
 		embed: q.get("embed") === "1",
+		layers: parseLayers(q.get("layers")),
 	};
 }
 
