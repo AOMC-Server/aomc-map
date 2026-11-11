@@ -1,7 +1,7 @@
 import type { ComponentChildren } from "preact";
 import { useEffect } from "preact/hooks";
 
-/** Centered dialog over a backdrop. Escape closes it before anything else sees the key. */
+/** Centered inventory-style dialog over a dimmed backdrop. Escape closes it before anything else sees the key. */
 export function Modal(props: {
 	label: string;
 	onClose: () => void;
@@ -21,14 +21,14 @@ export function Modal(props: {
 	return (
 		<div class="modal-backdrop">
 			<div
-				class="modal"
+				class="modal gui"
 				role="dialog"
 				aria-modal="true"
 				aria-label={props.label}
 			>
 				<button
 					type="button"
-					class="plain popup-close"
+					class="btn small close modal-close"
 					aria-label="Close"
 					onClick={onClose}
 				>

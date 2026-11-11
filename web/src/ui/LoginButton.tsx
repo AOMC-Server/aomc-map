@@ -5,17 +5,23 @@ export function LoginButton() {
 	const u = user.value;
 	if (!u) {
 		return (
-			<a class="btn primary" href={loginUrl()}>
-				Log in with Discord
-			</a>
+			<div class="account">
+				<a class="btn primary" href={loginUrl()}>
+					Log in with Discord
+				</a>
+			</div>
 		);
 	}
 	return (
 		<div class="account">
-			{u.avatarUrl && (
-				<img class="avatar" src={u.avatarUrl} alt="" width={24} height={24} />
-			)}
-			<span class="username">{u.username}</span>
+			<span class="player">
+				{u.avatarUrl ? (
+					<img class="avatar" src={u.avatarUrl} alt="" width={28} height={28} />
+				) : (
+					<span class="avatar placeholder" />
+				)}
+				<span class="username">{u.username}</span>
+			</span>
 			<a class="btn" href="/settings" title="Your settings and API tokens">
 				Settings
 			</a>

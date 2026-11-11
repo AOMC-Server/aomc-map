@@ -1,4 +1,4 @@
-import { DYE_HEX, DYES, type Dye } from "@aomc/shared/colors";
+import type { Dye } from "@aomc/shared/colors";
 import {
 	type FeatureInput,
 	type FeatureType,
@@ -6,7 +6,7 @@ import {
 	MAX_POPUP,
 } from "@aomc/shared/features";
 import { useEffect, useState } from "preact/hooks";
-import { dyeLabel, pointsOf, TYPE_LABEL } from "../featureInfo";
+import { pointsOf, TYPE_LABEL } from "../featureInfo";
 import { createFeature, deleteFeature, updateFeature } from "../layers";
 import { editor, layersData, popup } from "../state";
 import {
@@ -19,6 +19,8 @@ import {
 	stopDraw,
 	undoPoint,
 } from "../tools/draw";
+import { DyePicker } from "./DyePicker";
+import { Banner } from "./icons";
 import { Panel } from "./Panel";
 
 const TYPES: FeatureType[] = ["pin", "line", "polygon"];
@@ -132,11 +134,13 @@ export function FeatureEditor() {
 				</>
 			}
 		>
-			<p class="muted">Layer: {layer.name}</p>
+			<p class="editor-layer">
+				<Banner dye={layer.color} /> {layer.name}
+			</p>
 
 			<div class="field">
 				<span class="label">Type</span>
-				<div class="group">
+				<div class="segmented">
 					{TYPES.map((t) => (
 						<button
 							key={t}
@@ -158,7 +162,7 @@ export function FeatureEditor() {
 					{d?.mode === "draw" && type !== "pin" && (
 						<button
 							type="button"
-							class="btn"
+							class="btn small"
 							disabled={!ready}
 							onClick={() => finishDraw()}
 						>
@@ -166,12 +170,12 @@ export function FeatureEditor() {
 						</button>
 					)}
 					{d?.mode === "placed" && (
-						<button type="button" class="btn" onClick={resumeDraw}>
+						<button type="button" class="btn small" onClick={resumeDraw}>
 							{type === "pin" ? "Place again" : "Add points"}
 						</button>
 					)}
 					{type !== "pin" && points.length > 0 && (
-						<button type="button" class="btn" onClick={undoPoint}>
+						<button type="button" class="btn small" onClick={undoPoint}>
 							Undo last
 						</button>
 					)}
@@ -210,28 +214,15 @@ export function FeatureEditor() {
 				/>
 			</label>
 
-			<label class="field">
+			<div class="field">
 				<span class="label">Colour</span>
-				<span class="color-row">
-					<span
-						class="swatch"
-						style={{ background: DYE_HEX[color ?? layer.color] }}
-					/>
-					<select
-						value={color ?? ""}
-						onChange={(e) =>
-							setColor((e.currentTarget.value || null) as Dye | null)
-						}
-					>
-						<option value="">Layer default ({dyeLabel(layer.color)})</option>
-						{DYES.map((dye) => (
-							<option key={dye} value={dye}>
-								{dyeLabel(dye)}
-							</option>
-						))}
-					</select>
-				</span>
-			</label>
+				<DyePicker
+					label="Colour"
+					value={color}
+					fallback={layer.color}
+					onChange={setColor}
+				/>
+			</div>
 		</Panel>
 	);
 }

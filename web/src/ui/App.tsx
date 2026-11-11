@@ -6,6 +6,7 @@ import { FeatureEditor } from "./FeatureEditor";
 import { FeatureHistory, featureHistoryFor } from "./FeatureHistory";
 import { HistoryBanner } from "./HistoryBanner";
 import { HistoryPanel } from "./HistoryPanel";
+import { Hotbar } from "./Hotbar";
 import { LayerPanel } from "./LayerPanel";
 import { LayerSharing, layerSharingFor } from "./LayerSharing";
 import { Popup } from "./Popup";
@@ -38,10 +39,18 @@ export function App() {
 		if (host.current) void boot(host.current);
 	}, []);
 
+	const panelOpen = editor.value !== null || sidePanel.value !== null;
 	return (
-		<div class={`app ${embed.value ? "embed" : ""}`}>
+		<div
+			class={`app ${embed.value ? "embed" : ""} ${panelOpen ? "panel-open" : ""}`}
+		>
 			<div class="map-host" ref={host} />
-			{loadError.value && <div class="load-error">{loadError.value}</div>}
+			{loadError.value && (
+				<div class="load-error gui">
+					<h2>Couldn't load the map</h2>
+					<p>{loadError.value}</p>
+				</div>
+			)}
 			<Popup />
 			{!embed.value && (
 				<>
@@ -49,6 +58,7 @@ export function App() {
 					<SidePanel />
 					<HistoryBanner />
 					<StatusBar />
+					<Hotbar />
 					<Tooltip />
 					{uploadOpen.value && <UploadDialog />}
 					{featureHistoryFor.value && <FeatureHistory />}

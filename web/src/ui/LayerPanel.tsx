@@ -1,9 +1,9 @@
-import { DYE_HEX, DYES, type Dye } from "@aomc/shared/colors";
+import type { Dye } from "@aomc/shared/colors";
 import { type FeatureInput, MAX_NAME } from "@aomc/shared/features";
 import { useState } from "preact/hooks";
 import { showNotice } from "../api";
 import { mapView } from "../controller";
-import { dyeLabel, featureTitle, pointsOf, TYPE_LABEL } from "../featureInfo";
+import { featureTitle, pointsOf, TYPE_LABEL } from "../featureInfo";
 import {
 	createLayer,
 	deleteFeature,
@@ -24,6 +24,8 @@ import {
 	toggleLayer,
 	user,
 } from "../state";
+import { DyePicker } from "./DyePicker";
+import { Banner } from "./icons";
 import { layerSharingFor } from "./LayerSharing";
 import { Panel } from "./Panel";
 
@@ -80,20 +82,11 @@ function LayerForm(props: { initial?: LayerData; onDone: () => void }) {
 				aria-label="Layer name"
 				onInput={(e) => setName(e.currentTarget.value)}
 			/>
-			<span class="color-row">
-				<span class="swatch" style={{ background: DYE_HEX[color] }} />
-				<select
-					value={color}
-					aria-label="Colour"
-					onChange={(e) => setColor(e.currentTarget.value as Dye)}
-				>
-					{DYES.map((d) => (
-						<option key={d} value={d}>
-							{dyeLabel(d)}
-						</option>
-					))}
-				</select>
-			</span>
+			<DyePicker
+				label="Colour"
+				value={color}
+				onChange={(d) => d && setColor(d)}
+			/>
 			<label class="check">
 				<input
 					type="checkbox"
@@ -130,7 +123,7 @@ function ImportButton(props: { layer: LayerData }) {
 	const [replace, setReplace] = useState(false);
 	return (
 		<span class="import">
-			<label class="btn file-btn">
+			<label class="btn small file-btn">
 				Import
 				<input
 					type="file"
@@ -180,7 +173,7 @@ function LayerRow(props: { layer: LayerData }) {
 	const hidden = isLayerHidden(l);
 
 	return (
-		<li class="layer">
+		<li class={`layer ${open ? "open" : ""} ${hidden ? "hidden" : ""}`}>
 			<div class="layer-head">
 				<input
 					type="checkbox"
@@ -188,16 +181,23 @@ function LayerRow(props: { layer: LayerData }) {
 					aria-label={`Show ${l.name}`}
 					onChange={() => toggleLayer(l)}
 				/>
-				<span class="swatch" style={{ background: DYE_HEX[l.color] }} />
+				<Banner dye={l.color} />
 				<button
 					type="button"
 					class="plain layer-name"
 					onClick={() => setOpen(!open)}
 					aria-expanded={open}
 				>
-					{l.visibility === "private" && <span title="Private layer">🔒 </span>}
-					{l.name}
+					<span class="layer-title">{l.name}</span>
+					{l.visibility === "private" && (
+						<span class="badge" title="Only invited members and moderators">
+							private
+						</span>
+					)}
 					<span class="count">{l.features.length}</span>
+					<span class="chevron" aria-hidden="true">
+						{open ? "▼" : "▶"}
+					</span>
 				</button>
 			</div>
 
@@ -211,7 +211,7 @@ function LayerRow(props: { layer: LayerData }) {
 								<>
 									<button
 										type="button"
-										class="btn"
+										class="btn small"
 										onClick={() => {
 											editor.value = { mode: "create", layerId: l.id };
 										}}
@@ -220,7 +220,7 @@ function LayerRow(props: { layer: LayerData }) {
 									</button>
 									<button
 										type="button"
-										class="btn"
+										class="btn small"
 										onClick={() => setEditing(true)}
 									>
 										Settings
@@ -228,7 +228,7 @@ function LayerRow(props: { layer: LayerData }) {
 									{l.visibility === "private" && l.canManage && (
 										<button
 											type="button"
-											class="btn"
+											class="btn small"
 											title="Who can see and edit this layer"
 											onClick={() => {
 												layerSharingFor.value = { layerId: l.id, name: l.name };
@@ -241,7 +241,7 @@ function LayerRow(props: { layer: LayerData }) {
 								</>
 							)}
 							<a
-								class="btn"
+								class="btn small"
 								href={`/api/layers/${l.id}/export`}
 								download={`${l.name}.json`}
 							>
@@ -250,7 +250,7 @@ function LayerRow(props: { layer: LayerData }) {
 							{editable && (
 								<button
 									type="button"
-									class="btn danger"
+									class="btn small danger"
 									onClick={async () => {
 										if (confirm(`Delete layer "${l.name}" and its features?`))
 											await deleteLayer(l.id);
@@ -320,7 +320,11 @@ export function LayerPanel() {
 					{creating ? (
 						<LayerForm onDone={() => setCreating(false)} />
 					) : (
-						<button type="button" class="btn" onClick={() => setCreating(true)}>
+						<button
+							type="button"
+							class="btn wide"
+							onClick={() => setCreating(true)}
+						>
 							+ New layer
 						</button>
 					)}

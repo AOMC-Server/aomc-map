@@ -15,6 +15,7 @@ function describeScale(zoom: number): string {
 const trim = (n: number) =>
 	n >= 100 ? Math.round(n) : Math.round(n * 10) / 10;
 
+/** Cursor position, scale and measurements, drawn like the F3 debug screen. */
 export function StatusBar() {
 	const c = cursor.value;
 	const tool = activeTool.value;
@@ -26,33 +27,42 @@ export function StatusBar() {
 		prefs.showOverworldEquivalent && c && scale !== null && scale !== 1
 			? { x: Math.round(c.x * scale), z: Math.round(c.z * scale) }
 			: null;
+	const measuring = tool === "measure";
+	if (!prefs.showCoordinates && !equivalent && !prefs.showScale && !measuring)
+		return null;
 	return (
-		<footer class="statusbar">
+		<footer class="debug">
+			{measuring && (
+				<>
+					<span class="line measure">
+						{result
+							? `Δx ${result.dx}  Δz ${result.dz}`
+							: measurePoints.value.length === 1
+								? "Measure: click a second point"
+								: "Measure: click a first point"}
+						{measurePoints.value.length > 0 && (
+							<button type="button" class="plain link" onClick={clearMeasure}>
+								[clear]
+							</button>
+						)}
+					</span>
+					{result && (
+						<span class="line measure">
+							Distance: {result.distance.toFixed(1)} blocks
+						</span>
+					)}
+				</>
+			)}
 			{prefs.showCoordinates && (
-				<span class="readout">{c ? `x ${c.x}  z ${c.z}` : "x –  z –"}</span>
+				<span class="line readout">XZ: {c ? `${c.x} / ${c.z}` : "– / –"}</span>
 			)}
 			{equivalent && (
-				<span class="equivalent" title="The same place in the overworld">
-					≈ overworld x {equivalent.x} z {equivalent.z}
+				<span class="line equivalent" title="The same place in the overworld">
+					Overworld: {equivalent.x} / {equivalent.z}
 				</span>
 			)}
 			{prefs.showScale && (
-				<span class="scale">{describeScale(view.value.zoom)}</span>
-			)}
-
-			{tool === "measure" && (
-				<span class="tool-info">
-					{result
-						? `Δx ${result.dx}  Δz ${result.dz}  distance ${result.distance.toFixed(1)}`
-						: measurePoints.value.length === 1
-							? "Click a second point"
-							: "Click a first point"}
-					{measurePoints.value.length > 0 && (
-						<button type="button" class="plain link" onClick={clearMeasure}>
-							clear
-						</button>
-					)}
-				</span>
+				<span class="line scale">Zoom: {describeScale(view.value.zoom)}</span>
 			)}
 		</footer>
 	);

@@ -1,9 +1,9 @@
-import { DYE_HEX } from "@aomc/shared/colors";
 import { mapView } from "../controller";
 import { featureTitle, TYPE_LABEL } from "../featureInfo";
 import { deleteFeature } from "../layers";
 import { canEditMap, editor, layersData, popup, view } from "../state";
 import { featureHistoryFor } from "./FeatureHistory";
+import { Banner } from "./icons";
 import { PopupText } from "./PopupText";
 
 /** DOM popup for the clicked feature, anchored to the map position and following pans and zooms. */
@@ -24,7 +24,7 @@ export function Popup() {
 	const top = placeBelow
 		? at.y + 14
 		: at.y - (feature.type === "pin" ? 34 : 12);
-	const color = DYE_HEX[feature.color ?? layer.color];
+	const dye = feature.color ?? layer.color;
 	const editable = layer.canEdit && canEditMap.value;
 
 	return (
@@ -42,8 +42,8 @@ export function Popup() {
 			>
 				×
 			</button>
-			<h3>
-				<span class="swatch" style={{ background: color }} />
+			<h3 class={`dye-${dye}`}>
+				<Banner dye={dye} />
 				{featureTitle(feature)}
 			</h3>
 			<div class="popup-meta">
@@ -55,7 +55,7 @@ export function Popup() {
 					<>
 						<button
 							type="button"
-							class="btn"
+							class="btn small"
 							onClick={() => {
 								popup.value = null;
 								editor.value = {
@@ -69,7 +69,7 @@ export function Popup() {
 						</button>
 						<button
 							type="button"
-							class="btn"
+							class="btn small danger"
 							onClick={async () => {
 								if (!confirm(`Delete "${featureTitle(feature)}"?`)) return;
 								popup.value = null;
@@ -82,7 +82,7 @@ export function Popup() {
 				)}
 				<button
 					type="button"
-					class="btn"
+					class="btn small"
 					onClick={() => {
 						featureHistoryFor.value = {
 							featureId: feature.id,

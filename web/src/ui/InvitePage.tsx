@@ -62,8 +62,8 @@ export function InvitePage(props: { token: string }) {
 	const loginHref = loginUrl(`/invite/${token}?accept=1`);
 
 	return (
-		<main class="invite-page">
-			<div class="modal invite-card">
+		<main class="invite-page menu-screen">
+			<div class="modal gui invite-card">
 				<h1>AOMC Map</h1>
 				{state.phase === "loading" && <p class="muted">Checking invite…</p>}
 

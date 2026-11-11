@@ -1,21 +1,21 @@
 import type { ComponentChildren } from "preact";
 import { Toast } from "./Toast";
 
-/** Layout of the standalone pages (/settings, /manage): a back link, a title and the content. */
+/** Layout of the standalone pages (/settings, /manage): a menu screen with a title, a scrolling list and Done. */
 export function Page(props: { title: string; children: ComponentChildren }) {
 	return (
-		<div class="page-root">
+		<div class="page-root menu-screen">
+			<header class="page-head">
+				<h1>{props.title}</h1>
+			</header>
 			<main class="page">
-				<div class="page-inner">
-					<header class="page-head">
-						<a class="btn" href="/">
-							← Back to map
-						</a>
-						<h1>{props.title}</h1>
-					</header>
-					{props.children}
-				</div>
+				<div class="page-inner">{props.children}</div>
 			</main>
+			<footer class="page-foot">
+				<a class="btn wide" href="/">
+					Done
+				</a>
+			</footer>
 			<Toast />
 		</div>
 	);

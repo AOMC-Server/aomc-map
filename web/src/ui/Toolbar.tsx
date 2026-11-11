@@ -1,51 +1,16 @@
 import { useEffect, useRef } from "preact/hooks";
 import { selectDimension } from "../controller";
-import {
-	activeTool,
-	currentMap,
-	dimSlug,
-	isModerator,
-	rev,
-	type SidePanelName,
-	sidePanel,
-	type Tool,
-	visibleDimensions,
-} from "../state";
-import { uploadBusy, uploadOpen } from "../upload";
+import { currentMap, dimSlug, visibleDimensions } from "../state";
+import { BlockIcon } from "./icons";
 import { LoginButton } from "./LoginButton";
 
-/** One side panel at a time; opening the one that is already open closes it. */
-const toggle = (name: SidePanelName) => {
-	sidePanel.value = sidePanel.value === name ? null : name;
-};
-
-function ToolButton(props: {
-	tool: Exclude<Tool, "none">;
-	label: string;
-	title: string;
-}) {
-	const active = activeTool.value === props.tool;
-	return (
-		<button
-			type="button"
-			class={`btn ${active ? "active" : ""}`}
-			title={props.title}
-			aria-pressed={active}
-			onClick={() => {
-				activeTool.value = active ? "none" : props.tool;
-			}}
-		>
-			{props.label}
-		</button>
-	);
-}
-
+/** Map title, dimension picker and account, along the top edge. Tools live in the hotbar. */
 export function Toolbar() {
 	const detail = currentMap.value;
 	const dims = visibleDimensions.value;
 	const ref = useRef<HTMLElement>(null);
 
-	// The toolbar wraps on narrow screens; panels and banners position themselves below it.
+	// The bar wraps on narrow screens; panels and the boss bar position themselves below it.
 	useEffect(() => {
 		const el = ref.current;
 		if (!el) return;
@@ -61,71 +26,29 @@ export function Toolbar() {
 	}, []);
 
 	return (
-		<header class="toolbar" ref={ref}>
-			<span class="map-title">{detail?.map.name}</span>
-
-			<div class="group" role="tablist" aria-label="Dimension">
-				{dims.map((d) => (
-					<button
-						key={d.slug}
-						type="button"
-						role="tab"
-						aria-selected={d.slug === dimSlug.value}
-						class={`btn ${d.slug === dimSlug.value ? "active" : ""}`}
-						onClick={() => selectDimension(d.slug)}
-					>
-						{d.name}
-					</button>
-				))}
+		<header class="topbar" ref={ref}>
+			<div class="topbar-left">
+				{detail && <h1 class="map-title sign">{detail.map.name}</h1>}
+				<div class="dimensions" role="tablist" aria-label="Dimension">
+					{dims.map((d) => {
+						const active = d.slug === dimSlug.value;
+						return (
+							<button
+								key={d.slug}
+								type="button"
+								role="tab"
+								aria-selected={active}
+								title={d.name}
+								class={`btn dim ${active ? "active" : ""}`}
+								onClick={() => selectDimension(d.slug)}
+							>
+								<BlockIcon slug={d.slug} />
+								<span class="dim-name">{d.name}</span>
+							</button>
+						);
+					})}
+				</div>
 			</div>
-
-			<button
-				type="button"
-				class={`btn ${sidePanel.value === "layers" ? "active" : ""}`}
-				aria-pressed={sidePanel.value === "layers"}
-				onClick={() => toggle("layers")}
-			>
-				Layers
-			</button>
-
-			<button
-				type="button"
-				class={`btn ${sidePanel.value === "history" || rev.value !== null ? "active" : ""}`}
-				aria-pressed={sidePanel.value === "history"}
-				onClick={() => toggle("history")}
-			>
-				History
-			</button>
-
-			{isModerator.value && (
-				<a
-					class="btn"
-					href="/manage"
-					title="Settings, dimensions, members and invite links"
-				>
-					Manage
-				</a>
-			)}
-
-			<div class="group">
-				<ToolButton
-					tool="measure"
-					label="Measure"
-					title="Click two points to measure (Esc clears)"
-				/>
-			</div>
-
-			<div class="spacer" />
-			<button
-				type="button"
-				class={`btn ${uploadBusy() ? "active" : ""}`}
-				title="Upload Xaero's World Map exports"
-				onClick={() => {
-					uploadOpen.value = true;
-				}}
-			>
-				{uploadBusy() ? "Uploading…" : "Upload"}
-			</button>
 			<LoginButton />
 		</header>
 	);
