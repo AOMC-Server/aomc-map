@@ -3,16 +3,12 @@ import { z } from "zod";
 export const roleSchema = z.enum(["viewer", "editor", "moderator", "owner"]);
 export type Role = z.infer<typeof roleSchema>;
 
-export const visibilitySchema = z.enum(["public", "private"]);
-export type Visibility = z.infer<typeof visibilitySchema>;
-
 export const MAX_COORD = 30_000_000;
 
 export const coordSchema = z.object({
 	x: z.number().int().min(-MAX_COORD).max(MAX_COORD),
 	z: z.number().int().min(-MAX_COORD).max(MAX_COORD),
 });
-export type Coord = z.infer<typeof coordSchema>;
 
 export const uploadCoordsSchema = z.array(coordSchema);
 
@@ -31,10 +27,8 @@ const slugSchema = z
 
 export const updateMapSchema = z.object({
 	name: z.string().trim().min(1).max(100).optional(),
-	visibility: visibilitySchema.optional(),
 	tileSize: tileSizeSchema.optional(),
 });
-export type UpdateMap = z.infer<typeof updateMapSchema>;
 
 /**
  * Overworld blocks per block of the dimension (1 for the overworld, 8 for the Nether).
@@ -51,7 +45,6 @@ export const createDimensionSchema = z.object({
 	name: z.string().trim().min(1).max(100),
 	scale: dimensionScaleSchema.optional(),
 });
-export type CreateDimension = z.infer<typeof createDimensionSchema>;
 
 export const updateDimensionSchema = z.object({
 	name: z.string().trim().min(1).max(100).optional(),
@@ -59,13 +52,11 @@ export const updateDimensionSchema = z.object({
 	archived: z.boolean().optional(),
 	scale: dimensionScaleSchema.optional(),
 });
-export type UpdateDimension = z.infer<typeof updateDimensionSchema>;
 
 export const setMemberSchema = z.object({
 	userId: z.string().min(1),
 	role: roleSchema,
 });
-export type SetMember = z.infer<typeof setMemberSchema>;
 
 export const updateMemberSchema = z.object({ role: roleSchema });
 

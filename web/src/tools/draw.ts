@@ -66,7 +66,7 @@ export function stopDraw() {
 	onCancel = null;
 }
 
-export function cancelDraw() {
+function cancelDraw() {
 	const cancel = onCancel;
 	stopDraw();
 	cancel?.();

@@ -1,7 +1,6 @@
 import {
 	blockToScreen,
 	clampZoom,
-	MIN_ZOOM,
 	panBy,
 	type Size,
 	screenToBlock,
@@ -14,7 +13,7 @@ import { type DragSession, Input, type InputHost } from "./input";
 import { Renderer } from "./renderer";
 import { TileLayer, type TileSource } from "./tileLayer";
 
-export type MapPointer = { x: number; z: number; sx: number; sy: number };
+type MapPointer = { x: number; z: number; sx: number; sy: number };
 export type MapEvents = {
 	click: MapPointer & { hit: Hit | null };
 	move: MapPointer | null;
@@ -348,5 +347,3 @@ function stripUndefined<T extends object>(o: T): Partial<T> {
 		Object.entries(o).filter(([, v]) => v !== undefined),
 	) as Partial<T>;
 }
-
-export { MIN_ZOOM };

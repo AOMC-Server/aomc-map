@@ -3,18 +3,8 @@ import { mkdtempSync, readdirSync, utimesSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import sharp from "sharp";
-import { dimensions } from "../src/db/schema";
 import { pruneCache } from "../src/preview";
-import {
-	BLUE,
-	bootTiles,
-	insertMap,
-	makeUser,
-	RED,
-	solid,
-	T,
-	upload,
-} from "./helpers";
+import { BLUE, bootTiles, RED, solid, T, upload } from "./helpers";
 
 type Booted = Awaited<ReturnType<typeof bootTiles>>;
 
@@ -151,31 +141,6 @@ describe("/api/preview.png", () => {
 			"/api/preview.png?x=16&z=8&zoom=-2&rev=1",
 		);
 		expect(pinned.headers.get("cache-control")).toBe("public, max-age=86400");
-	});
-
-	test("private maps: no preview for anonymous users or outsiders, and never cached publicly", async () => {
-		const t = await bootTiles();
-		const owner = await makeUser(t.db, "owner");
-		const outsider = await makeUser(t.db, "outsider");
-		const mapId = await insertMap(t.db, {
-			slug: "club",
-			ownerId: "owner",
-			tileSize: T,
-		});
-		await t.db
-			.insert(dimensions)
-			.values({ mapId, slug: "overworld", name: "Overworld" });
-
-		const url = "/api/preview.png?map=club";
-		expect((await t.app.request(url)).status).toBe(404);
-		expect((await t.app.request(url, { headers: outsider.auth })).status).toBe(
-			404,
-		);
-		const mine = await t.app.request(url, { headers: owner.auth });
-		expect(mine.status).toBe(200);
-		expect(mine.headers.get("cache-control")).toStartWith("private");
-		// A cached render must not be handed to someone who may not see the map.
-		expect((await t.app.request(url)).status).toBe(404);
 	});
 });
 

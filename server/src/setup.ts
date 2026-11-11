@@ -11,12 +11,9 @@ const DEFAULT_DIMENSIONS = [
 	{ slug: "the_end", name: "The End", scale: null },
 ];
 
-/** Creates the default map on first run. Safe to call on every boot. */
+/** Creates the map on first run. Safe to call on every boot. */
 export async function runSetup(db: Db, env: Env) {
-	const [existing] = await db
-		.select({ id: maps.id })
-		.from(maps)
-		.where(eq(maps.isDefault, true));
+	const [existing] = await db.select({ id: maps.id }).from(maps).limit(1);
 	if (existing) return;
 
 	db.transaction((tx) => {
@@ -25,8 +22,6 @@ export async function runSetup(db: Db, env: Env) {
 			.values({
 				slug: env.SETUP_MAP_SLUG,
 				name: env.SETUP_MAP_NAME,
-				visibility: "public",
-				isDefault: true,
 				tileSize: env.DEFAULT_TILE_SIZE,
 			})
 			.returning({ id: maps.id })

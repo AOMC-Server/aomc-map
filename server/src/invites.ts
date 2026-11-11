@@ -5,7 +5,7 @@ import type { Db } from "./db/client";
 import { invites, layerMembers, layers, mapMembers, maps } from "./db/schema";
 import { atLeast, effectiveRole } from "./permissions";
 
-export const INVITE_PREFIX = "inv_";
+const INVITE_PREFIX = "inv_";
 export type InviteStatus = "active" | "revoked" | "expired" | "exhausted";
 
 export const looksLikeInviteToken = (value: string) =>
@@ -110,7 +110,7 @@ export function acceptInvite(
 				.where(and(eq(mapMembers.mapId, map.id), eq(mapMembers.userId, userId)))
 				.get()?.role ?? null;
 		// On a public map everyone is already an editor, so a lower role changes nothing.
-		const current = effectiveRole({ id: userId }, map, membership);
+		const current = effectiveRole({ id: userId }, membership);
 		const consume = () =>
 			tx
 				.update(invites)
@@ -125,7 +125,7 @@ export function acceptInvite(
 					ok: true,
 					kind: "map",
 					mapSlug: map.slug,
-					role: current as Role,
+					role: current,
 					alreadyMember: true,
 				};
 			}
@@ -146,15 +146,6 @@ export function acceptInvite(
 			};
 		}
 
-		// A layer invite never opens up a private map by itself; the map owner decides that.
-		if (current === null) {
-			return {
-				ok: false,
-				status: 409,
-				error:
-					"You need access to this map first. Ask the map owner to invite you to it.",
-			};
-		}
 		const role = inv.role as "viewer" | "editor";
 		const existing = tx
 			.select({ role: layerMembers.role })

@@ -40,15 +40,9 @@ export const tileRoutes = new Hono<AppEnv>().get("/:zoom/:x/:y", async (c) => {
 		);
 	if (!dim) return c.json({ error: "not found" }, 404);
 
-	// Shared caches must not hold tiles of private maps.
-	const scope = access.map.visibility === "private" ? "private" : "public";
 	c.header(
 		"Cache-Control",
-		revParam === undefined
-			? `${scope}, max-age=10`
-			: scope === "private"
-				? "private, max-age=31536000, immutable"
-				: IMMUTABLE,
+		revParam === undefined ? "public, max-age=10" : IMMUTABLE,
 	);
 
 	const version = await tileVersionAt(db, dim.id, zoom, x, y, rev);

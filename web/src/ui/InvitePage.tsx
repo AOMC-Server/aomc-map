@@ -101,9 +101,7 @@ export function InvitePage(props: { token: string }) {
 									<b>{state.invite.mapName}</b>
 								</>
 							) : (
-								<>
-									<b>{state.invite.mapName}</b>
-								</>
+								<b>{state.invite.mapName}</b>
 							)}{" "}
 							as <b>{state.invite.role}</b>.
 						</p>

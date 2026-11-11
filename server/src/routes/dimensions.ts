@@ -21,7 +21,7 @@ export const dimensionRoutes = new Hono<AppEnv>()
 				c.req.param("slug") ?? "",
 			);
 			if (!access) return c.json({ error: "not found" }, 404);
-			if (!canManageDimensions(access.role, access.map))
+			if (!canManageDimensions(access.role))
 				return c.json({ error: "forbidden" }, 403);
 
 			const body = c.req.valid("json");
@@ -59,7 +59,7 @@ export const dimensionRoutes = new Hono<AppEnv>()
 				c.req.param("slug") ?? "",
 			);
 			if (!access) return c.json({ error: "not found" }, 404);
-			if (!canManageDimensions(access.role, access.map))
+			if (!canManageDimensions(access.role))
 				return c.json({ error: "forbidden" }, 403);
 
 			const body = c.req.valid("json");

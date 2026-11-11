@@ -44,27 +44,16 @@ export const apiTokens = sqliteTable("api_tokens", {
 	lastUsedAt: integer("last_used_at"),
 });
 
-export const maps = sqliteTable(
-	"maps",
-	{
-		id: id(),
-		slug: text("slug").notNull().unique(),
-		name: text("name").notNull(),
-		ownerId: text("owner_id").references(() => users.id), // null for the setup map
-		visibility: text("visibility", { enum: ["public", "private"] })
-			.notNull()
-			.default("private"),
-		isDefault: bool("is_default").notNull().default(false),
-		tileSize: integer("tile_size").notNull(),
-		headRev: integer("head_rev").notNull().default(0),
-		createdAt: createdAt(),
-	},
-	(t) => [
-		uniqueIndex("maps_one_default")
-			.on(t.isDefault)
-			.where(sql`${t.isDefault} = 1`),
-	],
-);
+export const maps = sqliteTable("maps", {
+	id: id(),
+	slug: text("slug").notNull().unique(),
+	name: text("name").notNull(),
+	/** Never set any more (maps are not user-created); SQLite cannot drop a foreign-key column. */
+	ownerId: text("owner_id").references(() => users.id),
+	tileSize: integer("tile_size").notNull(),
+	headRev: integer("head_rev").notNull().default(0),
+	createdAt: createdAt(),
+});
 
 export const mapMembers = sqliteTable(
 	"map_members",

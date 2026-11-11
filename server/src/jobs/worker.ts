@@ -11,8 +11,6 @@ import {
 	type ProcessUploadPayload,
 } from "./types";
 
-export type Worker = ReturnType<typeof createWorker>;
-
 /** Runs persisted jobs one at a time, in id order. */
 export function createWorker(ctx: JobContext) {
 	const { db, env, progress } = ctx;

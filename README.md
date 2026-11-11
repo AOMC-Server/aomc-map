@@ -97,7 +97,7 @@ All settings are environment variables (see `.env.example`).
 
 **Dimensions and scale.** A dimension's scale is how many overworld blocks one of its blocks covers: 1 for the Overworld and Caves, 8 for the Nether, and none for the End, whose coordinates don't correspond to anything. Switching between dimensions that have a scale keeps showing the same place (Overworld → Nether divides the coordinates by 8 and zooms in three levels), and the status bar shows the overworld equivalent of the cursor while you are in a scaled dimension. Switching to or from a dimension without a scale can't map anything, so the view returns to wherever you last were in that dimension (its origin the first time). Scales are set in _Manage → Dimensions_; existing installs get the usual values for the standard dimension names when they upgrade.
 
-**Roles.** _viewer_ can look, _editor_ can upload and edit, _moderator_ can also revert uploads and restore features (and manage dimensions on the main map), _owner_ can also manage members, invites and settings. Logged-in visitors of the public main map are implicit editors; anonymous visitors are viewers.
+**Roles.** _viewer_ can look, _editor_ can upload and edit, _moderator_ can also revert uploads and restore features (and manage dimensions), _owner_ can also manage members, invites and settings. The map is public: logged-in visitors are implicit editors and anonymous visitors are viewers, unless someone has been given a role explicitly. There is exactly one map, created on first boot; it cannot be created or deleted through the app.
 
 **Managing the map** (_Manage_ in the toolbar):
 
@@ -137,7 +137,7 @@ An upload may also carry `coords`, a JSON array of `{x, z}` aligned with the fil
 
 Pasting a link to the map into Discord, Slack and similar shows a card with a picture of that spot. The server renders it: `GET /api/preview.png?map=&dim=&x=&z=&zoom=&rev=` composites the tiles around the point into a 1200×630 PNG with a marker in the middle (no headless browser), and `/` carries the matching Open Graph and Twitter tags. Rules:
 
-- Only **public** maps get a preview and a title. Crawlers are anonymous, so private maps return 404 for the image and the page keeps its generic title; nothing about them leaks. Logged-in members can still request the image for their private maps.
+- The image contains tiles only (no layers or features, so nothing from private layers can show up in it), and the map is public, so anyone may request it.
 - All values in the tags are HTML-escaped, and the URLs are rebuilt from validated numbers rather than echoing the query string.
 - Images are cached on disk (`DATA_DIR/preview-cache`, newest `PREVIEW_CACHE_MAX` kept), keyed by map, dimension, position, zoom and revision. Identical concurrent requests share one render and at most two renders run at once.
 
@@ -204,7 +204,7 @@ The container has a health check (`/api/me`). Jobs interrupted by a crash or res
 ## Security notes
 
 - Sessions are random values stored hashed; API tokens and invite tokens are shown once and stored hashed.
-- `GET /blobs/<hash>.webp` needs no login: hashes are unguessable, but a hash taken from a private map's tile URL would still work. Treat private maps as "not listed" rather than "encrypted".
+- The map and its tile images are public: `GET /blobs/<hash>.webp` and the tile endpoints need no login. Only layers can be private, and their features are never part of the tiles.
 - Cookie-authenticated writes require a matching `Origin` header. Popups and share tags are escaped or rendered as text.
 - Anyone who can log in via Discord can edit the main map as an editor; moderators and owners are granted explicitly.
 

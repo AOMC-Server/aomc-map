@@ -201,7 +201,6 @@ export const inviteRoutes = new Hono<AppEnv>()
 		if (user) {
 			const current = effectiveRole(
 				user,
-				map,
 				await loadMembership(db, map.id, user.id),
 			);
 			alreadyMember =

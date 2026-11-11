@@ -24,7 +24,6 @@ export type ViewQuery = z.infer<typeof viewQuerySchema>;
 export type PreviewTarget = {
 	mapName: string;
 	mapSlug: string;
-	isPublic: boolean;
 	dimensionName: string;
 	dimensionSlug: string;
 	mapId: number;
@@ -33,7 +32,7 @@ export type PreviewTarget = {
 
 /**
  * Resolves a view query to a concrete map, dimension, position and revision for the given actor.
- * Returns null when the map does not exist or the actor may not see it (callers answer 404).
+ * Returns null when the map or dimension does not exist (callers answer 404).
  */
 export async function resolvePreviewTarget(
 	db: Db,
@@ -43,11 +42,12 @@ export async function resolvePreviewTarget(
 ): Promise<PreviewTarget | null> {
 	let slug = q.map;
 	if (!slug) {
-		const [def] = await db
+		const [first] = await db
 			.select({ slug: maps.slug })
 			.from(maps)
-			.where(eq(maps.isDefault, true));
-		slug = def?.slug;
+			.orderBy(maps.id)
+			.limit(1);
+		slug = first?.slug;
 	}
 	if (!slug) return null;
 	const access = await loadMapAccess(db, actor, slug);
@@ -69,7 +69,6 @@ export async function resolvePreviewTarget(
 	return {
 		mapName: access.map.name,
 		mapSlug: access.map.slug,
-		isPublic: access.map.visibility === "public",
 		dimensionName: dim.name,
 		dimensionSlug: dim.slug,
 		mapId: access.map.id,

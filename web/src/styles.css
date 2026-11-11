@@ -79,8 +79,7 @@ body,
 	flex-wrap: wrap;
 }
 
-.btn,
-.map-select {
+.btn {
 	font: inherit;
 	color: var(--text);
 	background: #262a31;
@@ -92,8 +91,7 @@ body,
 	min-height: 32px;
 }
 
-.btn:hover,
-.map-select:hover {
+.btn:hover {
 	background: #30353d;
 }
 
@@ -260,10 +258,6 @@ select {
 	border: 1px solid var(--border);
 	border-radius: 6px;
 	padding: 6px 8px;
-}
-
-.map-select {
-	width: auto;
 }
 
 textarea {
@@ -941,11 +935,6 @@ code {
 
 	.toolbar {
 		gap: 6px;
-	}
-
-	.map-select {
-		flex: 1;
-		min-width: 0;
 	}
 
 	.username {

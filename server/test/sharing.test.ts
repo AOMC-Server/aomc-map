@@ -7,9 +7,8 @@ import {
 	mapMembers,
 	maps,
 } from "../src/db/schema";
-import { canManageInvites, canManageLayerMembers } from "../src/permissions";
 import { runSetup } from "../src/setup";
-import { insertMap, makeTestApp, makeUser } from "./helpers";
+import { makeTestApp, makeUser } from "./helpers";
 
 type Auth = { auth: Record<string, string> } | null;
 type Ctx = Awaited<ReturnType<typeof boot>>;
@@ -56,25 +55,6 @@ async function mapInvite(
 	expect(res.status).toBe(201);
 	return res.body as { invite: { id: number }; token: string; url: string };
 }
-
-describe("permissions", () => {
-	const layer = { visibility: "private", createdBy: "u1" } as const;
-	test("canManageInvites is owner-only", () => {
-		expect(
-			["viewer", "editor", "moderator", "owner", null].map((r) =>
-				canManageInvites(r as never),
-			),
-		).toEqual([false, false, false, true, false]);
-	});
-	test("canManageLayerMembers: moderators, or the layer's creator while they can still edit", () => {
-		const me = { id: "u1" };
-		expect(canManageLayerMembers(me, "moderator", layer)).toBe(true);
-		expect(canManageLayerMembers(me, "editor", layer)).toBe(true);
-		expect(canManageLayerMembers(me, "viewer", layer)).toBe(false);
-		expect(canManageLayerMembers({ id: "u2" }, "editor", layer)).toBe(false);
-		expect(canManageLayerMembers(null, null, layer)).toBe(false);
-	});
-});
 
 describe("map invites", () => {
 	test("owners create invites; the token is shown once and is never listed", async () => {
@@ -180,7 +160,7 @@ describe("map invites", () => {
 
 	test("unknown or malformed tokens are 404", async () => {
 		const t = await boot();
-		for (const bad of ["inv_" + "x".repeat(40), "nope", "inv_short"]) {
+		for (const bad of [`inv_${"x".repeat(40)}`, "nope", "inv_short"]) {
 			expect((await call(t, null, "GET", `/api/invites/${bad}`)).status).toBe(
 				404,
 			);
@@ -314,52 +294,6 @@ describe("map invites", () => {
 		expect(
 			list.body.invites.map((i: { status: string }) => i.status).sort(),
 		).toEqual(["exhausted", "expired", "revoked"]);
-	});
-
-	test("an invite is the way into a private map", async () => {
-		const t = await boot();
-		await insertMap(t.db, { slug: "club", name: "Club", ownerId: "owner" });
-		const outsider = await makeUser(t.db, "outsider");
-		expect((await call(t, outsider, "GET", "/api/maps/club")).status).toBe(404);
-
-		const made = await call(t, t.owner, "POST", "/api/maps/club/invites", {
-			role: "viewer",
-		});
-		expect(made.status).toBe(201);
-		const preview = await call(
-			t,
-			null,
-			"GET",
-			`/api/invites/${made.body.token}`,
-		);
-		expect(preview.body.invite.mapName).toBe("Club");
-
-		const accepted = await call(
-			t,
-			outsider,
-			"POST",
-			`/api/invites/${made.body.token}/accept`,
-		);
-		expect(accepted.body).toMatchObject({
-			mapSlug: "club",
-			role: "viewer",
-			alreadyMember: false,
-		});
-		const view = await call(t, outsider, "GET", "/api/maps/club");
-		expect(view.status).toBe(200);
-		expect(view.body.role).toBe("viewer");
-	});
-
-	test("a deleted map takes its invites with it", async () => {
-		const t = await boot();
-		await insertMap(t.db, { slug: "gone", ownerId: "owner" });
-		const made = await call(t, t.owner, "POST", "/api/maps/gone/invites", {
-			role: "viewer",
-		});
-		await call(t, t.owner, "DELETE", "/api/maps/gone");
-		expect(
-			(await call(t, null, "GET", `/api/invites/${made.body.token}`)).status,
-		).toBe(404);
 	});
 });
 
@@ -506,50 +440,6 @@ describe("layer invites", () => {
 			.from(layerMembers)
 			.where(eq(layerMembers.userId, "stranger"));
 		expect(still?.role).toBe("editor");
-	});
-
-	test("on a private map a layer invite does not open the map", async () => {
-		const t = await boot();
-		await insertMap(t.db, { slug: "club", ownerId: "owner" });
-		const layer = await privateLayer(t, { mapSlug: "club", creator: t.owner });
-		const made = await call(
-			t,
-			t.owner,
-			"POST",
-			`/api/layers/${layer.id}/invites`,
-			{ role: "viewer" },
-		);
-		expect(made.status).toBe(201);
-
-		const outsider = await makeUser(t.db, "outsider");
-		const refused = await call(
-			t,
-			outsider,
-			"POST",
-			`/api/invites/${made.body.token}/accept`,
-		);
-		expect(refused.status).toBe(409);
-		expect(refused.body.error).toContain("access to this map");
-		expect(
-			await t.db
-				.select()
-				.from(layerMembers)
-				.where(eq(layerMembers.userId, "outsider")),
-		).toHaveLength(0);
-
-		// Once the owner has let them into the map, the same link works.
-		await call(t, t.owner, "POST", "/api/maps/club/members", {
-			userId: "outsider",
-			role: "viewer",
-		});
-		const ok = await call(
-			t,
-			outsider,
-			"POST",
-			`/api/invites/${made.body.token}/accept`,
-		);
-		expect(ok.status).toBe(200);
-		expect(await layerNames(t, outsider, "club")).toEqual(["Secret"]);
 	});
 
 	test("a deleted layer invalidates its invites", async () => {
@@ -712,32 +602,6 @@ describe("layer members", () => {
 			).status,
 		).toBe(404);
 		expect((await call(t, null, "GET", path)).status).toBe(401);
-	});
-
-	test("people without access to a private map cannot be added to its layers", async () => {
-		const t = await boot();
-		await insertMap(t.db, { slug: "club", ownerId: "owner" });
-		const layer = await privateLayer(t, { mapSlug: "club", creator: t.owner });
-		const path = `/api/layers/${layer.id}/members`;
-		const outsider = await makeUser(t.db, "outsider");
-		const refused = await call(t, t.owner, "POST", path, {
-			userId: "outsider",
-			role: "viewer",
-		});
-		expect(refused.status).toBe(409);
-		await call(t, t.owner, "POST", "/api/maps/club/members", {
-			userId: "outsider",
-			role: "viewer",
-		});
-		expect(
-			(
-				await call(t, t.owner, "POST", path, {
-					userId: "outsider",
-					role: "viewer",
-				})
-			).status,
-		).toBe(201);
-		expect(await layerNames(t, outsider, "club")).toEqual(["Secret"]);
 	});
 
 	test("the layer list says who may manage it", async () => {

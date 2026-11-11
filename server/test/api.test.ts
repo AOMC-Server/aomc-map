@@ -3,13 +3,7 @@ import { eq } from "drizzle-orm";
 import { upsertUser } from "../src/auth/discord";
 import { mapMembers, maps, pendingOwners } from "../src/db/schema";
 import { runSetup } from "../src/setup";
-import {
-	insertMap,
-	json,
-	makeSessionCookie,
-	makeTestApp,
-	makeUser,
-} from "./helpers";
+import { json, makeSessionCookie, makeTestApp, makeUser } from "./helpers";
 
 async function boot(env: Record<string, string> = {}) {
 	const t = makeTestApp(env);
@@ -18,7 +12,7 @@ async function boot(env: Record<string, string> = {}) {
 }
 
 describe("setup", () => {
-	test("creates default map with four dimensions and is idempotent", async () => {
+	test("creates the map with four dimensions and is idempotent", async () => {
 		const { app, db, env } = await boot();
 		await runSetup(db, env);
 		await runSetup(db, env);
@@ -27,8 +21,6 @@ describe("setup", () => {
 		const res = await app.request("/api/maps/aomc");
 		expect(res.status).toBe(200);
 		const body = await res.json();
-		expect(body.map.isDefault).toBe(true);
-		expect(body.map.visibility).toBe("public");
 		expect(body.map.tileSize).toBe(512);
 		expect(body.dimensions.map((d: { slug: string }) => d.slug)).toEqual([
 			"overworld",
@@ -239,10 +231,25 @@ describe("api tokens", () => {
 });
 
 describe("maps", () => {
-	test("create, private map hidden as 404, members and last-owner guard", async () => {
+	test("the map is public and listed; anonymous visitors can read it", async () => {
+		const { app } = await boot();
+		const list = await (await app.request("/api/maps")).json();
+		expect(list.maps.map((m: { slug: string }) => m.slug)).toEqual(["aomc"]);
+		expect(list.maps[0]).not.toHaveProperty("visibility");
+		const res = await app.request("/api/maps/aomc");
+		expect(res.status).toBe(200);
+		expect((await res.json()).role).toBe("viewer");
+		expect((await app.request("/api/maps/nope")).status).toBe(404);
+	});
+
+	test("members: roles, who may manage them, and the last-owner guard", async () => {
 		const { app, db } = await boot();
 		const alice = await makeUser(db, "1", "alice");
 		const bob = await makeUser(db, "2", "bob");
+		const [map] = await db.select().from(maps);
+		await db
+			.insert(mapMembers)
+			.values({ mapId: map?.id as number, userId: "1", role: "owner" });
 		const post = (
 			u: { auth: object },
 			path: string,
@@ -255,68 +262,43 @@ describe("maps", () => {
 				headers: { ...u.auth, "Content-Type": "application/json" },
 			});
 
-		await insertMap(db, { slug: "secret", name: "Secret", ownerId: "1" });
-
-		expect((await app.request("/api/maps/secret")).status).toBe(404);
-		expect(
-			(await app.request("/api/maps/secret", { headers: bob.auth })).status,
-		).toBe(404);
-		expect(
-			(await app.request("/api/maps/secret", { headers: alice.auth })).status,
-		).toBe(200);
-
-		const listBob = await (
-			await app.request("/api/maps", { headers: bob.auth })
-		).json();
-		expect(listBob.maps.map((m: { slug: string }) => m.slug)).toEqual(["aomc"]);
-		const listAlice = await (
-			await app.request("/api/maps", { headers: alice.auth })
-		).json();
-		expect(listAlice.maps.map((m: { slug: string }) => m.slug).sort()).toEqual([
-			"aomc",
-			"secret",
-		]);
-
 		expect(
 			(
-				await post(alice, "/api/maps/secret/members", {
+				await post(alice, "/api/maps/aomc/members", {
 					userId: "2",
 					role: "viewer",
 				})
 			).status,
 		).toBe(201);
 		const asBob = await (
-			await app.request("/api/maps/secret", { headers: bob.auth })
+			await app.request("/api/maps/aomc", { headers: bob.auth })
 		).json();
 		expect(asBob.role).toBe("viewer");
 		expect(
-			(await app.request("/api/maps/secret/members", { headers: bob.auth }))
+			(await app.request("/api/maps/aomc/members", { headers: bob.auth }))
 				.status,
 		).toBe(403);
 		expect(
-			(await post(bob, "/api/maps/secret", { name: "x" }, "PATCH")).status,
+			(await post(bob, "/api/maps/aomc", { name: "x" }, "PATCH")).status,
 		).toBe(403);
 
 		const demote = await post(
 			alice,
-			"/api/maps/secret/members/1",
+			"/api/maps/aomc/members/1",
 			{ role: "editor" },
 			"PATCH",
 		);
 		expect(demote.status).toBe(409);
-		const remove = await app.request("/api/maps/secret/members/1", {
+		const remove = await app.request("/api/maps/aomc/members/1", {
 			method: "DELETE",
 			headers: alice.auth,
 		});
 		expect(remove.status).toBe(409);
 
-		await post(alice, "/api/maps/secret/members", {
-			userId: "2",
-			role: "owner",
-		});
+		await post(alice, "/api/maps/aomc/members", { userId: "2", role: "owner" });
 		const demoteOk = await post(
 			alice,
-			"/api/maps/secret/members/1",
+			"/api/maps/aomc/members/1",
 			{ role: "editor" },
 			"PATCH",
 		);
@@ -338,7 +320,7 @@ describe("maps", () => {
 		expect(dim.status).toBe(403);
 	});
 
-	test("default map: moderator manages dimensions, cannot delete map or hide it", async () => {
+	test("a moderator manages dimensions but not the map's settings", async () => {
 		const { app, db } = await boot();
 		const mod = await makeUser(db, "3");
 		const [map] = await db.select().from(maps);
@@ -360,14 +342,27 @@ describe("maps", () => {
 		});
 		expect((await archive.json()).dimension.archived).toBe(true);
 
-		expect(
-			(
-				await app.request("/api/maps/aomc", {
-					method: "DELETE",
-					headers: mod.auth,
-				})
-			).status,
-		).toBe(403);
+		const rename = await app.request("/api/maps/aomc", {
+			method: "PATCH",
+			...json({ name: "Mine now" }),
+			headers: h,
+		});
+		expect(rename.status).toBe(403);
+	});
+
+	test("maps cannot be deleted through the API", async () => {
+		const { app, db } = await boot();
+		const owner = await makeUser(db, "4");
+		const [map] = await db.select().from(maps);
+		await db
+			.insert(mapMembers)
+			.values({ mapId: map?.id as number, userId: "4", role: "owner" });
+		const res = await app.request("/api/maps/aomc", {
+			method: "DELETE",
+			headers: owner.auth,
+		});
+		expect([404, 405]).toContain(res.status);
+		expect(await db.select().from(maps)).toHaveLength(1);
 	});
 
 	test("dimension scale can be set on creation, changed, cleared, and is validated", async () => {
@@ -421,51 +416,40 @@ describe("maps", () => {
 		expect(await scaleOf("a")).toBeNull();
 	});
 
-	test("default map cannot be made private or deleted by an owner", async () => {
-		const { app, db } = await boot();
-		const owner = await makeUser(db, "4");
-		const [map] = await db.select().from(maps);
-		await db
-			.insert(mapMembers)
-			.values({ mapId: map?.id as number, userId: "4", role: "owner" });
-		const h = { ...owner.auth, "Content-Type": "application/json" };
-		const hide = await app.request("/api/maps/aomc", {
-			method: "PATCH",
-			...json({ visibility: "private" }),
-			headers: h,
-		});
-		expect(hide.status).toBe(400);
-		expect(
-			(
-				await app.request("/api/maps/aomc", {
-					method: "DELETE",
-					headers: owner.auth,
-				})
-			).status,
-		).toBe(400);
-	});
-
 	test("tile size only changes while the map has no uploads", async () => {
 		const { app, db } = await boot();
 		const alice = await makeUser(db, "1");
+		const [map] = await db.select().from(maps);
+		await db
+			.insert(mapMembers)
+			.values({ mapId: map?.id as number, userId: "1", role: "owner" });
 		const h = { ...alice.auth, "Content-Type": "application/json" };
-		await insertMap(db, { slug: "t", ownerId: "1" });
 
-		const ok = await app.request("/api/maps/t", {
+		const ok = await app.request("/api/maps/aomc", {
 			method: "PATCH",
-			...json({ tileSize: 256 }),
+			...json({ tileSize: 256, name: "Renamed" }),
 			headers: h,
 		});
 		expect(ok.status).toBe(200);
-		expect((await ok.json()).map.tileSize).toBe(256);
+		expect((await ok.json()).map).toMatchObject({
+			tileSize: 256,
+			name: "Renamed",
+		});
 
-		await db.update(maps).set({ headRev: 1 }).where(eq(maps.slug, "t"));
-		const locked = await app.request("/api/maps/t", {
+		await db.update(maps).set({ headRev: 1 }).where(eq(maps.slug, "aomc"));
+		const locked = await app.request("/api/maps/aomc", {
 			method: "PATCH",
 			...json({ tileSize: 128 }),
 			headers: h,
 		});
 		expect(locked.status).toBe(409);
+		// Renaming is still fine.
+		const rename = await app.request("/api/maps/aomc", {
+			method: "PATCH",
+			...json({ name: "Still fine" }),
+			headers: h,
+		});
+		expect(rename.status).toBe(200);
 	});
 
 	test("there is no endpoint for creating maps", async () => {

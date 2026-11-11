@@ -60,10 +60,6 @@ function SettingsTab() {
 						: "Locked: the map already has uploads, and tiles cannot be re-cut."}
 				</span>
 			</label>
-			<p class="muted">
-				Visibility: <b>{detail.map.visibility}</b>
-				{detail.map.isDefault ? " (the main map is always public)" : ""}
-			</p>
 			<button type="submit" class="btn primary" disabled={busy || !name.trim()}>
 				Save
 			</button>
@@ -287,8 +283,7 @@ export function MapPanel() {
 	const role = detail?.role;
 	const tabs: Tab[] = [];
 	if (role === "owner") tabs.push("settings");
-	if (role === "owner" || (role === "moderator" && detail?.map.isDefault))
-		tabs.push("dimensions");
+	if (role === "owner" || role === "moderator") tabs.push("dimensions");
 	if (role === "owner") tabs.push("members", "invites");
 	const [tab, setTab] = useState<Tab>(tabs[0] ?? "dimensions");
 	const active = tabs.includes(tab) ? tab : tabs[0];

@@ -6,7 +6,7 @@ export type Point = { x: number; z: number };
 export const copiedPoints = signal<Point[]>([]);
 export const copyStatus = signal<"idle" | "copied" | "failed">("idle");
 
-export const formatCoords = (points: Point[]) =>
+const formatCoords = (points: Point[]) =>
 	points.map((p) => `${p.x} ${p.z}`).join(", ");
 
 export async function clickCopy(p: Point) {

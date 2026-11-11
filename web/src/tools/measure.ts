@@ -1,6 +1,5 @@
 import { computed, effect, signal } from "@preact/signals";
 import type { MapView } from "../map/MapView";
-import { activeTool } from "../state";
 
 export type Point = { x: number; z: number };
 
@@ -73,5 +72,3 @@ export function watchMeasure(map: MapView) {
 		map.invalidate();
 	});
 }
-
-export const measureActive = () => activeTool.value === "measure";

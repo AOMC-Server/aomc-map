@@ -15,7 +15,7 @@ import {
 	pointInPolygon,
 } from "./geometry";
 
-export type RenderFeature = {
+type RenderFeature = {
 	id: number;
 	layerId: number;
 	type: "pin" | "line" | "polygon";

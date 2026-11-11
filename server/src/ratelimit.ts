@@ -1,5 +1,3 @@
-export type RateLimiter = ReturnType<typeof createRateLimiter>;
-
 /** Fixed-window in-memory limiter. `hit` returns false once the key is over its limit. */
 export function createRateLimiter(limit: number, windowMs = 60_000) {
 	const windows = new Map<string, { start: number; count: number }>();

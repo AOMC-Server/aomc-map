@@ -4,12 +4,7 @@ import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
 import { requireUser } from "../auth/session";
 import { layerMembers, users } from "../db/schema";
-import {
-	canManageLayerMembers,
-	effectiveRole,
-	loadLayerAccess,
-	loadMembership,
-} from "../permissions";
+import { canManageLayerMembers, loadLayerAccess } from "../permissions";
 import type { AppEnv } from "../types";
 
 const parseId = (value: string | undefined) =>
@@ -59,17 +54,6 @@ export const layerMemberRoutes = new Hono<AppEnv>()
 				404,
 			);
 
-		// Layer access never opens a private map; that is the map owner's decision.
-		const membership = await loadMembership(db, found.map.id, target.id);
-		if (effectiveRole({ id: target.id }, found.map, membership) === null) {
-			return c.json(
-				{
-					error:
-						"that user has no access to this map; ask the map owner to add them first",
-				},
-				409,
-			);
-		}
 		await db
 			.insert(layerMembers)
 			.values({ layerId: found.layer.id, userId: target.id, role: body.role })

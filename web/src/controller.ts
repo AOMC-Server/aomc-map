@@ -13,7 +13,6 @@ import {
 	layersData,
 	loadError,
 	type MapDetail,
-	maps,
 	popup,
 	rev,
 	user,
@@ -41,9 +40,13 @@ export async function loadUser() {
 	if (res.ok) user.value = (await res.json()).user;
 }
 
-export async function loadMaps() {
+/** There is a single map; the address bar may name it, otherwise it is the first one. */
+async function mapSlugToOpen(
+	fromUrl: string | null,
+): Promise<string | undefined> {
+	if (fromUrl) return fromUrl;
 	const res = await api.api.maps.$get();
-	if (res.ok) maps.value = (await res.json()).maps;
+	return res.ok ? (await res.json()).maps[0]?.slug : undefined;
 }
 
 async function fetchDetail(slug: string): Promise<MapDetail | null> {
@@ -52,7 +55,7 @@ async function fetchDetail(slug: string): Promise<MapDetail | null> {
 }
 
 /** Loads a map and (re)creates the canvas for it. */
-export async function selectMap(
+async function selectMap(
 	slug: string,
 	opts: { dim?: string | null; view?: Partial<View>; rev?: number | null } = {},
 ) {
@@ -150,7 +153,6 @@ export async function reloadMap(): Promise<void> {
 	const detail = await fetchDetail(current.map.slug);
 	if (!detail || currentMap.value !== current) return;
 	currentMap.value = detail;
-	await loadMaps();
 	// The dimension being viewed may have been archived.
 	const visible = detail.dimensions.filter((d) => !d.archived);
 	if (!visible.some((d) => d.slug === dimSlug.value)) {
@@ -175,12 +177,7 @@ export async function refreshHead() {
 export async function boot() {
 	const initial = parseUrl(location.search);
 	embed.value = initial.embed;
-	await Promise.all([loadUser(), loadMaps()]);
-
-	const slug =
-		initial.map ??
-		maps.value.find((m) => m.isDefault)?.slug ??
-		maps.value[0]?.slug;
+	const [slug] = await Promise.all([mapSlugToOpen(initial.map), loadUser()]);
 	if (!slug) {
 		loadError.value = "No maps are available.";
 		return;

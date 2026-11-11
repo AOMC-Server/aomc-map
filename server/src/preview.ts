@@ -14,8 +14,8 @@ import type { Db } from "./db/client";
 import type { BlobStore } from "./tiles/blobstore";
 import { tileHashAt } from "./tiles/history";
 
-export const PREVIEW_W = 1200;
-export const PREVIEW_H = 630;
+const PREVIEW_W = 1200;
+const PREVIEW_H = 630;
 const BACKGROUND = { r: 27, g: 29, b: 34, alpha: 1 };
 const MAX_TILES = 150;
 const MAX_CONCURRENT = 2;
@@ -45,7 +45,7 @@ const clamp = (n: number, lo: number, hi: number) =>
 	Math.min(Math.max(n, lo), hi);
 
 /** Composites the tiles around a point into a 1200x630 PNG. No browser involved. */
-export async function renderPreview(
+async function renderPreview(
 	db: Db,
 	blobs: BlobStore,
 	p: PreviewParams,
@@ -118,7 +118,7 @@ export async function renderPreview(
 		.toBuffer();
 }
 
-export function previewCacheKey(mapId: number, p: PreviewParams): string {
+function previewCacheKey(mapId: number, p: PreviewParams): string {
 	return createHash("sha256")
 		.update(
 			JSON.stringify([
@@ -202,5 +202,3 @@ export function createPreviewService(opts: {
 		},
 	};
 }
-
-export type PreviewService = ReturnType<typeof createPreviewService>;

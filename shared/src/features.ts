@@ -44,7 +44,6 @@ export const featurePatchSchema = z.object({
 	color: dyeSchema.nullable().optional(),
 	geometry: z.unknown().optional(),
 });
-export type FeaturePatch = z.infer<typeof featurePatchSchema>;
 
 export const featureImportSchema = z
 	.array(featureInputSchema)

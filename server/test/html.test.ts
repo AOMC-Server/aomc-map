@@ -6,7 +6,7 @@ import { eq } from "drizzle-orm";
 import { maps } from "../src/db/schema";
 import { escapeHtml, injectMeta } from "../src/html";
 import { runSetup } from "../src/setup";
-import { insertMap, makeTestApp } from "./helpers";
+import { makeTestApp } from "./helpers";
 
 const INDEX = `<!doctype html>
 <html lang="en">
@@ -134,24 +134,12 @@ describe("share tags on /", () => {
 		expect(meta(html, "og:title")).toContain("&quot;&gt;&lt;script&gt;");
 	});
 
-	test("private maps and unknown views leak nothing", async () => {
+	test("unknown or invalid views keep the generic page", async () => {
 		const t = await bootPage();
-		await insertMap(t.db, {
-			slug: "secret",
-			name: "Top Secret Plans",
-			ownerId: undefined,
-		});
-		for (const q of [
-			"?map=secret",
-			"?map=nope",
-			"?dim=nope",
-			"?x=abc",
-			"?zoom=NaN",
-		]) {
+		for (const q of ["?map=nope", "?dim=nope", "?x=abc", "?zoom=NaN"]) {
 			const html = await (await t.app.request(`/${q}`)).text();
 			expect(html).toContain("<title>AOMC Map</title>");
 			expect(html).not.toContain("og:");
-			expect(html).not.toContain("Top Secret");
 		}
 	});
 

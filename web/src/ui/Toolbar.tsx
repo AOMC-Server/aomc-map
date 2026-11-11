@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "preact/hooks";
-import { selectDimension, selectMap } from "../controller";
+import { selectDimension } from "../controller";
 import {
 	activeTool,
 	canAdminister,
@@ -8,7 +8,6 @@ import {
 	historyPanelOpen,
 	layerPanelOpen,
 	mapPanelOpen,
-	maps,
 	rev,
 	type Tool,
 	toggleSidePanel,
@@ -60,26 +59,7 @@ export function Toolbar() {
 
 	return (
 		<header class="toolbar" ref={ref}>
-			{/* Maps are not user-creatable, so most installs have just one; only show a picker for several. */}
-			{maps.value.length > 1 ? (
-				<select
-					class="map-select"
-					aria-label="Map"
-					value={detail?.map.slug}
-					onChange={(e) =>
-						selectMap(e.currentTarget.value, { dim: dimSlug.value })
-					}
-				>
-					{maps.value.map((m) => (
-						<option key={m.slug} value={m.slug}>
-							{m.name}
-							{m.visibility === "private" ? " (private)" : ""}
-						</option>
-					))}
-				</select>
-			) : (
-				<span class="map-title">{detail?.map.name}</span>
-			)}
+			<span class="map-title">{detail?.map.name}</span>
 
 			<div class="group" role="tablist" aria-label="Dimension">
 				{dims.map((d) => (

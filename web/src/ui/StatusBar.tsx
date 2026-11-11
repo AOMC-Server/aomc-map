@@ -3,7 +3,7 @@ import { clearCopy, copiedPoints, copyStatus } from "../tools/copyCoords";
 import { clearMeasure, measurePoints, measureResult } from "../tools/measure";
 
 /** Human readable scale: "1 block = 4 px" when magnified, "1 px = 8 blocks" when zoomed out. */
-export function describeScale(zoom: number): string {
+function describeScale(zoom: number): string {
 	const blocksPerPx = 2 ** zoom;
 	if (blocksPerPx < 1) {
 		const pxPerBlock = 1 / blocksPerPx;

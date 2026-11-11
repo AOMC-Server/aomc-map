@@ -23,7 +23,7 @@ export function authorizeUrl(env: Env, state: string): string {
 	return `https://discord.com/oauth2/authorize?${params}`;
 }
 
-export function redirectUri(env: Env): string {
+function redirectUri(env: Env): string {
 	return new URL("/auth/discord/callback", env.PUBLIC_URL).toString();
 }
 
@@ -65,7 +65,7 @@ export async function fetchProfile(
 	};
 }
 
-export function avatarUrl(profile: DiscordProfile): string | null {
+function avatarUrl(profile: DiscordProfile): string | null {
 	return profile.avatar
 		? `https://cdn.discordapp.com/avatars/${profile.id}/${profile.avatar}.png`
 		: null;

@@ -4,7 +4,6 @@ import { mapMembers } from "../../src/db/schema";
 import {
 	BLUE,
 	bootTiles,
-	insertMap,
 	makeUser,
 	png,
 	postUpload,
@@ -228,88 +227,6 @@ describe("progress and revisions API", () => {
 		expect(list.revisions.map((r: { id: number }) => r.id)).toEqual([id]);
 		expect((await t.app.request("/api/revisions/9999")).status).toBe(404);
 		expect((await t.app.request("/api/revisions/abc")).status).toBe(404);
-	});
-});
-
-describe("private maps", () => {
-	async function privateMap() {
-		const t = await bootTiles();
-		const owner = await makeUser(t.db, "owner");
-		const outsider = await makeUser(t.db, "outsider");
-		await insertMap(t.db, {
-			slug: "priv",
-			name: "Priv",
-			tileSize: T,
-			ownerId: "owner",
-		});
-		return { t, owner, outsider };
-	}
-
-	test("tiles, uploads and revisions of a private map are invisible to outsiders", async () => {
-		const { t, owner, outsider } = await privateMap();
-		const form = new FormData();
-		form.append(
-			"files[]",
-			new File([(await solid(T, T, RED)) as BlobPart], "a.png"),
-		);
-		form.append("coords", JSON.stringify([{ x: 0, z: 0 }]));
-		const base = "/api/maps/priv/dimensions";
-		await t.app.request("/api/maps/priv/dimensions", {
-			method: "POST",
-			body: JSON.stringify({ slug: "overworld", name: "Overworld" }),
-			headers: { ...owner.auth, "Content-Type": "application/json" },
-		});
-
-		const asOutsider = await t.app.request(`${base}/overworld/uploads`, {
-			method: "POST",
-			body: form,
-			headers: outsider.auth,
-		});
-		expect(asOutsider.status).toBe(404);
-
-		const ok = await t.app.request(`${base}/overworld/uploads`, {
-			method: "POST",
-			body: form,
-			headers: owner.auth,
-		});
-		expect(ok.status).toBe(202);
-		const { revisionId } = (await ok.json()) as { revisionId: number };
-		await t.services.worker.run();
-
-		const tilePath = `${base}/overworld/tiles/0/0/0`;
-		expect((await t.app.request(tilePath)).status).toBe(404);
-		expect(
-			(await t.app.request(tilePath, { headers: outsider.auth })).status,
-		).toBe(404);
-		const mine = await t.app.request(tilePath, { headers: owner.auth });
-		expect(mine.status).toBe(302);
-		expect(mine.headers.get("cache-control")).toStartWith("private");
-
-		expect(
-			(
-				await t.app.request(`/api/revisions/${revisionId}`, {
-					headers: outsider.auth,
-				})
-			).status,
-		).toBe(404);
-		expect(
-			(await t.app.request(`/api/revisions/${revisionId}/events`)).status,
-		).toBe(404);
-		expect(
-			(
-				await t.app.request(`/api/revisions/${revisionId}/revert`, {
-					method: "POST",
-					headers: outsider.auth,
-				})
-			).status,
-		).toBe(404);
-		expect(
-			(
-				await t.app.request("/api/maps/priv/revisions", {
-					headers: outsider.auth,
-				})
-			).status,
-		).toBe(404);
 	});
 });
 

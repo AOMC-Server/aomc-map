@@ -6,12 +6,10 @@ import type { View } from "./map/camera";
 
 export type User = { id: string; username: string; avatarUrl: string | null };
 
-export type MapSummary = {
+type MapSummary = {
 	id: number;
 	slug: string;
 	name: string;
-	visibility: "public" | "private";
-	isDefault: boolean;
 	tileSize: number;
 	headRev: number;
 };
@@ -71,7 +69,6 @@ export type LayerData = {
 export type Tool = "none" | "measure" | "copy";
 
 export const user = signal<User | null>(null);
-export const maps = signal<MapSummary[]>([]);
 export const currentMap = signal<MapDetail | null>(null);
 export const dimSlug = signal<string | null>(null);
 /** null means "follow head". */
@@ -88,7 +85,7 @@ export const notice = signal<{ text: string; kind: "error" | "info" } | null>(
 
 export const layersData = signal<LayerData[]>([]);
 /** Layers the user toggled away from their default (layerId -> hidden). */
-export const layerOverrides = signal<Map<number, boolean>>(new Map());
+const layerOverrides = signal<Map<number, boolean>>(new Map());
 export const layerPanelOpen = signal(false);
 export const historyPanelOpen = signal(false);
 export const mapPanelOpen = signal(false);
@@ -162,7 +159,7 @@ export type EditorTarget =
 export const editor = signal<EditorTarget | null>(null);
 
 /** Edits are only possible while looking at the present. */
-export const viewingHistory = computed(() => rev.value !== null);
+const viewingHistory = computed(() => rev.value !== null);
 export const canEditMap = computed(() => {
 	const role = currentMap.value?.role;
 	return (
@@ -178,13 +175,13 @@ export const isModerator = computed(() => {
 	return user.value !== null && (role === "moderator" || role === "owner");
 });
 
-/** Owners manage everything; moderators of the main map manage its dimensions. */
+/** Owners manage everything; moderators manage the dimensions. */
 export const canAdminister = computed(() => {
 	const d = currentMap.value;
 	return (
 		user.value !== null &&
 		d !== null &&
-		(d.role === "owner" || (d.role === "moderator" && d.map.isDefault))
+		(d.role === "owner" || d.role === "moderator")
 	);
 });
 

@@ -19,11 +19,10 @@ export const previewRoutes = new Hono<AppEnv>().get(
 			target.mapId,
 			target.params,
 		);
-		const scope = target.isPublic ? "public" : "private";
 		// A pinned revision never changes; "latest" may.
 		c.header(
 			"Cache-Control",
-			`${scope}, max-age=${q.rev === undefined ? 300 : 86400}`,
+			`public, max-age=${q.rev === undefined ? 300 : 86400}`,
 		);
 		c.header("Content-Type", "image/png");
 		return c.body(png as unknown as ArrayBuffer);

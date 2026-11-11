@@ -22,10 +22,7 @@ export async function createSession(db: Db, userId: string): Promise<string> {
 	return value;
 }
 
-export async function validateSession(
-	db: Db,
-	value: string,
-): Promise<User | null> {
+async function validateSession(db: Db, value: string): Promise<User | null> {
 	const id = sha256Hex(value);
 	const [row] = await db
 		.select({

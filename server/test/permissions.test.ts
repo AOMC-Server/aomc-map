@@ -7,32 +7,28 @@ import {
 	canEditFeatures,
 	canEditLayer,
 	canManageDimensions,
+	canManageInvites,
+	canManageLayerMembers,
 	canManageMembers,
 	canModerate,
 	canUpload,
 	canViewLayer,
-	canViewMap,
 	effectiveRole,
 	type LayerRole,
 	leavesNoOwner,
-	type MapInfo,
 } from "../src/permissions";
 
 const user = { id: "u1" };
-const pub: MapInfo = { visibility: "public", isDefault: false, headRev: 0 };
-const priv: MapInfo = { visibility: "private", isDefault: false, headRev: 0 };
-const roles: (Role | null)[] = [null, "viewer", "editor", "moderator", "owner"];
+const map = { headRev: 0 };
+const roles: Role[] = ["viewer", "editor", "moderator", "owner"];
 
 describe("effectiveRole", () => {
-	const cases: [string, Parameters<typeof effectiveRole>, Role | null][] = [
-		["anonymous on public", [null, pub, null], "viewer"],
-		["logged-in non-member on public", [user, pub, null], "editor"],
-		["anonymous on private", [null, priv, null], null],
-		["logged-in non-member on private", [user, priv, null], null],
-		["explicit viewer on public stays viewer", [user, pub, "viewer"], "viewer"],
-		["explicit moderator on public", [user, pub, "moderator"], "moderator"],
-		["explicit viewer on private", [user, priv, "viewer"], "viewer"],
-		["explicit owner on private", [user, priv, "owner"], "owner"],
+	const cases: [string, Parameters<typeof effectiveRole>, Role][] = [
+		["anonymous visitor", [null, null], "viewer"],
+		["logged-in non-member is an implicit editor", [user, null], "editor"],
+		["an explicit viewer stays a viewer", [user, "viewer"], "viewer"],
+		["explicit moderator", [user, "moderator"], "moderator"],
+		["explicit owner", [user, "owner"], "owner"],
 	];
 	for (const [name, args, expected] of cases) {
 		test(name, () => expect(effectiveRole(...args)).toBe(expected));
@@ -40,41 +36,22 @@ describe("effectiveRole", () => {
 });
 
 describe("map capabilities by role", () => {
-	// [role, view, upload/edit/createLayer, moderate, manageMembers]
-	const table: [Role | null, boolean, boolean, boolean, boolean][] = [
-		[null, false, false, false, false],
-		["viewer", true, false, false, false],
-		["editor", true, true, false, false],
-		["moderator", true, true, true, false],
+	// [role, upload/edit/createLayer, moderate, manageMembers, manageDimensions]
+	const table: [Role, boolean, boolean, boolean, boolean][] = [
+		["viewer", false, false, false, false],
+		["editor", true, false, false, false],
+		["moderator", true, true, false, true],
 		["owner", true, true, true, true],
 	];
-	for (const [role, view, edit, mod, members] of table) {
+	for (const [role, edit, mod, members, dims] of table) {
 		test(`role ${role}`, () => {
-			expect(canViewMap(role)).toBe(view);
 			expect(canUpload(role)).toBe(edit);
 			expect(canEditFeatures(role)).toBe(edit);
 			expect(canCreateLayers(role)).toBe(edit);
 			expect(canModerate(role)).toBe(mod);
 			expect(canManageMembers(role)).toBe(members);
-		});
-	}
-});
-
-describe("canManageDimensions", () => {
-	const table: [Role | null, boolean, boolean][] = [
-		// role, regular map, default map
-		[null, false, false],
-		["viewer", false, false],
-		["editor", false, false],
-		["moderator", false, true],
-		["owner", true, true],
-	];
-	for (const [role, regular, isDefault] of table) {
-		test(`role ${role}`, () => {
-			expect(canManageDimensions(role, pub)).toBe(regular);
-			expect(canManageDimensions(role, { ...pub, isDefault: true })).toBe(
-				isDefault,
-			);
+			expect(canManageInvites(role)).toBe(members);
+			expect(canManageDimensions(role)).toBe(dims);
 		});
 	}
 });
@@ -82,8 +59,8 @@ describe("canManageDimensions", () => {
 describe("canChangeTileSize", () => {
 	for (const role of roles) {
 		test(`role ${role}`, () => {
-			expect(canChangeTileSize(role, pub)).toBe(role === "owner");
-			expect(canChangeTileSize(role, { ...pub, headRev: 1 })).toBe(false);
+			expect(canChangeTileSize(role, map)).toBe(role === "owner");
+			expect(canChangeTileSize(role, { headRev: 1 })).toBe(false);
 		});
 	}
 });
@@ -96,20 +73,15 @@ describe("layer permissions", () => {
 	for (const role of roles) {
 		for (const lr of layerRoles) {
 			test(`inherit layer: map ${role}, layer ${lr}`, () => {
-				expect(canViewLayer(role, inherit, lr)).toBe(role !== null);
-				expect(canEditLayer(role, inherit, lr)).toBe(
-					role !== null && role !== "viewer",
-				);
+				expect(canViewLayer(role, inherit, lr)).toBe(true);
+				expect(canEditLayer(role, inherit, lr)).toBe(role !== "viewer");
 			});
 
 			test(`private layer: map ${role}, layer ${lr}`, () => {
 				const mod = role === "moderator" || role === "owner";
-				expect(canViewLayer(role, priv, lr)).toBe(
-					role !== null && (mod || lr !== null),
-				);
-				const isEditor = role !== null && role !== "viewer";
+				expect(canViewLayer(role, priv, lr)).toBe(mod || lr !== null);
 				expect(canEditLayer(role, priv, lr)).toBe(
-					mod || (isEditor && lr === "editor"),
+					mod || (role !== "viewer" && lr === "editor"),
 				);
 			});
 		}
@@ -136,7 +108,18 @@ describe("canDeleteLayer", () => {
 		expect(canDeleteLayer(user, "viewer", mine)).toBe(false);
 	});
 	test("anonymous cannot delete", () => {
-		expect(canDeleteLayer(null, null, mine)).toBe(false);
+		expect(canDeleteLayer(null, "viewer", mine)).toBe(false);
+	});
+});
+
+describe("canManageLayerMembers", () => {
+	const layer = { visibility: "private", createdBy: "u1" } as const;
+	test("moderators, or the layer's creator while they can still edit", () => {
+		expect(canManageLayerMembers(user, "moderator", layer)).toBe(true);
+		expect(canManageLayerMembers(user, "editor", layer)).toBe(true);
+		expect(canManageLayerMembers(user, "viewer", layer)).toBe(false);
+		expect(canManageLayerMembers({ id: "u2" }, "editor", layer)).toBe(false);
+		expect(canManageLayerMembers(null, "viewer", layer)).toBe(false);
 	});
 });
 

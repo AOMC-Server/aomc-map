@@ -4,7 +4,7 @@ import type { Db } from "../db/client";
 import { apiTokens, users } from "../db/schema";
 import type { User } from "../types";
 
-export const TOKEN_PREFIX = "aomc_";
+const TOKEN_PREFIX = "aomc_";
 
 export function randomToken(bytes = 32): string {
 	return randomBytes(bytes).toString("base64url");

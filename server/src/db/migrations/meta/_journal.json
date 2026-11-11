@@ -15,6 +15,13 @@
       "when": 1794356946333,
       "tag": "0001_loud_spirit",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1794357504694,
+      "tag": "0002_romantic_talisman",
+      "breakpoints": true
     }
   ]
 }
