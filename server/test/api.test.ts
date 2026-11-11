@@ -36,6 +36,15 @@ describe("setup", () => {
 			"nether",
 			"the_end",
 		]);
+		// Coordinate scales: overworld-like 1, the Nether 8, the End unrelated.
+		expect(
+			Object.fromEntries(
+				body.dimensions.map((d: { slug: string; scale: number | null }) => [
+					d.slug,
+					d.scale,
+				]),
+			),
+		).toEqual({ overworld: 1, overworld_caves: 1, nether: 8, the_end: null });
 		expect(body.role).toBe("viewer");
 		expect(body.limits).toEqual({
 			maxUploadBytes: 200 * 1024 * 1024,
@@ -359,6 +368,57 @@ describe("maps", () => {
 				})
 			).status,
 		).toBe(403);
+	});
+
+	test("dimension scale can be set on creation, changed, cleared, and is validated", async () => {
+		const { app, db } = await boot();
+		const mod = await makeUser(db, "3");
+		const [map] = await db.select().from(maps);
+		await db
+			.insert(mapMembers)
+			.values({ mapId: map?.id as number, userId: "3", role: "moderator" });
+		const h = { ...mod.auth, "Content-Type": "application/json" };
+		const req = (method: string, path: string, body: unknown) =>
+			app.request(path, { method, ...json(body), headers: h });
+		const scaleOf = async (slug: string) =>
+			(await (await app.request("/api/maps/aomc")).json()).dimensions.find(
+				(d: { slug: string }) => d.slug === slug,
+			).scale;
+
+		// No scale given: unrelated.
+		expect(
+			(await req("POST", "/api/maps/aomc/dimensions", { slug: "a", name: "A" }))
+				.status,
+		).toBe(201);
+		expect(await scaleOf("a")).toBeNull();
+		expect(
+			(
+				await req("POST", "/api/maps/aomc/dimensions", {
+					slug: "b",
+					name: "B",
+					scale: 2.5,
+				})
+			).status,
+		).toBe(201);
+		expect(await scaleOf("b")).toBe(2.5);
+
+		expect(
+			(await req("PATCH", "/api/maps/aomc/dimensions/a", { scale: 16 })).status,
+		).toBe(200);
+		expect(await scaleOf("a")).toBe(16);
+		// Other edits leave the scale alone; null clears it.
+		await req("PATCH", "/api/maps/aomc/dimensions/a", { name: "Renamed" });
+		expect(await scaleOf("a")).toBe(16);
+		await req("PATCH", "/api/maps/aomc/dimensions/a", { scale: null });
+		expect(await scaleOf("a")).toBeNull();
+
+		for (const bad of [0, -1, "8", 1_000_001]) {
+			expect(
+				(await req("PATCH", "/api/maps/aomc/dimensions/a", { scale: bad }))
+					.status,
+			).toBe(400);
+		}
+		expect(await scaleOf("a")).toBeNull();
 	});
 
 	test("default map cannot be made private or deleted by an owner", async () => {

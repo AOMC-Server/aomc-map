@@ -22,6 +22,8 @@ export type Dimension = {
 	name: string;
 	sortOrder: number;
 	archived: boolean;
+	/** Overworld blocks per block of this dimension (Nether: 8); null when coordinates are unrelated. */
+	scale: number | null;
 };
 
 export type UploadLimits = {
@@ -190,6 +192,13 @@ export const effectiveRev = computed(() => {
 	const head = currentMap.value?.map.headRev ?? 0;
 	return Math.min(rev.value ?? head, head);
 });
+
+/** Scale of the dimension being viewed (overworld blocks per block), or null if unrelated. */
+export const currentScale = computed(
+	() =>
+		currentMap.value?.dimensions.find((d) => d.slug === dimSlug.value)?.scale ??
+		null,
+);
 
 export const visibleDimensions = computed(
 	() => currentMap.value?.dimensions.filter((d) => !d.archived) ?? [],

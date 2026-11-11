@@ -4,6 +4,7 @@ import {
 	index,
 	integer,
 	primaryKey,
+	real,
 	sqliteTable,
 	text,
 	uniqueIndex,
@@ -105,6 +106,12 @@ export const dimensions = sqliteTable(
 		name: text("name").notNull(),
 		sortOrder: integer("sort_order").notNull().default(0),
 		archived: bool("archived").notNull().default(false),
+		/**
+		 * Blocks of the reference dimension (the overworld, scale 1) that one block of this
+		 * dimension spans: 8 for the Nether. null means the coordinates are not comparable
+		 * with other dimensions (the End).
+		 */
+		scale: real("scale"),
 		createdAt: createdAt(),
 	},
 	(t) => [uniqueIndex("dimensions_map_slug").on(t.mapId, t.slug)],

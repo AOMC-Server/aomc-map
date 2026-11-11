@@ -36,9 +36,20 @@ export const updateMapSchema = z.object({
 });
 export type UpdateMap = z.infer<typeof updateMapSchema>;
 
+/**
+ * Overworld blocks per block of the dimension (1 for the overworld, 8 for the Nether).
+ * null: the coordinates cannot be mapped to other dimensions (the End).
+ */
+export const dimensionScaleSchema = z
+	.number()
+	.positive()
+	.max(1_000_000)
+	.nullable();
+
 export const createDimensionSchema = z.object({
 	slug: slugSchema,
 	name: z.string().trim().min(1).max(100),
+	scale: dimensionScaleSchema.optional(),
 });
 export type CreateDimension = z.infer<typeof createDimensionSchema>;
 
@@ -46,6 +57,7 @@ export const updateDimensionSchema = z.object({
 	name: z.string().trim().min(1).max(100).optional(),
 	sortOrder: z.number().int().optional(),
 	archived: z.boolean().optional(),
+	scale: dimensionScaleSchema.optional(),
 });
 export type UpdateDimension = z.infer<typeof updateDimensionSchema>;
 

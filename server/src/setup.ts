@@ -3,11 +3,12 @@ import type { Db } from "./db/client";
 import { dimensions, mapMembers, maps, pendingOwners } from "./db/schema";
 import type { Env } from "./env";
 
+/** scale: overworld blocks per block of that dimension; null = coordinates are unrelated. */
 const DEFAULT_DIMENSIONS = [
-	{ slug: "overworld", name: "Overworld" },
-	{ slug: "overworld_caves", name: "Overworld Caves" },
-	{ slug: "nether", name: "Nether" },
-	{ slug: "the_end", name: "The End" },
+	{ slug: "overworld", name: "Overworld", scale: 1 },
+	{ slug: "overworld_caves", name: "Overworld Caves", scale: 1 },
+	{ slug: "nether", name: "Nether", scale: 8 },
+	{ slug: "the_end", name: "The End", scale: null },
 ];
 
 /** Creates the default map on first run. Safe to call on every boot. */

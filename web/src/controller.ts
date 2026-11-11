@@ -1,7 +1,7 @@
 import { effect, signal } from "@preact/signals";
 import { api } from "./api";
 import { loadLayers } from "./layers";
-import type { View } from "./map/camera";
+import { convertView, type View } from "./map/camera";
 import { MapView } from "./map/MapView";
 import {
 	currentMap,
@@ -70,6 +70,7 @@ export async function selectMap(
 
 	destroyMap();
 	closeFeatureUi();
+	lastViews.clear();
 	layersData.value = [];
 	currentMap.value = detail;
 	dimSlug.value = dim?.slug ?? null;
@@ -95,11 +96,37 @@ function closeFeatureUi() {
 	popup.value = null;
 }
 
+/** Where you last were in each dimension, for ones whose coordinates can't be converted. */
+const lastViews = new Map<string, View>();
+
+/**
+ * Switches dimension and moves the camera to match. Related dimensions keep showing the same
+ * place (overworld to nether divides coordinates by 8); for an unrelated one (the End) there is
+ * no such place, so you land where you last were there, or at its origin the first time.
+ */
 export function selectDimension(slug: string) {
-	if (visibleDimensions.value.some((d) => d.slug === slug)) {
-		closeFeatureUi();
-		dimSlug.value = slug;
+	if (!visibleDimensions.value.some((d) => d.slug === slug)) return;
+	const detail = currentMap.value;
+	const mv = mapView.value;
+	const from = dimSlug.value;
+	if (detail && mv && from && from !== slug) {
+		const scaleOf = (s: string) =>
+			detail.dimensions.find((d) => d.slug === s)?.scale ?? null;
+		const here = mv.getView();
+		lastViews.set(from, here);
+		const converted = convertView(
+			here,
+			scaleOf(from),
+			scaleOf(slug),
+			detail.maxZoom,
+		);
+		mv.setView(
+			converted ??
+				lastViews.get(slug) ?? { centerX: 0, centerZ: 0, zoom: here.zoom },
+		);
 	}
+	closeFeatureUi();
+	dimSlug.value = slug;
 }
 
 export function setRev(value: number | null) {

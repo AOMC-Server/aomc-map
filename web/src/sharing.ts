@@ -108,11 +108,15 @@ export async function updateMapSettings(patch: {
 	return out !== null;
 }
 
-export async function addDimension(dimSlug: string, name: string) {
+export async function addDimension(
+	dimSlug: string,
+	name: string,
+	scale: number | null = null,
+) {
 	const out = await run(() =>
 		api.api.maps[":slug"].dimensions.$post({
 			param: { slug: slug() },
-			json: { slug: dimSlug, name },
+			json: { slug: dimSlug, name, scale },
 		}),
 	);
 	if (out) await reloadMap();
@@ -121,7 +125,12 @@ export async function addDimension(dimSlug: string, name: string) {
 
 export async function updateDimension(
 	dimSlug: string,
-	patch: { name?: string; sortOrder?: number; archived?: boolean },
+	patch: {
+		name?: string;
+		sortOrder?: number;
+		archived?: boolean;
+		scale?: number | null;
+	},
 ) {
 	const out = await run(() =>
 		api.api.maps[":slug"].dimensions[":dim"].$patch({

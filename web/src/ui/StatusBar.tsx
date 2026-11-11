@@ -1,4 +1,4 @@
-import { activeTool, cursor, view } from "../state";
+import { activeTool, currentScale, cursor, view } from "../state";
 import { clearCopy, copiedPoints, copyStatus } from "../tools/copyCoords";
 import { clearMeasure, measurePoints, measureResult } from "../tools/measure";
 
@@ -19,9 +19,20 @@ export function StatusBar() {
 	const c = cursor.value;
 	const tool = activeTool.value;
 	const result = measureResult.value;
+	const scale = currentScale.value;
+	// In a scaled dimension (the Nether) also show where the cursor is in overworld coordinates.
+	const equivalent =
+		c && scale !== null && scale !== 1
+			? { x: Math.round(c.x * scale), z: Math.round(c.z * scale) }
+			: null;
 	return (
 		<footer class="statusbar">
 			<span class="readout">{c ? `x ${c.x}  z ${c.z}` : "x –  z –"}</span>
+			{c && equivalent && (
+				<span class="equivalent" title="The same place in the overworld">
+					≈ overworld x {equivalent.x} z {equivalent.z}
+				</span>
+			)}
 			<span class="scale">{describeScale(view.value.zoom)}</span>
 
 			{tool === "measure" && (

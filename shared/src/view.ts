@@ -12,6 +12,29 @@ export function clampZoom(zoom: number, maxZoom: number): number {
 	return Math.min(Math.max(zoom, MIN_ZOOM), maxZoom);
 }
 
+/**
+ * The same place in another dimension. `scale` is overworld blocks per block of the dimension
+ * (1 for the overworld, 8 for the Nether), or null when its coordinates can't be related to
+ * others (the End), in which case there is no equivalent and this returns null.
+ *
+ * The view keeps showing the same area: one Nether block covers 8 overworld blocks, so going to
+ * the Nether divides the coordinates by 8 and zooms in by 3 levels (log2 8).
+ */
+export function convertView(
+	view: View,
+	fromScale: number | null,
+	toScale: number | null,
+	maxZoom: number,
+): View | null {
+	if (fromScale === null || toScale === null) return null;
+	const ratio = fromScale / toScale;
+	return {
+		centerX: view.centerX * ratio,
+		centerZ: view.centerZ * ratio,
+		zoom: clampZoom(view.zoom + Math.log2(ratio), maxZoom),
+	};
+}
+
 export function screenToBlock(view: View, size: Size, sx: number, sy: number) {
 	const s = scaleOf(view.zoom);
 	return {

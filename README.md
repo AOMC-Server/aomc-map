@@ -95,6 +95,8 @@ All settings are environment variables (see `.env.example`).
 
 **History.** The _History_ panel has the time slider (tiles and features both follow it) and the upload log. Hover or click an entry to outline its area. While looking at the past editing is off. Moderators can **Revert** an upload and **Restore** it again; this publishes a new revision, so older revisions still show what was there. Feature popups have a _History_ button, and moderators can restore an earlier version of a feature (to bring back a deleted one, slide to a revision where it existed, open its popup, and restore).
 
+**Dimensions and scale.** A dimension's scale is how many overworld blocks one of its blocks covers: 1 for the Overworld and Caves, 8 for the Nether, and none for the End, whose coordinates don't correspond to anything. Switching between dimensions that have a scale keeps showing the same place (Overworld → Nether divides the coordinates by 8 and zooms in three levels), and the status bar shows the overworld equivalent of the cursor while you are in a scaled dimension. Switching to or from a dimension without a scale can't map anything, so the view returns to wherever you last were in that dimension (its origin the first time). Scales are set in _Manage → Dimensions_; existing installs get the usual values for the standard dimension names when they upgrade.
+
 **Roles.** _viewer_ can look, _editor_ can upload and edit, _moderator_ can also revert uploads and restore features (and manage dimensions on the main map), _owner_ can also manage members, invites and settings. Logged-in visitors of the public main map are implicit editors; anonymous visitors are viewers.
 
 **Managing the map** (_Manage_ in the toolbar):

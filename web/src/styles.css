@@ -713,6 +713,24 @@ textarea {
 	opacity: 0.55;
 }
 
+.dim-scale {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-top: 4px;
+	font-size: 12px;
+}
+
+.dim-scale input,
+.scale-input {
+	width: 64px;
+	padding: 3px 6px;
+}
+
+.equivalent {
+	color: #9aa0aa;
+}
+
 .dim-slug {
 	display: block;
 	font-size: 11px;

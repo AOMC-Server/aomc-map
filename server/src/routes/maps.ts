@@ -88,6 +88,7 @@ export const mapRoutes = new Hono<AppEnv>()
 				name: d.name,
 				sortOrder: d.sortOrder,
 				archived: d.archived,
+				scale: d.scale,
 			})),
 		});
 	})

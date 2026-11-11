@@ -1,4 +1,5 @@
 import { useState } from "preact/hooks";
+import { describeDimensionScale, formatScale, parseScale } from "../scale";
 import { addDimension, updateDimension, updateMapSettings } from "../sharing";
 import { slugify } from "../slug";
 import { currentMap, type Dimension, mapPanelOpen } from "../state";
@@ -79,6 +80,7 @@ function DimensionRow(props: {
 }) {
 	const { d, all, index } = props;
 	const [name, setName] = useState(d.name);
+	const [scale, setScale] = useState(formatScale(d.scale));
 	const prev = all[index - 1];
 	const next = all[index + 1];
 
@@ -112,6 +114,28 @@ function DimensionRow(props: {
 					}}
 				/>
 				<span class="muted dim-slug">{d.slug}</span>
+				<label class="dim-scale" title={describeDimensionScale(d.scale)}>
+					<span class="muted">Scale ×</span>
+					<input
+						type="text"
+						inputMode="decimal"
+						placeholder="none"
+						value={scale}
+						aria-label={`Coordinate scale of ${d.slug}`}
+						onInput={(e) => setScale(e.currentTarget.value)}
+						onBlur={() => {
+							const parsed = parseScale(scale);
+							if (parsed === undefined || parsed === d.scale) {
+								setScale(formatScale(d.scale));
+								return;
+							}
+							props.run(() => updateDimension(d.slug, { scale: parsed }));
+						}}
+						onKeyDown={(e) => {
+							if (e.key === "Enter") e.currentTarget.blur();
+						}}
+					/>
+				</label>
 			</div>
 			<div class="group">
 				<button
@@ -151,6 +175,7 @@ function DimensionsTab() {
 	const detail = currentMap.value;
 	const [newName, setNewName] = useState("");
 	const [newSlug, setNewSlug] = useState("");
+	const [newScale, setNewScale] = useState("");
 	const [slugTouched, setSlugTouched] = useState(false);
 	const [busy, setBusy] = useState(false);
 	if (!detail) return null;
@@ -168,11 +193,14 @@ function DimensionsTab() {
 		e.preventDefault();
 		const slug = newSlug || slugify(newName);
 		if (!newName.trim() || !slug) return;
+		const scale = parseScale(newScale);
+		if (scale === undefined) return;
 		await run(async () => {
-			const ok = await addDimension(slug, newName.trim());
+			const ok = await addDimension(slug, newName.trim(), scale);
 			if (ok) {
 				setNewName("");
 				setNewSlug("");
+				setNewScale("");
 				setSlugTouched(false);
 			}
 			return ok;
@@ -185,10 +213,17 @@ function DimensionsTab() {
 				Archived dimensions disappear from the dimension picker but keep their
 				tiles and history. Dimensions cannot be deleted.
 			</p>
+			<p class="muted">
+				<b>Scale</b> relates a dimension's coordinates to the overworld: 1 for
+				the overworld, 8 for the Nether (one Nether block is 8 overworld
+				blocks). Switching between dimensions with a scale keeps showing the
+				same place. Leave it empty for a dimension like the End, whose
+				coordinates don't correspond to anything.
+			</p>
 			<ul class="dimension-list">
 				{dims.map((d, i) => (
 					<DimensionRow
-						key={`${d.slug}:${d.name}:${d.sortOrder}`}
+						key={`${d.slug}:${d.name}:${d.sortOrder}:${d.scale}`}
 						d={d}
 						index={i}
 						all={dims}
@@ -220,10 +255,24 @@ function DimensionsTab() {
 						setNewSlug(e.currentTarget.value.toLowerCase());
 					}}
 				/>
+				<input
+					type="text"
+					inputMode="decimal"
+					class="scale-input"
+					placeholder="scale"
+					aria-label="Coordinate scale of the new dimension"
+					value={newScale}
+					onInput={(e) => setNewScale(e.currentTarget.value)}
+				/>
 				<button
 					type="submit"
 					class="btn"
-					disabled={busy || !newName.trim() || !newSlug}
+					disabled={
+						busy ||
+						!newName.trim() ||
+						!newSlug ||
+						parseScale(newScale) === undefined
+					}
 				>
 					Add
 				</button>

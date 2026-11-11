@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	blockToScreen,
 	clampZoom,
+	convertView,
 	panBy,
 	screenToBlock,
 	tileLevel,
@@ -55,6 +56,56 @@ describe("panBy", () => {
 			centerX: 95,
 			centerZ: -60,
 		});
+	});
+});
+
+describe("convertView between dimensions", () => {
+	const at: View = { centerX: 800, centerZ: -160, zoom: 1 };
+
+	test("overworld to nether divides coordinates by 8 and zooms in 3 levels to keep the same area", () => {
+		expect(convertView(at, 1, 8, 8)).toEqual({
+			centerX: 100,
+			centerZ: -20,
+			zoom: -2,
+		});
+	});
+
+	test("nether to overworld multiplies by 8 and zooms out", () => {
+		expect(
+			convertView({ centerX: 100, centerZ: -20, zoom: -2 }, 8, 1, 8),
+		).toEqual(at);
+	});
+
+	test("the visible area is preserved: the same overworld block sits at the same pixel", () => {
+		const size = { width: 800, height: 600 };
+		const nether = convertView(at, 1, 8, 8) as View;
+		// Overworld block (880, -100) is Nether block (110, -12.5).
+		const a = blockToScreen(at, size, 880, -100);
+		const b = blockToScreen(nether, size, 110, -12.5);
+		expect(b.x).toBeCloseTo(a.x, 6);
+		expect(b.y).toBeCloseTo(a.y, 6);
+	});
+
+	test("dimensions with the same scale keep the view as it is", () => {
+		expect(convertView(at, 1, 1, 8)).toEqual(at);
+		expect(convertView(at, 8, 8, 8)).toEqual(at);
+	});
+
+	test("a dimension without a scale has no equivalent place", () => {
+		expect(convertView(at, 1, null, 8)).toBeNull();
+		expect(convertView(at, null, 8, 8)).toBeNull();
+		expect(convertView(at, null, null, 8)).toBeNull();
+	});
+
+	test("the zoom stays within the allowed range", () => {
+		expect(convertView({ ...at, zoom: -3 }, 1, 8, 8)?.zoom).toBe(-4);
+		expect(convertView({ ...at, zoom: 7 }, 8, 1, 8)?.zoom).toBe(8);
+	});
+
+	test("custom scales work (e.g. a 1:2 dimension)", () => {
+		expect(convertView({ centerX: 10, centerZ: 10, zoom: 0 }, 1, 2, 8)).toEqual(
+			{ centerX: 5, centerZ: 5, zoom: -1 },
+		);
 	});
 });
 

@@ -38,6 +38,7 @@ export const dimensionRoutes = new Hono<AppEnv>()
 						mapId: access.map.id,
 						slug: body.slug,
 						name: body.name,
+						scale: body.scale ?? null,
 						sortOrder: Math.max(-1, ...existing.map((d) => d.sortOrder)) + 1,
 					})
 					.returning();
@@ -68,6 +69,7 @@ export const dimensionRoutes = new Hono<AppEnv>()
 					name: body.name,
 					sortOrder: body.sortOrder,
 					archived: body.archived,
+					scale: body.scale,
 				})
 				.where(
 					and(
