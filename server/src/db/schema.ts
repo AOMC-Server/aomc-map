@@ -1,6 +1,10 @@
 import {
 	DEFAULT_PRELOAD,
 	DIMENSION_THEMES,
+	FEATURE_TYPES,
+	layerRoleSchema,
+	layerVisibilitySchema,
+	memberRoleSchema,
 	type PreloadRing,
 	TOKEN_SCOPES,
 	type TokenScope,
@@ -14,6 +18,9 @@ import {
 	text,
 } from "drizzle-orm/sqlite-core";
 
+/** The values of a zod enum, as drizzle wants them. */
+const options = <T extends string>(schema: { options: T[] }) =>
+	schema.options as [T, ...T[]];
 const id = () => integer("id").primaryKey({ autoIncrement: true });
 const bool = (name: string) => integer(name, { mode: "boolean" });
 const createdAt = () =>
@@ -71,7 +78,7 @@ export const members = sqliteTable("members", {
 	userId: text("user_id")
 		.primaryKey()
 		.references(() => users.id, { onDelete: "cascade" }),
-	role: text("role", { enum: ["moderator", "owner"] }).notNull(),
+	role: text("role", { enum: options(memberRoleSchema) }).notNull(),
 	createdAt: createdAt(),
 });
 
@@ -103,35 +110,42 @@ export const dimensions = sqliteTable("dimensions", {
 	createdAt: createdAt(),
 });
 
-export const revisions = sqliteTable("revisions", {
-	id: id(),
-	rev: integer("rev").unique(), // assigned when the job completes
-	// "revert" and "unrevert" only exist in history from before uploads could be deleted.
-	kind: text("kind", { enum: ["upload", "revert", "unrevert"] }).notNull(),
-	dimensionId: integer("dimension_id").references(() => dimensions.id),
-	authorId: text("author_id")
-		.notNull()
-		.references(() => users.id),
-	targetRevisionId: integer("target_revision_id"),
-	status: text("status", {
-		enum: ["pending", "processing", "done", "failed"],
-	})
-		.notNull()
-		.default("pending"),
-	error: text("error"),
-	bboxMinX: integer("bbox_min_x"),
-	bboxMinZ: integer("bbox_min_z"),
-	bboxMaxX: integer("bbox_max_x"),
-	bboxMaxZ: integer("bbox_max_z"),
-	fileCount: integer("file_count").notNull().default(0),
-	/** Sent by the in-game mod (its User-Agent matched MOD_USER_AGENTS); for statistics only. */
-	viaMod: bool("via_mod").notNull().default(false),
-	reverted: bool("reverted").notNull().default(false),
-	createdAt: createdAt(),
-	/** When the uploaded export was made (from its file name); null = when it was uploaded. */
-	exportedAt: integer("exported_at"),
-	completedAt: integer("completed_at"),
-});
+export const revisions = sqliteTable(
+	"revisions",
+	{
+		id: id(),
+		rev: integer("rev").unique(), // assigned when the job completes
+		// "revert" and "unrevert" only exist in history from before uploads could be deleted.
+		kind: text("kind", { enum: ["upload", "revert", "unrevert"] }).notNull(),
+		dimensionId: integer("dimension_id").references(() => dimensions.id),
+		authorId: text("author_id")
+			.notNull()
+			.references(() => users.id),
+		targetRevisionId: integer("target_revision_id"),
+		status: text("status", {
+			enum: ["pending", "processing", "done", "failed"],
+		})
+			.notNull()
+			.default("pending"),
+		error: text("error"),
+		bboxMinX: integer("bbox_min_x"),
+		bboxMinZ: integer("bbox_min_z"),
+		bboxMaxX: integer("bbox_max_x"),
+		bboxMaxZ: integer("bbox_max_z"),
+		fileCount: integer("file_count").notNull().default(0),
+		/** Sent by the in-game mod (its User-Agent matched MOD_USER_AGENTS); for statistics only. */
+		viaMod: bool("via_mod").notNull().default(false),
+		reverted: bool("reverted").notNull().default(false),
+		createdAt: createdAt(),
+		/** When the uploaded export was made (from its file name); null = when it was uploaded. */
+		exportedAt: integer("exported_at"),
+		completedAt: integer("completed_at"),
+	},
+	(t) => [
+		index("revisions_dimension_status").on(t.dimensionId, t.status),
+		index("revisions_author").on(t.authorId),
+	],
+);
 
 export const uploadPatches = sqliteTable(
 	"upload_patches",
@@ -143,7 +157,10 @@ export const uploadPatches = sqliteTable(
 		tileY: integer("tile_y").notNull(),
 		blobHash: text("blob_hash").notNull(),
 	},
-	(t) => [primaryKey({ columns: [t.revisionId, t.tileX, t.tileY] })],
+	(t) => [
+		primaryKey({ columns: [t.revisionId, t.tileX, t.tileY] }),
+		index("upload_patches_tile").on(t.tileX, t.tileY),
+	],
 );
 
 export const tileVersions = sqliteTable(
@@ -173,7 +190,7 @@ export const layers = sqliteTable(
 		name: text("name").notNull(),
 		color: text("color").notNull(),
 		hiddenByDefault: bool("hidden_by_default").notNull().default(false),
-		visibility: text("visibility", { enum: ["public", "private"] })
+		visibility: text("visibility", { enum: options(layerVisibilitySchema) })
 			.notNull()
 			.default("public"),
 		sortOrder: integer("sort_order").notNull().default(0),
@@ -195,20 +212,24 @@ export const layerMembers = sqliteTable(
 		userId: text("user_id")
 			.notNull()
 			.references(() => users.id, { onDelete: "cascade" }),
-		role: text("role", { enum: ["viewer", "editor"] }).notNull(),
+		role: text("role", { enum: options(layerRoleSchema) }).notNull(),
 	},
 	(t) => [primaryKey({ columns: [t.layerId, t.userId] })],
 );
 
-export const features = sqliteTable("features", {
-	id: id(),
-	layerId: integer("layer_id")
-		.notNull()
-		.references(() => layers.id, { onDelete: "cascade" }),
-	/** Position in the layer (lower first). Not versioned: reordering is not an edit of the feature. */
-	sortOrder: integer("sort_order").notNull().default(0),
-	createdAt: createdAt(),
-});
+export const features = sqliteTable(
+	"features",
+	{
+		id: id(),
+		layerId: integer("layer_id")
+			.notNull()
+			.references(() => layers.id, { onDelete: "cascade" }),
+		/** Position in the layer (lower first). Not versioned: reordering is not an edit of the feature. */
+		sortOrder: integer("sort_order").notNull().default(0),
+		createdAt: createdAt(),
+	},
+	(t) => [index("features_layer_order").on(t.layerId, t.sortOrder)],
+);
 
 export const featureRevisions = sqliteTable(
 	"feature_revisions",
@@ -222,13 +243,16 @@ export const featureRevisions = sqliteTable(
 			.references(() => users.id),
 		createdAt: createdAt(),
 		deleted: bool("deleted").notNull().default(false),
-		type: text("type", { enum: ["pin", "line", "polygon"] }).notNull(),
+		type: text("type", { enum: FEATURE_TYPES }).notNull(),
 		name: text("name").notNull(),
 		popup: text("popup").notNull().default(""),
 		color: text("color"),
 		geometry: text("geometry", { mode: "json" }).notNull(),
 	},
-	(t) => [index("feature_revisions_feature").on(t.featureId, t.createdAt)],
+	(t) => [
+		index("feature_revisions_feature").on(t.featureId, t.createdAt),
+		index("feature_revisions_author").on(t.authorId),
+	],
 );
 
 export const invites = sqliteTable("invites", {
@@ -299,6 +323,7 @@ export const trafficHourly = sqliteTable(
 		s2xx: integer("s2xx").notNull().default(0),
 		s3xx: integer("s3xx").notNull().default(0),
 		s4xx: integer("s4xx").notNull().default(0),
+		s5xx: integer("s5xx").notNull().default(0),
 	},
 	(t) => [primaryKey({ columns: [t.hour, t.category, t.domain] })],
 );

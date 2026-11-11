@@ -19,6 +19,7 @@ const PREVIEW_H = 630;
 const BACKGROUND = { r: 27, g: 29, b: 34, alpha: 1 };
 const MAX_TILES = 150;
 const MAX_CONCURRENT = 2;
+const MAX_WAITING = 20;
 
 export type PreviewParams = {
 	dimensionId: number;
@@ -31,6 +32,26 @@ export type PreviewParams = {
 	/** Changes when history is rewritten; see `map_info.epoch`. */
 	epoch: number;
 };
+
+/** The render queue is full. */
+export class PreviewBusyError extends Error {}
+/** The caller may not start another render right now. */
+export class PreviewLimitError extends Error {}
+
+/**
+ * Rounds a view so that nearby requests share one picture: the zoom to half levels and the
+ * centre to about 16 screen pixels, which is the most the marker moves.
+ */
+export function snapParams(p: PreviewParams): PreviewParams {
+	const zoom = Math.round(p.zoom * 2) / 2;
+	const step = 2 ** Math.max(0, Math.floor(zoom) + 4);
+	return {
+		...p,
+		zoom,
+		x: Math.round(p.x / step) * step,
+		z: Math.round(p.z / step) * step,
+	};
+}
 
 const SIZE: Size = { width: PREVIEW_W, height: PREVIEW_H };
 
@@ -152,7 +173,10 @@ export async function pruneCache(dir: string, max: number) {
 	}
 }
 
-/** Disk cache plus: identical concurrent requests share one render, and renders run two at a time. */
+/**
+ * Disk cache plus: identical concurrent requests share one render, and renders run two at a
+ * time, with a bounded queue (`PreviewBusyError` when it is full).
+ */
 export function createPreviewService(opts: {
 	cacheDir: string;
 	maxCached: number;
@@ -163,9 +187,10 @@ export function createPreviewService(opts: {
 	let writes = 0;
 
 	async function slot<T>(fn: () => Promise<T>): Promise<T> {
-		if (running >= MAX_CONCURRENT)
+		if (running >= MAX_CONCURRENT) {
+			if (waiting.length >= MAX_WAITING) throw new PreviewBusyError();
 			await new Promise<void>((resolve) => waiting.push(resolve));
-		else running++;
+		} else running++;
 		try {
 			return await fn();
 		} finally {
@@ -177,7 +202,14 @@ export function createPreviewService(opts: {
 	}
 
 	return {
-		async get(db: Db, blobs: BlobStore, p: PreviewParams): Promise<Buffer> {
+		/** `admit` is asked before a render is started; false answers with `PreviewLimitError`. */
+		async get(
+			db: Db,
+			blobs: BlobStore,
+			params: PreviewParams,
+			admit: () => boolean = () => true,
+		): Promise<Buffer> {
+			const p = snapParams(params);
 			const key = previewCacheKey(p);
 			const file = join(opts.cacheDir, `${key}.png`);
 			const cached = Bun.file(file);
@@ -185,6 +217,7 @@ export function createPreviewService(opts: {
 
 			let job = inFlight.get(key);
 			if (!job) {
+				if (!admit()) throw new PreviewLimitError();
 				job = slot(async () => {
 					const png = await renderPreview(db, blobs, p);
 					await mkdir(opts.cacheDir, { recursive: true });

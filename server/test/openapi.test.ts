@@ -84,4 +84,43 @@ describe("OpenAPI spec", () => {
 			"application/json",
 		);
 	});
+
+	test("documents the validation error and the extra statuses", async () => {
+		const { app } = makeTestApp();
+		const spec = (await (await app.request("/api/openapi.json")).json()) as {
+			paths: Record<
+				string,
+				Record<
+					string,
+					{
+						responses: Record<
+							string,
+							{
+								content?: {
+									"application/json": {
+										schema: {
+											properties: Record<string, unknown>;
+											required: string[];
+										};
+									};
+								};
+							}
+						>;
+					}
+				>
+			>;
+		};
+		const bad =
+			spec.paths["/api/layers"]?.post?.responses["400"]?.content?.[
+				"application/json"
+			].schema;
+		expect(bad?.required).toEqual(["error"]);
+		expect(Object.keys(bad?.properties ?? {})).toEqual(["error", "issues"]);
+		const preview = spec.paths["/api/preview.png"]?.get?.responses;
+		expect(Object.keys(preview ?? {})).toEqual(
+			expect.arrayContaining(["429", "503"]),
+		);
+		const patch = spec.paths["/api/features/{id}"]?.patch?.responses;
+		expect(Object.keys(patch ?? {})).toContain("409");
+	});
 });

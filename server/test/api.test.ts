@@ -98,6 +98,9 @@ describe("setup", () => {
 			maxUploadBytes: 200 * 1024 * 1024,
 			maxFilesPerUpload: 2000,
 			selfDeleteWindowHours: 24,
+			maxJsonBytes: 16 * 1024 * 1024,
+			maxFeaturesPerLayer: 5000,
+			maxLayersPerUser: 50,
 		});
 	});
 
@@ -262,9 +265,10 @@ describe("api tokens", () => {
 		});
 		expect((await me.json()).user.id).toBe("1");
 
-		const list = await (
-			await app.request("/api/tokens", { headers: u.auth })
-		).json();
+		expect((await app.request("/api/tokens", { headers: u.auth })).status).toBe(
+			403,
+		);
+		const list = await (await app.request("/api/tokens", { headers })).json();
 		expect(list.tokens).toHaveLength(2);
 		expect(JSON.stringify(list)).not.toContain(token);
 

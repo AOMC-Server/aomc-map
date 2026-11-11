@@ -46,6 +46,25 @@ describe("static web app", () => {
 		}
 	});
 
+	test("the app shell is never cached, so a new build is picked up", async () => {
+		const { app } = makeTestApp({ WEB_DIST: makeDist() });
+		for (const path of ["/", "/invite/abc", "/some/deep/link"]) {
+			const res = await app.request(path);
+			expect(res.headers.get("cache-control")).toBe("no-cache");
+		}
+	});
+
+	test("unknown API, auth and blob paths are 404s for every method", async () => {
+		const { app } = makeTestApp({ WEB_DIST: makeDist() });
+		for (const method of ["POST", "PUT", "DELETE"]) {
+			for (const path of ["/api/nope", "/auth/nope", "/blobs/nope"]) {
+				const res = await app.request(path, { method });
+				expect(res.status).toBe(404);
+				expect(res.headers.get("content-type")).toContain("application/json");
+			}
+		}
+	});
+
 	test("without a build the API still works and / is a 404", async () => {
 		const { app } = makeTestApp({
 			WEB_DIST: join(tmpdir(), "aomc-no-such-dist"),

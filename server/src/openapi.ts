@@ -1,3 +1,4 @@
+import { MAX_JSON_BYTES } from "@aomc/shared";
 import { describeRoute } from "hono-openapi";
 
 export const apiDescription = [
@@ -5,7 +6,7 @@ export const apiDescription = [
 	"Tokens are created on the Settings page or with `POST /api/tokens` (session only).",
 	"A token has scopes (`read`, `upload`, `features`, `moderate`, `manage`) and never more access than its user: without `read`, GETs are answered as to an anonymous visitor; a write outside its scopes answers 403.",
 	"Writes made with a cookie must come from `PUBLIC_URL` (CSRF check); Bearer requests need no such check.",
-	'Errors are JSON `{"error": "…"}`. Resources you may not see answer 404.',
+	`Errors are JSON \`{"error": "…"}\`; a request that fails validation (400) also lists \`issues\`, each with a \`path\` and a \`message\`. JSON bodies are limited to ${MAX_JSON_BYTES / 1024 / 1024} MB (413). Resources you may not see answer 404.`,
 ].join(" ");
 
 export const securitySchemes = {
@@ -41,30 +42,49 @@ const requiresLogin: Record<string, string[]>[] = [
 	{ session: [] },
 ];
 
-const errorResponse = (description: string) => ({
+const errorResponse = (
+	description: string,
+	properties: Record<string, unknown> = {},
+) => ({
 	description,
 	content: {
 		"application/json": {
 			schema: {
 				type: "object" as const,
-				properties: { error: { type: "string" as const } },
+				properties: { error: { type: "string" as const }, ...properties },
 				required: ["error"],
 			},
 		},
 	},
 });
 
+const issues = {
+	type: "array" as const,
+	items: {
+		type: "object" as const,
+		properties: {
+			path: {
+				type: "array" as const,
+				items: { oneOf: [{ type: "string" }, { type: "number" }] },
+			},
+			message: { type: "string" as const },
+		},
+		required: ["path", "message"],
+	},
+};
+
 /** Status codes that need no per-route text. */
 export const errors = {
-	400: errorResponse("Invalid request"),
+	400: errorResponse("Invalid request", { issues }),
 	401: errorResponse("Not logged in"),
 	403: errorResponse("Not allowed"),
 	404: errorResponse("Not found, or not visible to you"),
-	409: errorResponse("Conflict"),
+	409: errorResponse("Conflict, or the data changed since you read it"),
 	410: errorResponse("Gone: expired, revoked or used up"),
-	413: errorResponse("Upload too large"),
+	413: errorResponse("Request body too large"),
 	429: errorResponse("Rate limited"),
 	502: errorResponse("Discord could not be reached"),
+	503: errorResponse("Busy, try again shortly"),
 } as const;
 
 type Doc = {

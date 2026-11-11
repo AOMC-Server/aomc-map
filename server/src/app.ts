@@ -1,4 +1,7 @@
+import { MAX_JSON_BYTES } from "@aomc/shared";
 import { Hono, type MiddlewareHandler } from "hono";
+import { bodyLimit } from "hono/body-limit";
+import { HTTPException } from "hono/http-exception";
 import { openAPIRouteHandler } from "hono-openapi";
 import { asyncApiDocument } from "./asyncapi";
 import { isRead, roleCap, scopeMiddleware } from "./auth/scopes";
@@ -8,6 +11,7 @@ import { docsRoutes } from "./docs";
 import type { Env } from "./env";
 import { apiDescription, securitySchemes, tags } from "./openapi";
 import { atLeast, loadAccess } from "./permissions";
+import { limitWrites } from "./ratelimit";
 import { adminRoutes } from "./routes/admin";
 import { authRoutes } from "./routes/auth";
 import { blobRoutes } from "./routes/blobs";
@@ -25,6 +29,14 @@ import { statsRoutes } from "./routes/stats";
 import { tokenRoutes } from "./routes/tokens";
 import type { Services } from "./services";
 import type { AppEnv } from "./types";
+
+const isUpload = (path: string) =>
+	/^\/api\/dimensions\/[^/]+\/uploads\/?$/.test(path);
+
+const jsonLimit = bodyLimit({
+	maxSize: MAX_JSON_BYTES,
+	onError: (c) => c.json({ error: "request body too large" }, 413),
+});
 
 export type AppDeps = {
 	db: Db;
@@ -45,6 +57,7 @@ export function createApp({ db, env, services, fetch: fetchFn }: AppDeps) {
 			await next();
 		})
 		.use(services.traffic.middleware)
+		.use((c, next) => (isUpload(c.req.path) ? next() : jsonLimit(c, next)))
 		// Registered before auth: blobs are public and need no user lookup.
 		.route("/blobs", blobRoutes)
 		.use(authMiddleware)
@@ -58,6 +71,8 @@ export function createApp({ db, env, services, fetch: fetchFn }: AppDeps) {
 			c.set("role", cap && !atLeast(cap, role) ? cap : role);
 			await next();
 		})
+		.use("/api/layers/*", limitWrites)
+		.use("/api/features/*", limitWrites)
 		.route("/auth", authRoutes(fetchFn))
 		.route("/api/me", meRoutes)
 		.route("/api/tokens", tokenRoutes)
@@ -94,6 +109,15 @@ export function createApp({ db, env, services, fetch: fetchFn }: AppDeps) {
 			"/",
 			staticRoutes(env.WEB_DIST ?? `${import.meta.dir}/../../web/dist`),
 		);
+	app.onError((err, c) => {
+		if (err instanceof HTTPException) {
+			// A handler may carry its own response; otherwise answer in the API's error format.
+			if (err.res) return err.getResponse();
+			return c.json({ error: err.message || "request failed" }, err.status);
+		}
+		console.error(err);
+		return c.json({ error: "internal server error" }, 500);
+	});
 	self = app;
 	return app;
 }

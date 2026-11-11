@@ -2,7 +2,8 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { readdirSync, utimesSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import sharp from "sharp";
-import { pruneCache } from "../src/preview";
+import { type PreviewParams, pruneCache, snapParams } from "../src/preview";
+import { createRateLimiter } from "../src/ratelimit";
 
 afterAll(cleanupTempDirs);
 
@@ -135,7 +136,7 @@ describe("/api/preview.png", () => {
 
 		await t.app.request(url); // served from disk
 		expect(cacheFiles(t)).toHaveLength(1);
-		await t.app.request("/api/preview.png?x=17&z=8&zoom=-2");
+		await t.app.request("/api/preview.png?x=20&z=8&zoom=-2");
 		expect(cacheFiles(t)).toHaveLength(2);
 		// Same view with the default rev spelled out is the same picture.
 		await t.app.request("/api/preview.png?x=16&z=8&zoom=-2&rev=2");
@@ -150,6 +151,93 @@ describe("/api/preview.png", () => {
 			"/api/preview.png?x=16&z=8&zoom=-2&rev=1",
 		);
 		expect(pinned.headers.get("cache-control")).toBe("public, max-age=86400");
+		const head = await t.app.request("/api/preview.png?x=16&z=8&zoom=-2&rev=2");
+		expect(head.headers.get("cache-control")).toBe("public, max-age=86400");
+		// A revision that does not exist yet may still become something else.
+		const future = await t.app.request(
+			"/api/preview.png?x=16&z=8&zoom=-2&rev=999",
+		);
+		expect(future.headers.get("cache-control")).toBe("public, max-age=300");
+	});
+
+	test("nearby views share one picture", async () => {
+		const t = await withTiles();
+		await t.app.request("/api/preview.png?x=16&z=8&zoom=-2");
+		await t.app.request("/api/preview.png?x=17&z=9&zoom=-2.2");
+		await t.app.request("/api/preview.png?x=15&z=7&zoom=-1.8");
+		expect(cacheFiles(t)).toHaveLength(1);
+	});
+
+	test("renders are limited per client, cached pictures are free", async () => {
+		const t = await withTiles();
+		t.services.previewLimiter = createRateLimiter(2);
+		const get = (x: number) => t.app.request(`/api/preview.png?x=${x}&zoom=-2`);
+		expect((await get(0)).status).toBe(200);
+		expect((await get(4)).status).toBe(200);
+		const limited = await get(8);
+		expect(limited.status).toBe(429);
+		expect((await limited.json()).error).toBeString();
+		expect((await get(0)).status).toBe(200);
+		expect(cacheFiles(t)).toHaveLength(2);
+
+		// Another client has its own allowance.
+		const other = await t.app.request("/api/preview.png?x=8&zoom=-2", {
+			headers: { "X-Forwarded-For": "203.0.113.9" },
+		});
+		expect(other.status).toBe(200);
+	});
+
+	test("a full render queue answers 503", async () => {
+		const t = await withTiles();
+		t.services.previewLimiter = createRateLimiter(10_000);
+		const responses = await Promise.all(
+			Array.from({ length: 60 }, (_, i) =>
+				t.app.request(`/api/preview.png?x=${i * 4}&z=0&zoom=-2`),
+			),
+		);
+		const statuses = responses.map((r) => r.status);
+		expect(statuses.every((s) => s === 200 || s === 503)).toBe(true);
+		expect(statuses).toContain(503);
+		expect(statuses).toContain(200);
+		const busy = responses.find((r) => r.status === 503) as Response;
+		expect(busy.headers.get("retry-after")).toBe("5");
+		expect(((await busy.json()) as { error: string }).error).toBeString();
+	});
+});
+
+describe("snapParams", () => {
+	const base: PreviewParams = {
+		dimensionId: 1,
+		tileSize: 512,
+		maxZoom: 8,
+		x: 0,
+		z: 0,
+		zoom: 0,
+		rev: 1,
+		epoch: 0,
+	};
+
+	test("zoom goes to half levels", () => {
+		expect(snapParams({ ...base, zoom: 0.24 }).zoom).toBe(0);
+		expect(snapParams({ ...base, zoom: 0.26 }).zoom).toBe(0.5);
+		expect(snapParams({ ...base, zoom: -2.2 }).zoom).toBe(-2);
+		expect(snapParams({ ...base, zoom: 8 }).zoom).toBe(8);
+	});
+
+	test("the centre goes to a grid of about 16 screen pixels", () => {
+		// 16 blocks at 1:1, 64 blocks at 4 blocks per pixel, single blocks when zoomed in far.
+		expect(snapParams({ ...base, zoom: 0, x: 9, z: -9 })).toMatchObject({
+			x: 16,
+			z: -16,
+		});
+		expect(snapParams({ ...base, zoom: 2, x: 100, z: 20 })).toMatchObject({
+			x: 128,
+			z: 0,
+		});
+		expect(snapParams({ ...base, zoom: -6, x: 1234, z: -77 })).toMatchObject({
+			x: 1234,
+			z: -77,
+		});
 	});
 });
 

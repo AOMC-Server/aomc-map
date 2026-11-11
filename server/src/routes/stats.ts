@@ -1,20 +1,25 @@
-import { type StatsRange, statsQuerySchema } from "@aomc/shared";
+import {
+	FEATURE_TYPES,
+	type FeatureType,
+	type StatsRange,
+	statsQuerySchema,
+} from "@aomc/shared";
 import { inArray, type SQL, sql } from "drizzle-orm";
 import { Hono } from "hono";
-import { validator } from "hono-openapi";
 import type { Db } from "../db/client";
 import { users } from "../db/schema";
 import { doc } from "../openapi";
+import { DAY, HOUR } from "../traffic";
 import type { AppEnv } from "../types";
+import { validate } from "../validate";
 
-const DAY = 24 * 3600_000;
+/** How long the figures that are the same for everyone are reused. */
+const CACHE_MS = 60_000;
 const RANGE_DAYS: Record<StatsRange, number | null> = {
 	all: null,
 	"30d": 30,
 	"7d": 7,
 };
-
-type FeatureType = "pin" | "line" | "polygon";
 
 export type UserStats = {
 	uploads: number;
@@ -59,6 +64,15 @@ type Scope = {
 	publicOnly: boolean;
 };
 
+/** Finished uploads (revision `r`) that still count. */
+const DONE_UPLOAD = sql.raw(
+	"r.kind = 'upload' AND r.status = 'done' AND r.reverted = 0",
+);
+
+/** The uploads of `DONE_UPLOAD` that completed since `since`. */
+const uploadedSince = (since: number) =>
+	sql`${DONE_UPLOAD} AND COALESCE(r.completed_at, r.created_at) >= ${since}`;
+
 const FIRST_REVISION = sql.raw(
 	"(SELECT MIN(id) FROM feature_revisions WHERE feature_id = fr.feature_id)",
 );
@@ -99,8 +113,7 @@ function collect(db: Db, s: Scope): Map<string, UserStats> {
 			COUNT(p.revision_id) AS tiles,
 			COUNT(DISTINCT r.dimension_id || ':' || p.tile_x || ':' || p.tile_y) AS area
 		FROM revisions r LEFT JOIN upload_patches p ON p.revision_id = r.id
-		WHERE r.kind = 'upload' AND r.status = 'done' AND r.reverted = 0
-			AND COALESCE(r.completed_at, r.created_at) >= ${s.since} ${byUser("r.author_id", s)}
+		WHERE ${uploadedSince(s.since)} ${byUser("r.author_id", s)}
 		GROUP BY r.author_id`);
 	for (const r of uploads) {
 		const row = get(r.userId);
@@ -153,7 +166,7 @@ function totalsOf(db: Db, s: Scope, rows: UserStats[]): UserStats {
 		total.tiles += r.tiles;
 		total.uploadedBlocks += r.uploadedBlocks;
 		total.featuresCreated += r.featuresCreated;
-		for (const t of ["pin", "line", "polygon"] as const)
+		for (const t of FEATURE_TYPES)
 			total.featuresByType[t] += r.featuresByType[t];
 		total.featureEdits += r.featureEdits;
 		total.layersCreated += r.layersCreated;
@@ -162,8 +175,7 @@ function totalsOf(db: Db, s: Scope, rows: UserStats[]): UserStats {
 		SELECT COUNT(*) AS area, COALESCE(SUM(viaMod), 0) AS modArea FROM (
 			SELECT r.dimension_id, p.tile_x, p.tile_y, MAX(r.via_mod) AS viaMod
 			FROM revisions r JOIN upload_patches p ON p.revision_id = r.id
-			WHERE r.kind = 'upload' AND r.status = 'done' AND r.reverted = 0
-				AND COALESCE(r.completed_at, r.created_at) >= ${s.since}
+			WHERE ${uploadedSince(s.since)}
 			GROUP BY r.dimension_id, p.tile_x, p.tile_y
 		)`);
 	total.areaTiles = area?.area ?? 0;
@@ -173,22 +185,18 @@ function totalsOf(db: Db, s: Scope, rows: UserStats[]): UserStats {
 	return total;
 }
 
-const HOUR = 3600_000;
+type FirstUploads = { t: number; n: number }[];
 
 /**
  * How many tiles were first mapped in each period (by `bucket` ms), optionally by one user. A tile
- * is dated by when its data was exported, or by its upload when that is unknown. An export is
- * never dated after its upload.
+ * is dated by when its data was exported, or by its upload when that is unknown.
  */
-function firstUploads(db: Db, bucket: number, userId?: string) {
-	const uploaded = sql`COALESCE(r.completed_at, r.created_at)`;
-	const date = sql`COALESCE(MIN(r.exported_at, ${uploaded}), ${uploaded})`;
+function firstUploads(db: Db, bucket: number, userId?: string): FirstUploads {
 	return db.all<{ t: number; n: number }>(sql`
 		SELECT (first / ${bucket}) * ${bucket} AS t, COUNT(*) AS n FROM (
-			SELECT MIN(${date}) AS first
+			SELECT MIN(COALESCE(r.exported_at, r.created_at)) AS first
 			FROM revisions r JOIN upload_patches p ON p.revision_id = r.id
-			WHERE r.kind = 'upload' AND r.status = 'done' AND r.reverted = 0
-				${userId ? sql`AND r.author_id = ${userId}` : sql``}
+			WHERE ${DONE_UPLOAD} ${userId ? sql`AND r.author_id = ${userId}` : sql``}
 			GROUP BY r.dimension_id, p.tile_x, p.tile_y
 		) GROUP BY 1 ORDER BY 1`);
 }
@@ -198,22 +206,20 @@ function firstUploads(db: Db, bucket: number, userId?: string) {
  * Starts from what was already mapped when the range began.
  */
 function areaHistory(
-	db: Db,
+	total: FirstUploads,
+	mine: FirstUploads | null,
 	since: number,
 	now: number,
+	bucket: number,
 	tileSize: number,
-	userId: string | null,
 ) {
-	const bucket = since > 0 && now - since <= 7 * DAY ? 6 * HOUR : DAY;
-	const total = firstUploads(db, bucket);
 	const first = total[0];
 	if (!first) return [];
-	const mine = userId ? firstUploads(db, bucket, userId) : null;
 	const start = since > 0 ? Math.floor(since / bucket) * bucket : first.t;
 
 	const grid: number[] = [];
 	for (let t = start; t <= now; t += bucket) grid.push(t);
-	const cumulative = (rows: { t: number; n: number }[]) => {
+	const cumulative = (rows: FirstUploads) => {
 		const added = new Map(rows.map((r) => [r.t, r.n]));
 		let sum = rows.filter((r) => r.t < start).reduce((n, r) => n + r.n, 0);
 		return { base: sum, at: grid.map((t) => (sum += added.get(t) ?? 0)) };
@@ -236,61 +242,110 @@ function areaHistory(
 	];
 }
 
+/** What is the same for every visitor; reused for `CACHE_MS`. */
+type Everyone = {
+	at: number;
+	since: number | null;
+	leaderboard: (UserStats & {
+		userId: string;
+		username: string;
+		avatarUrl: string | null;
+	})[];
+	totals: UserStats;
+	firstUploads: FirstUploads;
+};
+
+const caches = new WeakMap<Db, Map<string, Everyone>>();
+
+/** Forgets the reused figures (for tests). */
+export const resetStatsCache = (db: Db) => caches.delete(db);
+
+function everyone(
+	db: Db,
+	range: StatsRange,
+	tileSize: number,
+	now: number,
+): Everyone {
+	const cache = caches.get(db) ?? new Map<string, Everyone>();
+	caches.set(db, cache);
+	const key = `${range}|${tileSize}`;
+	const hit = cache.get(key);
+	if (hit && now - hit.at < CACHE_MS) return hit;
+
+	const days = RANGE_DAYS[range];
+	const since = days === null ? null : now - days * DAY;
+	const scope = { since: since ?? 0, tileSize, publicOnly: true };
+	const all = collect(db, scope);
+	const ids = [...all.keys()];
+	const people = ids.length
+		? db
+				.select({
+					id: users.id,
+					username: users.username,
+					avatarUrl: users.avatarUrl,
+				})
+				.from(users)
+				.where(inArray(users.id, ids))
+				.all()
+		: [];
+	const fresh: Everyone = {
+		at: now,
+		since,
+		leaderboard: people.map((p) => ({
+			userId: p.id,
+			username: p.username,
+			avatarUrl: p.avatarUrl,
+			...(all.get(p.id) as UserStats),
+		})),
+		totals: totalsOf(db, scope, [...all.values()]),
+		firstUploads: firstUploads(db, bucketOf(range)),
+	};
+	cache.set(key, fresh);
+	return fresh;
+}
+
+/** The week is drawn in 6 hour steps, everything longer in days. */
+const bucketOf = (range: StatsRange) => (range === "7d" ? 6 * HOUR : DAY);
+
 export const statsRoutes = new Hono<AppEnv>().get(
 	"/",
 	doc({
 		tag: "Stats",
 		summary: "Contribution statistics and leaderboard",
 		description:
-			"Public. `me` is your own activity (null when not logged in) and includes private layers; `leaderboard` and `totals` (everyone combined) only count public layers. `modUploads`, `modUploadedBlocks` (volume, repeats counted) and `modAreaTiles`/`modAreaBlocks` (distinct ground) are the part sent by the in-game mod (AOMC Webmapper, or whatever `MOD_USER_AGENTS` lists); it is also counted in the other numbers. `areaHistory` is the mapped area over time, for the whole map and for you, by the date the uploaded data was exported. `range` is `all` (default), `30d` or `7d`.",
+			"Public. `me` is your own activity (null when not logged in) and includes private layers; `leaderboard` and `totals` (everyone combined) only count public layers and are reused for a minute. `modUploads`, `modUploadedBlocks` (volume, repeats counted) and `modAreaTiles`/`modAreaBlocks` (distinct ground) are the part sent by the in-game mod (AOMC Webmapper, or whatever `MOD_USER_AGENTS` lists); it is also counted in the other numbers. `areaHistory` is the mapped area over time, for the whole map and for you, by the date the uploaded data was exported. `range` is `all` (default), `30d` or `7d`.",
 		fails: [400],
 	}),
-	validator("query", statsQuerySchema),
-	async (c) => {
+	validate("query", statsQuerySchema),
+	(c) => {
 		const { db, user, map } = c.var;
 		const { range } = c.req.valid("query");
-		const days = RANGE_DAYS[range];
 		const now = Date.now();
-		const since = days === null ? null : now - days * DAY;
-		const base = { since: since ?? 0, tileSize: map.tileSize };
-
-		const all = collect(db, { ...base, publicOnly: true });
-		const ids = [...all.keys()];
-		const people = ids.length
-			? await db
-					.select({
-						id: users.id,
-						username: users.username,
-						avatarUrl: users.avatarUrl,
-					})
-					.from(users)
-					.where(inArray(users.id, ids))
-			: [];
-		const leaderboard = people.map((p) => ({
-			userId: p.id,
-			username: p.username,
-			avatarUrl: p.avatarUrl,
-			...(all.get(p.id) as UserStats),
-		}));
+		const shared = everyone(db, range, map.tileSize, now);
+		const since = shared.since ?? 0;
 
 		const me = user
-			? (collect(db, { ...base, publicOnly: false, userId: user.id }).get(
-					user.id,
-				) ?? emptyStats())
+			? (collect(db, {
+					since,
+					tileSize: map.tileSize,
+					publicOnly: false,
+					userId: user.id,
+				}).get(user.id) ?? emptyStats())
 			: null;
 
 		return c.json({
 			range,
-			since,
+			since: shared.since,
 			me,
-			leaderboard,
-			totals: totalsOf(db, { ...base, publicOnly: true }, [...all.values()]),
+			leaderboard: shared.leaderboard,
+			totals: shared.totals,
 			areaHistory: areaHistory(
-				db,
-				base.since,
+				shared.firstUploads,
+				user ? firstUploads(db, bucketOf(range), user.id) : null,
+				since,
 				now,
+				bucketOf(range),
 				map.tileSize,
-				user?.id ?? null,
 			),
 		});
 	},

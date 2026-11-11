@@ -5,12 +5,13 @@ import {
 } from "@aomc/shared";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
-import { validator } from "hono-openapi";
 import { requireUser } from "../auth/session";
 import { dimensions } from "../db/schema";
 import { doc } from "../openapi";
+import { nextSortOrder } from "../order";
 import { canModerate } from "../permissions";
 import type { AppEnv } from "../types";
+import { validate } from "../validate";
 import { tileRoutes } from "./tiles";
 import { uploadRoutes } from "./uploads";
 
@@ -26,7 +27,7 @@ export const dimensionRoutes = new Hono<AppEnv>()
 			login: true,
 		}),
 		requireUser,
-		validator("json", createDimensionSchema),
+		validate("json", createDimensionSchema),
 		async (c) => {
 			const { db } = c.var;
 			if (!canModerate(c.var.role)) return c.json({ error: "forbidden" }, 403);
@@ -46,7 +47,7 @@ export const dimensionRoutes = new Hono<AppEnv>()
 						scale: body.scale ?? null,
 						theme: body.theme ?? guessDimensionTheme(body.slug),
 						preload: body.preload,
-						sortOrder: Math.max(-1, ...existing.map((d) => d.sortOrder)) + 1,
+						sortOrder: nextSortOrder(existing),
 					})
 					.returning();
 				return c.json({ dimension }, 201);
@@ -61,11 +62,11 @@ export const dimensionRoutes = new Hono<AppEnv>()
 			tag: "Map",
 			summary: "Update a dimension",
 			description: "Moderators. `dim` is the slug.",
-			fails: [403, 404],
+			fails: [400, 403, 404],
 			login: true,
 		}),
 		requireUser,
-		validator("json", updateDimensionSchema),
+		validate("json", updateDimensionSchema),
 		async (c) => {
 			if (!canModerate(c.var.role)) return c.json({ error: "forbidden" }, 403);
 

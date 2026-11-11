@@ -3,47 +3,69 @@ import {
 	featureImportSchema,
 	featureInputSchema,
 	MAX_FEATURES_PER_LAYER,
+	MAX_LAYERS_PER_USER,
 	reorderLayersSchema,
 	reorderSchema,
 	updateLayerSchema,
 } from "@aomc/shared";
-import { and, eq, gt, inArray, isNull, lte, or } from "drizzle-orm";
+import { and, count, eq, gt, isNull, lte, or } from "drizzle-orm";
 import { Hono } from "hono";
-import { validator } from "hono-openapi";
 import { z } from "zod";
 import { requireUser, userOf } from "../auth/session";
 import type { Db } from "../db/client";
-import {
-	dimensions,
-	features,
-	layerMembers,
-	layers,
-	revisions,
-} from "../db/schema";
+import { features, layerMembers, layers, revisions } from "../db/schema";
+import { dimensionBySlug } from "../dimensionLookup";
 import {
 	contentOf,
 	featuresOfLayers,
+	insertFeature,
 	insertRevision,
+	liveFeatureCount,
 	nextFeatureOrder,
-	toView,
 } from "../features";
 import { doc } from "../openapi";
-import { assignOrder, sameSet } from "../order";
+import { assignOrder, nextSortOrder, sameSet } from "../order";
 import {
+	type Actor,
 	canEdit,
 	canEditLayer,
 	canManageLayer,
+	canModerate,
 	canViewLayer,
+	effectiveLayerRole,
 } from "../permissions";
 import type { AppEnv } from "../types";
+import { validate } from "../validate";
 import { layerInviteRoutes } from "./invites";
 import { layerMemberRoutes } from "./layerMembers";
 import { layerFor } from "./util";
 
-const layerFeatures = async (db: Db, layerId: number) =>
-	(await featuresOfLayers(db, [layerId])).get(layerId) ?? [];
+const layerFeatures = (db: Pick<Db, "select">, layerId: number) =>
+	featuresOfLayers(db, [layerId]).get(layerId) ?? [];
 
 type LayerRow = typeof layers.$inferSelect;
+type LayerRole = ReturnType<typeof effectiveLayerRole>;
+
+/** The actor's role on any layer: an explicit membership, else editor for the layer's creator. */
+function layerRoles(db: Pick<Db, "select">, actor: Actor) {
+	const memberships = actor
+		? db
+				.select({ layerId: layerMembers.layerId, role: layerMembers.role })
+				.from(layerMembers)
+				.where(eq(layerMembers.userId, actor.id))
+				.all()
+		: [];
+	const byLayer = new Map(memberships.map((m) => [m.layerId, m.role]));
+	return (layer: LayerRow): LayerRole =>
+		effectiveLayerRole(actor, layer, byLayer.get(layer.id) ?? null);
+}
+
+const layerIsLive = (db: Pick<Db, "select">, id: number) =>
+	db
+		.select({ id: layers.id })
+		.from(layers)
+		.where(and(eq(layers.id, id), isNull(layers.deletedAt)))
+		.get() !== undefined;
 
 function serializeLayer(layer: LayerRow, canEdit: boolean, canManage: boolean) {
 	return {
@@ -60,15 +82,19 @@ function serializeLayer(layer: LayerRow, canEdit: boolean, canManage: boolean) {
 	};
 }
 
-/** Unix ms time of a revision, for "as of revision" reads. null means "now". */
-async function timeOfRev(db: Db, headRev: number, at: number | null) {
+/**
+ * Unix ms time of a revision, for "as of revision" reads. null means "now"; undefined means
+ * there is no such revision (for example the upload was deleted).
+ */
+function timeOfRev(db: Db, headRev: number, at: number | null) {
 	if (at === null || at >= headRev) return null;
 	if (at <= 0) return 0;
-	const [row] = await db
+	const row = db
 		.select({ completedAt: revisions.completedAt })
 		.from(revisions)
-		.where(eq(revisions.rev, at));
-	return row?.completedAt ?? null;
+		.where(eq(revisions.rev, at))
+		.get();
+	return row ? row.completedAt : undefined;
 }
 
 const layersQuerySchema = z.object({
@@ -83,24 +109,23 @@ export const layerRoutes = new Hono<AppEnv>()
 			tag: "Layers",
 			summary: "List layers with their features",
 			description:
-				"Only layers you may see. `at` reads the layers as of a revision.",
+				"Only layers you may see. `at` reads the layers as of a revision (404 if there is no such revision).",
+			fails: [400, 404],
 		}),
-		validator("query", layersQuerySchema),
-		async (c) => {
+		validate("query", layersQuerySchema),
+		(c) => {
 			const { db, user, map, role } = c.var;
 			const query = c.req.valid("query");
-			const at = await timeOfRev(
+			const at = timeOfRev(
 				db,
 				map.headRev,
 				query.at === undefined ? null : Number(query.at),
 			);
+			if (at === undefined) return c.json({ error: "revision not found" }, 404);
 
 			let dimensionId: number | undefined;
 			if (query.dim) {
-				const [dim] = await db
-					.select({ id: dimensions.id })
-					.from(dimensions)
-					.where(eq(dimensions.slug, query.dim));
+				const dim = dimensionBySlug(db, query.dim);
 				if (!dim) return c.json({ error: "dimension not found" }, 404);
 				dimensionId = dim.id;
 			}
@@ -112,7 +137,7 @@ export const layerRoutes = new Hono<AppEnv>()
 							lte(layers.createdAt, at),
 							or(isNull(layers.deletedAt), gt(layers.deletedAt, at)),
 						);
-			const rows = await db
+			const rows = db
 				.select()
 				.from(layers)
 				.where(
@@ -123,28 +148,12 @@ export const layerRoutes = new Hono<AppEnv>()
 						liveAt,
 					),
 				)
-				.orderBy(layers.sortOrder, layers.id);
+				.orderBy(layers.sortOrder, layers.id)
+				.all();
 
-			const memberships = user
-				? await db
-						.select({ layerId: layerMembers.layerId, role: layerMembers.role })
-						.from(layerMembers)
-						.where(
-							and(
-								eq(layerMembers.userId, user.id),
-								inArray(
-									layerMembers.layerId,
-									rows.map((r) => r.id),
-								),
-							),
-						)
-				: [];
-			const layerRoles = new Map(memberships.map((m) => [m.layerId, m.role]));
-
-			const visible = rows.filter((l) =>
-				canViewLayer(role, l, layerRoles.get(l.id) ?? null),
-			);
-			const byLayer = await featuresOfLayers(
+			const roleOn = layerRoles(db, user);
+			const visible = rows.filter((l) => canViewLayer(role, l, roleOn(l)));
+			const byLayer = featuresOfLayers(
 				db,
 				visible.map((l) => l.id),
 				at,
@@ -153,7 +162,7 @@ export const layerRoutes = new Hono<AppEnv>()
 				layers: visible.map((l) => ({
 					...serializeLayer(
 						l,
-						canEditLayer(role, l, layerRoles.get(l.id) ?? null),
+						canEditLayer(role, l, roleOn(l)),
 						canManageLayer(user, role, l),
 					),
 					features: byLayer.get(l.id) ?? [],
@@ -166,25 +175,31 @@ export const layerRoutes = new Hono<AppEnv>()
 		doc({
 			tag: "Layers",
 			summary: "Create a layer",
+			description: `Everyone but moderators may have at most ${MAX_LAYERS_PER_USER} layers (409 beyond that).`,
 			ok: { 201: "Layer created" },
-			fails: [403, 404],
+			fails: [400, 403, 404, 409],
 			login: true,
 		}),
 		requireUser,
-		validator("json", createLayerSchema),
-		async (c) => {
-			const { db } = c.var;
+		validate("json", createLayerSchema),
+		(c) => {
+			const { db, role } = c.var;
 			const user = userOf(c);
-			if (!canEdit(c.var.role)) return c.json({ error: "forbidden" }, 403);
+			if (!canEdit(role)) return c.json({ error: "forbidden" }, 403);
 
 			const body = c.req.valid("json");
-			const [dim] = await db
-				.select({ id: dimensions.id })
-				.from(dimensions)
-				.where(eq(dimensions.slug, body.dimension));
+			const dim = dimensionBySlug(db, body.dimension);
 			if (!dim) return c.json({ error: "dimension not found" }, 404);
 
 			const layer = db.transaction((tx) => {
+				if (!canModerate(role)) {
+					const mine = tx
+						.select({ n: count() })
+						.from(layers)
+						.where(and(eq(layers.createdBy, user.id), isNull(layers.deletedAt)))
+						.get();
+					if ((mine?.n ?? 0) >= MAX_LAYERS_PER_USER) return null;
+				}
 				const existing = tx
 					.select({ sortOrder: layers.sortOrder })
 					.from(layers)
@@ -198,7 +213,7 @@ export const layerRoutes = new Hono<AppEnv>()
 						color: body.color,
 						hiddenByDefault: body.hiddenByDefault,
 						visibility: body.visibility,
-						sortOrder: Math.max(-1, ...existing.map((l) => l.sortOrder)) + 1,
+						sortOrder: nextSortOrder(existing),
 						createdBy: user.id,
 					})
 					.returning()
@@ -211,6 +226,11 @@ export const layerRoutes = new Hono<AppEnv>()
 				}
 				return row;
 			});
+			if (!layer)
+				return c.json(
+					{ error: `you can have at most ${MAX_LAYERS_PER_USER} layers` },
+					409,
+				);
 			return c.json(
 				{ layer: { ...serializeLayer(layer, true, true), features: [] } },
 				201,
@@ -224,46 +244,40 @@ export const layerRoutes = new Hono<AppEnv>()
 			summary: "Reorder the layers of a dimension",
 			description:
 				"`ids` must be exactly the layers you can see in that dimension.",
-			fails: [403, 404, 409],
+			fails: [400, 403, 404, 409],
 			login: true,
 		}),
 		requireUser,
-		validator("json", reorderLayersSchema),
-		async (c) => {
+		validate("json", reorderLayersSchema),
+		(c) => {
 			const { db, role } = c.var;
 			const user = userOf(c);
 			if (!canEdit(role)) return c.json({ error: "forbidden" }, 403);
 			const body = c.req.valid("json");
-			const [dim] = await db
-				.select({ id: dimensions.id })
-				.from(dimensions)
-				.where(eq(dimensions.slug, body.dimension));
+			const dim = dimensionBySlug(db, body.dimension);
 			if (!dim) return c.json({ error: "dimension not found" }, 404);
 
-			const rows = await db
-				.select()
-				.from(layers)
-				.where(and(eq(layers.dimensionId, dim.id), isNull(layers.deletedAt)));
-			const memberships = await db
-				.select({ layerId: layerMembers.layerId, role: layerMembers.role })
-				.from(layerMembers)
-				.where(eq(layerMembers.userId, user.id));
-			const layerRoles = new Map(memberships.map((m) => [m.layerId, m.role]));
-			// Only the layers this user can see take part; the others keep their places.
-			const visible = rows.filter((l) =>
-				canViewLayer(role, l, layerRoles.get(l.id) ?? null),
-			);
-			if (!sameSet(visible, body.ids))
-				return c.json({ error: "the list of layers is out of date" }, 409);
-
-			db.transaction((tx) => {
-				for (const u of assignOrder(visible, body.ids))
+			const done = db.transaction((tx) => {
+				const rows = tx
+					.select()
+					.from(layers)
+					.where(and(eq(layers.dimensionId, dim.id), isNull(layers.deletedAt)))
+					.all();
+				const roleOn = layerRoles(tx, user);
+				// Only the layers this user can see take part; the others keep their places.
+				const visible = rows.filter((l) => canViewLayer(role, l, roleOn(l)));
+				if (!sameSet(visible, body.ids)) return false;
+				const hidden = rows.filter((l) => !visible.includes(l));
+				for (const u of assignOrder(visible, body.ids, hidden))
 					tx.update(layers)
 						.set({ sortOrder: u.sortOrder })
 						.where(eq(layers.id, u.id))
 						.run();
+				return true;
 			});
-			return c.json({ ok: true });
+			return done
+				? c.json({ ok: true })
+				: c.json({ error: "the list of layers is out of date" }, 409);
 		},
 	)
 	.patch(
@@ -271,11 +285,13 @@ export const layerRoutes = new Hono<AppEnv>()
 		doc({
 			tag: "Layers",
 			summary: "Update a layer",
-			fails: [403, 404],
+			description:
+				"Name, colour, `hiddenByDefault` and visibility. Order is changed with `POST /api/layers/reorder`.",
+			fails: [400, 403, 404],
 			login: true,
 		}),
 		requireUser,
-		validator("json", updateLayerSchema),
+		validate("json", updateLayerSchema),
 		async (c) => {
 			const { db } = c.var;
 			const user = userOf(c);
@@ -293,26 +309,31 @@ export const layerRoutes = new Hono<AppEnv>()
 				if (!canManageLayer(user, c.var.role, found.layer))
 					return c.json({ error: "forbidden" }, 403);
 			}
-			const [updated] = await db
-				.update(layers)
-				.set(body)
-				.where(eq(layers.id, found.layer.id))
-				.returning();
-			if (
-				updated &&
-				updated.visibility === "private" &&
-				found.layer.visibility !== "private"
-			) {
-				await db
-					.insert(layerMembers)
-					.values({ layerId: updated.id, userId: user.id, role: "editor" })
-					.onConflictDoNothing();
-			}
+			const updated = db.transaction((tx) => {
+				const row = tx
+					.update(layers)
+					.set(body)
+					.where(and(eq(layers.id, found.layer.id), isNull(layers.deletedAt)))
+					.returning()
+					.get();
+				// Whoever makes it private keeps access; the creator has it anyway.
+				if (
+					row?.visibility === "private" &&
+					found.layer.visibility !== "private"
+				) {
+					tx.insert(layerMembers)
+						.values({ layerId: row.id, userId: user.id, role: "editor" })
+						.onConflictDoNothing()
+						.run();
+				}
+				return row;
+			});
+			if (!updated) return c.json({ error: "not found" }, 404);
 			return c.json({
 				layer: serializeLayer(
-					updated as LayerRow,
+					updated,
 					true,
-					canManageLayer(user, c.var.role, updated as LayerRow),
+					canManageLayer(user, c.var.role, updated),
 				),
 			});
 		},
@@ -347,11 +368,11 @@ export const layerRoutes = new Hono<AppEnv>()
 			tag: "Layers",
 			summary: "Add a feature to a layer",
 			ok: { 201: "Feature created" },
-			fails: [403, 404, 409],
+			fails: [400, 403, 404, 409],
 			login: true,
 		}),
 		requireUser,
-		validator("json", featureInputSchema),
+		validate("json", featureInputSchema),
 		async (c) => {
 			const { db } = c.var;
 			const user = userOf(c);
@@ -360,25 +381,22 @@ export const layerRoutes = new Hono<AppEnv>()
 			if (!canEditLayer(c.var.role, found.layer, found.layerRole))
 				return c.json({ error: "forbidden" }, 403);
 
-			const existing = await layerFeatures(db, found.layer.id);
-			if (existing.length >= MAX_FEATURES_PER_LAYER)
-				return c.json({ error: "layer is full" }, 409);
-
 			const content = c.req.valid("json");
+			const layerId = found.layer.id;
 			const view = db.transaction((tx) => {
-				const feature = tx
-					.insert(features)
-					.values({
-						layerId: found.layer.id,
-						sortOrder: nextFeatureOrder(tx, found.layer.id),
-					})
-					.returning()
-					.get();
-				return toView(
-					feature,
-					insertRevision(tx, feature.id, user.id, content),
+				if (!layerIsLive(tx, layerId)) return "gone";
+				if (liveFeatureCount(tx, layerId) >= MAX_FEATURES_PER_LAYER)
+					return "full";
+				return insertFeature(
+					tx,
+					layerId,
+					nextFeatureOrder(tx, layerId),
+					user.id,
+					content,
 				);
 			});
+			if (view === "gone") return c.json({ error: "not found" }, 404);
+			if (view === "full") return c.json({ error: "layer is full" }, 409);
 			return c.json({ feature: view }, 201);
 		},
 	)
@@ -387,11 +405,11 @@ export const layerRoutes = new Hono<AppEnv>()
 		doc({
 			tag: "Layers",
 			summary: "Reorder the features of a layer",
-			fails: [403, 404, 409],
+			fails: [400, 403, 404, 409],
 			login: true,
 		}),
 		requireUser,
-		validator("json", reorderSchema),
+		validate("json", reorderSchema),
 		async (c) => {
 			const { db } = c.var;
 			const found = await layerFor(c, c.req.param("id"));
@@ -400,26 +418,29 @@ export const layerRoutes = new Hono<AppEnv>()
 				return c.json({ error: "forbidden" }, 403);
 
 			const { ids } = c.req.valid("json");
-			const live = new Set(
-				(await layerFeatures(db, found.layer.id)).map((f) => f.id),
-			);
-			const current = (
-				await db
+			const done = db.transaction((tx) => {
+				const live = new Set(
+					layerFeatures(tx, found.layer.id).map((f) => f.id),
+				);
+				const all = tx
 					.select({ id: features.id, sortOrder: features.sortOrder })
 					.from(features)
 					.where(eq(features.layerId, found.layer.id))
-			).filter((f) => live.has(f.id));
-			if (!sameSet(current, ids))
-				return c.json({ error: "the list of features is out of date" }, 409);
-
-			db.transaction((tx) => {
-				for (const u of assignOrder(current, ids))
+					.all();
+				const current = all.filter((f) => live.has(f.id));
+				if (!sameSet(current, ids)) return false;
+				// Deleted features keep their rows, which a restore brings back at their old place.
+				const deleted = all.filter((f) => !live.has(f.id));
+				for (const u of assignOrder(current, ids, deleted))
 					tx.update(features)
 						.set({ sortOrder: u.sortOrder })
 						.where(eq(features.id, u.id))
 						.run();
+				return true;
 			});
-			return c.json({ ok: true });
+			return done
+				? c.json({ ok: true })
+				: c.json({ error: "the list of features is out of date" }, 409);
 		},
 	)
 	.get(
@@ -434,7 +455,7 @@ export const layerRoutes = new Hono<AppEnv>()
 			const { db } = c.var;
 			const found = await layerFor(c, c.req.param("id"));
 			if (!found) return c.json({ error: "not found" }, 404);
-			const list = await layerFeatures(db, found.layer.id);
+			const list = layerFeatures(db, found.layer.id);
 			c.header(
 				"Content-Disposition",
 				`attachment; filename="layer-${found.layer.id}.json"`,
@@ -448,14 +469,14 @@ export const layerRoutes = new Hono<AppEnv>()
 			tag: "Layers",
 			summary: "Import features into a layer",
 			description:
-				"Adds to the layer, or replaces its features with `replace=1`.",
+				"Adds to the layer, or replaces its features with `replace=1`, which only the layer's creator or a moderator may do.",
 			ok: { 201: "Imported" },
-			fails: [403, 404, 409],
+			fails: [400, 403, 404, 409],
 			login: true,
 		}),
 		requireUser,
-		validator("query", z.object({ replace: z.enum(["0", "1"]).optional() })),
-		validator("json", featureImportSchema),
+		validate("query", z.object({ replace: z.enum(["0", "1"]).optional() })),
+		validate("json", featureImportSchema),
 		async (c) => {
 			const { db } = c.var;
 			const user = userOf(c);
@@ -465,43 +486,35 @@ export const layerRoutes = new Hono<AppEnv>()
 				return c.json({ error: "forbidden" }, 403);
 
 			const items = c.req.valid("json");
-			const replace = c.req.query("replace") === "1";
-			const existing = await layerFeatures(db, found.layer.id);
-			if (
-				(replace ? 0 : existing.length) + items.length >
-				MAX_FEATURES_PER_LAYER
-			) {
+			const replace = c.req.valid("query").replace === "1";
+			if (replace && !canManageLayer(user, c.var.role, found.layer))
+				return c.json({ error: "forbidden" }, 403);
+
+			const layerId = found.layer.id;
+			const out = db.transaction((tx) => {
+				if (!layerIsLive(tx, layerId)) return "gone";
+				const existing = replace ? layerFeatures(tx, layerId) : [];
+				const kept = replace ? 0 : liveFeatureCount(tx, layerId);
+				if (kept + items.length > MAX_FEATURES_PER_LAYER) return "full";
+
+				for (const f of existing) {
+					insertRevision(tx, f.id, user.id, {
+						...contentOf(f),
+						deleted: true,
+					});
+				}
+				let order = nextFeatureOrder(tx, layerId);
+				for (const item of items)
+					insertFeature(tx, layerId, order++, user.id, item);
+				return existing.length;
+			});
+			if (out === "gone") return c.json({ error: "not found" }, 404);
+			if (out === "full")
 				return c.json(
 					{ error: `a layer holds at most ${MAX_FEATURES_PER_LAYER} features` },
 					409,
 				);
-			}
-
-			db.transaction((tx) => {
-				if (replace) {
-					for (const f of existing) {
-						insertRevision(tx, f.id, user.id, {
-							...contentOf(f),
-							deleted: true,
-						});
-					}
-				}
-				for (const item of items) {
-					const feature = tx
-						.insert(features)
-						.values({
-							layerId: found.layer.id,
-							sortOrder: nextFeatureOrder(tx, found.layer.id),
-						})
-						.returning()
-						.get();
-					insertRevision(tx, feature.id, user.id, item);
-				}
-			});
-			return c.json(
-				{ imported: items.length, replaced: replace ? existing.length : 0 },
-				201,
-			);
+			return c.json({ imported: items.length, replaced: out }, 201);
 		},
 	)
 	.route("/:id/members", layerMemberRoutes)

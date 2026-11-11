@@ -1,13 +1,13 @@
-import { MAX_COORD } from "@aomc/shared/schemas";
+import { blockCoord } from "@aomc/shared/schemas";
 import { MIN_ZOOM } from "@aomc/shared/view";
 import { z } from "zod";
 import type { Db } from "./db/client";
-import { dimensions } from "./db/schema";
+import { defaultDimension, dimensionBySlug } from "./dimensionLookup";
 import type { Env } from "./env";
 import type { PreviewParams } from "./preview";
 import type { MapRow } from "./types";
 
-const coord = z.coerce.number().int().min(-MAX_COORD).max(MAX_COORD);
+const coord = z.coerce.number().pipe(blockCoord);
 
 /** The view parameters shared by /api/preview.png and the page's share tags. */
 export const viewQuerySchema = z.object({
@@ -36,13 +36,7 @@ export async function resolvePreviewTarget(
 	map: MapRow,
 	q: ViewQuery,
 ): Promise<PreviewTarget | null> {
-	const dims = await db
-		.select()
-		.from(dimensions)
-		.orderBy(dimensions.sortOrder, dimensions.id);
-	const dim = q.dim
-		? dims.find((d) => d.slug === q.dim)
-		: dims.find((d) => !d.archived);
+	const dim = q.dim ? dimensionBySlug(db, q.dim) : defaultDimension(db);
 	if (!dim) return null;
 
 	const zoom =

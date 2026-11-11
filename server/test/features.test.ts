@@ -1,8 +1,9 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { featureInputSchema } from "@aomc/shared";
+import { featureInputSchema, MAX_LAYERS_PER_USER } from "@aomc/shared";
 import { eq } from "drizzle-orm";
 import {
 	featureRevisions,
+	features,
 	layerMembers,
 	layers,
 	revisions,
@@ -929,5 +930,468 @@ describe("reordering", () => {
 			ids: [a.id, c.id],
 		});
 		expect(incomplete.status).toBe(409);
+	});
+});
+
+describe("concurrent edits", () => {
+	async function addPin(t: TileApp, layerId: number) {
+		const res = await call(
+			t,
+			t.editor,
+			"POST",
+			`/api/layers/${layerId}/features`,
+			pin(),
+		);
+		expect(res.status).toBe(201);
+		return res.body.feature as { id: number; revisionId: number };
+	}
+	const revisionCount = async (t: TileApp, featureId: number) =>
+		(
+			await t.db
+				.select()
+				.from(featureRevisions)
+				.where(eq(featureRevisions.featureId, featureId))
+		).length;
+
+	test("an update based on an older revision answers 409 with the current feature", async () => {
+		const t = await bootTiles();
+		const layer = await makeLayer(t);
+		const feature = await addPin(t, layer.id);
+		const url = `/api/features/${feature.id}`;
+
+		const first = await call(t, t.editor, "PATCH", url, {
+			name: "One",
+			baseRevisionId: feature.revisionId,
+		});
+		expect(first.status).toBe(200);
+		expect(first.body.feature.name).toBe("One");
+
+		const stale = await call(t, t.mod, "PATCH", url, {
+			name: "Two",
+			baseRevisionId: feature.revisionId,
+		});
+		expect(stale.status).toBe(409);
+		expect(stale.body.error).toBeString();
+		expect(stale.body.feature).toMatchObject({
+			id: feature.id,
+			name: "One",
+			revisionId: first.body.feature.revisionId,
+		});
+		expect(await revisionCount(t, feature.id)).toBe(2);
+
+		const fresh = await call(t, t.mod, "PATCH", url, {
+			name: "Two",
+			baseRevisionId: first.body.feature.revisionId,
+		});
+		expect(fresh.status).toBe(200);
+		// Without a base revision the update still goes through.
+		expect((await call(t, t.mod, "PATCH", url, { name: "Three" })).status).toBe(
+			200,
+		);
+		expect(
+			(await call(t, t.mod, "PATCH", url, { baseRevisionId: 0 })).status,
+		).toBe(400);
+	});
+
+	test("a deleted feature cannot be updated or deleted again", async () => {
+		const t = await bootTiles();
+		const layer = await makeLayer(t);
+		const feature = await addPin(t, layer.id);
+		const url = `/api/features/${feature.id}`;
+		expect((await call(t, t.editor, "DELETE", url)).status).toBe(200);
+		expect((await call(t, t.editor, "DELETE", url)).status).toBe(404);
+		const patch = await call(t, t.editor, "PATCH", url, {
+			name: "Zombie",
+			baseRevisionId: feature.revisionId,
+		});
+		expect(patch.status).toBe(404);
+		expect(await revisionCount(t, feature.id)).toBe(2);
+	});
+
+	test("restoring the current version adds no revision", async () => {
+		const t = await bootTiles();
+		const layer = await makeLayer(t);
+		const feature = await addPin(t, layer.id);
+		const edit = await call(
+			t,
+			t.editor,
+			"PATCH",
+			`/api/features/${feature.id}`,
+			{
+				name: "Edited",
+			},
+		);
+		const restore = (revisionId: number) =>
+			call(
+				t,
+				t.mod,
+				"POST",
+				`/api/features/${feature.id}/restore/${revisionId}`,
+			);
+		const current = await restore(edit.body.feature.revisionId);
+		expect(current.status).toBe(200);
+		expect(current.body.feature.name).toBe("Edited");
+		expect(await revisionCount(t, feature.id)).toBe(2);
+
+		const old = await restore(feature.revisionId);
+		expect(old.status).toBe(201);
+		expect(old.body.feature.name).toBe("Base");
+		expect(await revisionCount(t, feature.id)).toBe(3);
+	});
+
+	test("a deleted feature is not restored into a full layer", async () => {
+		const t = await bootTiles();
+		const layer = await makeLayer(t);
+		const many = Array.from({ length: 5000 }, (_, i) => pin(i, i));
+		await call(t, t.editor, "POST", `/api/layers/${layer.id}/import`, many);
+		const list = await call(t, t.editor, "GET", "/api/layers?dim=overworld");
+		const victim = list.body.layers[0].features[0] as {
+			id: number;
+			revisionId: number;
+		};
+		await call(t, t.editor, "DELETE", `/api/features/${victim.id}`);
+		expect((await addPin(t, layer.id)).id).toBeGreaterThan(0);
+
+		const res = await call(
+			t,
+			t.mod,
+			"POST",
+			`/api/features/${victim.id}/restore/${victim.revisionId}`,
+		);
+		expect(res.status).toBe(409);
+		expect(await revisionCount(t, victim.id)).toBe(2);
+	});
+
+	test("the history comes in pages, newest first", async () => {
+		const t = await bootTiles();
+		const layer = await makeLayer(t);
+		const feature = await addPin(t, layer.id);
+		for (const name of ["a", "b", "c", "d"])
+			await call(t, t.editor, "PATCH", `/api/features/${feature.id}`, { name });
+		const url = `/api/features/${feature.id}/history`;
+
+		const all = await call(t, null, "GET", url);
+		expect(all.body.history).toHaveLength(5);
+		expect(all.body.nextBefore).toBeNull();
+		const ids = all.body.history.map(
+			(h: { revisionId: number }) => h.revisionId,
+		);
+		expect(ids).toEqual([...ids].sort((a, b) => b - a));
+
+		const seen: number[] = [];
+		let before: number | null = null;
+		let pages = 0;
+		do {
+			const res: Awaited<ReturnType<typeof call>> = await call(
+				t,
+				null,
+				"GET",
+				`${url}?limit=2${before === null ? "" : `&before=${before}`}`,
+			);
+			expect(res.status).toBe(200);
+			seen.push(
+				...res.body.history.map((h: { revisionId: number }) => h.revisionId),
+			);
+			before = res.body.nextBefore;
+			pages++;
+		} while (before !== null);
+		expect(seen).toEqual(ids);
+		expect(pages).toBe(3);
+
+		expect((await call(t, null, "GET", `${url}?limit=0`)).status).toBe(400);
+		expect((await call(t, null, "GET", `${url}?limit=9999`)).status).toBe(400);
+	});
+});
+
+describe("layer limits and rules", () => {
+	test("replacing a layer's features by import needs its creator or a moderator", async () => {
+		const t = await bootTiles();
+		const layer = await makeLayer(t);
+		const other = await makeUser(t.db, "other");
+		const url = `/api/layers/${layer.id}/import`;
+		await call(t, t.editor, "POST", url, [pin(1, 1)]);
+
+		expect((await call(t, other, "POST", url, [pin(2, 2)])).status).toBe(201);
+		const replace = `${url}?replace=1`;
+		expect((await call(t, other, "POST", replace, [pin(3, 3)])).status).toBe(
+			403,
+		);
+		const list = async () =>
+			(await call(t, null, "GET", `/api/layers/${layer.id}/export`)).body;
+		expect(await list()).toHaveLength(2);
+
+		const own = await call(t, t.editor, "POST", replace, [pin(4, 4)]);
+		expect(own.status).toBe(201);
+		expect(own.body).toEqual({ imported: 1, replaced: 2 });
+		expect((await call(t, t.mod, "POST", replace, [pin(5, 5)])).status).toBe(
+			201,
+		);
+		expect(await list()).toHaveLength(1);
+	});
+
+	test("imported features keep their order, after the existing ones", async () => {
+		const t = await bootTiles();
+		const layer = await makeLayer(t);
+		const url = `/api/layers/${layer.id}/import`;
+		await call(t, t.editor, "POST", url, [pin(1, 0), pin(2, 0)]);
+		await call(t, t.editor, "POST", url, [pin(3, 0), pin(4, 0)]);
+		const xs = (
+			await call(t, null, "GET", `/api/layers/${layer.id}/export`)
+		).body.map((f: { geometry: number[] }) => f.geometry[0]);
+		expect(xs).toEqual([1, 2, 3, 4]);
+		const orders = (
+			await call(t, null, "GET", "/api/layers?dim=overworld")
+		).body.layers[0].features.map((f: { id: number }) => f.id);
+		expect(new Set(orders).size).toBe(4);
+	});
+
+	test("everyone but moderators may create only a limited number of layers", async () => {
+		const t = await bootTiles();
+		const create = (user: Auth) =>
+			call(t, user, "POST", "/api/layers", {
+				dimension: "overworld",
+				name: "L",
+				color: "red",
+			});
+		const first = await create(t.editor);
+		for (let i = 1; i < MAX_LAYERS_PER_USER; i++)
+			expect((await create(t.editor)).status).toBe(201);
+		const over = await create(t.editor);
+		expect(over.status).toBe(409);
+		expect(over.body.error).toContain(String(MAX_LAYERS_PER_USER));
+		// Someone else is not affected, and moderators are exempt.
+		expect((await create(await makeUser(t.db, "other"))).status).toBe(201);
+		for (let i = 0; i <= MAX_LAYERS_PER_USER; i++)
+			expect((await create(t.mod)).status).toBe(201);
+
+		// A deleted layer frees a place.
+		await call(t, t.editor, "DELETE", `/api/layers/${first.body.layer.id}`);
+		expect((await create(t.editor)).status).toBe(201);
+	});
+
+	test("a layer's order is not changed by PATCH", async () => {
+		const t = await bootTiles();
+		const a = await makeLayer(t, t.editor, { name: "A" });
+		await makeLayer(t, t.editor, { name: "B" });
+		const only = await call(t, t.editor, "PATCH", `/api/layers/${a.id}`, {
+			sortOrder: 99,
+		});
+		expect(only.status).toBe(400);
+		const both = await call(t, t.editor, "PATCH", `/api/layers/${a.id}`, {
+			name: "A2",
+			sortOrder: 99,
+		});
+		expect(both.status).toBe(200);
+		expect(both.body.layer.sortOrder).toBe(0);
+	});
+
+	test("a missing layer cannot be updated", async () => {
+		const t = await bootTiles();
+		const layer = await makeLayer(t);
+		await call(t, t.editor, "DELETE", `/api/layers/${layer.id}`);
+		expect(
+			(
+				await call(t, t.editor, "PATCH", `/api/layers/${layer.id}`, {
+					name: "Back",
+				})
+			).status,
+		).toBe(404);
+	});
+
+	test("`at` naming a revision that does not exist is a 404", async () => {
+		const t = await bootTiles();
+		for (let i = 0; i < 3; i++)
+			await upload(t, await solid(T, T, RED), i * T, 0);
+		await makeLayer(t);
+		const at = (rev: number) =>
+			call(t, null, "GET", `/api/layers?dim=overworld&at=${rev}`);
+		expect((await at(1)).status).toBe(200);
+		// Revision 2 was an upload that has since been deleted: there is a gap.
+		await t.db.update(revisions).set({ rev: null }).where(eq(revisions.rev, 2));
+		expect((await at(2)).status).toBe(404);
+		expect((await at(1)).status).toBe(200);
+		expect((await at(0)).status).toBe(200);
+		// The head and anything newer is "now".
+		expect((await at(3)).status).toBe(200);
+		expect((await at(99)).status).toBe(200);
+	});
+
+	test("the creator keeps a layer a moderator made private", async () => {
+		const t = await bootTiles();
+		const layer = await makeLayer(t);
+		const made = await call(t, t.mod, "PATCH", `/api/layers/${layer.id}`, {
+			visibility: "private",
+		});
+		expect(made.status).toBe(200);
+		await t.db.delete(layerMembers).where(eq(layerMembers.layerId, layer.id));
+
+		const mine = await call(t, t.editor, "GET", "/api/layers?dim=overworld");
+		expect(mine.body.layers).toHaveLength(1);
+		expect(mine.body.layers[0]).toMatchObject({
+			canEdit: true,
+			canManage: true,
+		});
+		expect(
+			(
+				await call(
+					t,
+					t.editor,
+					"POST",
+					`/api/layers/${layer.id}/features`,
+					pin(),
+				)
+			).status,
+		).toBe(201);
+		const reorder = await call(t, t.editor, "POST", "/api/layers/reorder", {
+			dimension: "overworld",
+			ids: [layer.id],
+		});
+		expect(reorder.status).toBe(200);
+
+		const stranger = await makeUser(t.db, "stranger");
+		expect(
+			(await call(t, stranger, "GET", "/api/layers?dim=overworld")).body.layers,
+		).toHaveLength(0);
+	});
+
+	test("reordering renumbers when it would collide with a layer the user cannot see", async () => {
+		const t = await bootTiles();
+		const a = await makeLayer(t, t.editor, { name: "A" });
+		const b = await makeLayer(t, t.editor, { name: "B" });
+		const other = await makeUser(t.db, "other");
+		const secret = await makeLayer(t, other, {
+			name: "Secret",
+			visibility: "private",
+		});
+		await t.db.update(layers).set({ sortOrder: 0 }).where(eq(layers.id, a.id));
+		await t.db.update(layers).set({ sortOrder: 0 }).where(eq(layers.id, b.id));
+		await t.db
+			.update(layers)
+			.set({ sortOrder: 1 })
+			.where(eq(layers.id, secret.id));
+
+		const res = await call(t, t.editor, "POST", "/api/layers/reorder", {
+			dimension: "overworld",
+			ids: [b.id, a.id],
+		});
+		expect(res.status).toBe(200);
+		const names = async (user: Auth) =>
+			(
+				(await call(t, user, "GET", "/api/layers?dim=overworld")).body
+					.layers as { name: string }[]
+			).map((l) => l.name);
+		expect(await names(t.mod)).toEqual(["B", "A", "Secret"]);
+		const orders = (await t.db.select().from(layers)).map((l) => l.sortOrder);
+		expect(new Set(orders).size).toBe(3);
+	});
+
+	test("a deleted feature keeps a place of its own when the others are reordered", async () => {
+		const t = await bootTiles();
+		const layer = await makeLayer(t);
+		const add = async (x: number) =>
+			(
+				await call(
+					t,
+					t.editor,
+					"POST",
+					`/api/layers/${layer.id}/features`,
+					pin(x),
+				)
+			).body.feature.id as number;
+		const [a, b, c] = [await add(1), await add(2), await add(3)];
+		await call(t, t.editor, "DELETE", `/api/features/${b}`);
+		await t.db.update(features).set({ sortOrder: 0 }).where(eq(features.id, a));
+		await t.db.update(features).set({ sortOrder: 0 }).where(eq(features.id, c));
+		await t.db.update(features).set({ sortOrder: 1 }).where(eq(features.id, b));
+		const res = await call(
+			t,
+			t.editor,
+			"POST",
+			`/api/layers/${layer.id}/features/reorder`,
+			{ ids: [c, a] },
+		);
+		expect(res.status).toBe(200);
+		const rows = await t.db.select().from(features);
+		expect(new Set(rows.map((f) => f.sortOrder)).size).toBe(3);
+		const list = await call(t, null, "GET", "/api/layers?dim=overworld");
+		expect(
+			list.body.layers[0].features.map((f: { id: number }) => f.id),
+		).toEqual([c, a]);
+	});
+});
+
+describe("feature geometry", () => {
+	const parse = (geometry: unknown, type: string) =>
+		featureInputSchema.safeParse({ type, name: "x", geometry }).success;
+
+	test("lines need two different points and areas three that enclose something", () => {
+		expect(
+			parse(
+				[
+					[1, 1],
+					[1, 1],
+				],
+				"line",
+			),
+		).toBe(false);
+		expect(
+			parse(
+				[
+					[1, 1],
+					[2, 1],
+				],
+				"line",
+			),
+		).toBe(true);
+		expect(
+			parse(
+				[
+					[0, 0],
+					[5, 0],
+					[5, 0],
+				],
+				"polygon",
+			),
+		).toBe(false);
+		expect(
+			parse(
+				[
+					[0, 0],
+					[0, 0],
+					[0, 0],
+				],
+				"polygon",
+			),
+		).toBe(false);
+		expect(
+			parse(
+				[
+					[0, 0],
+					[5, 5],
+					[10, 10],
+				],
+				"polygon",
+			),
+		).toBe(false);
+		expect(
+			parse(
+				[
+					[0, 0],
+					[5, 0],
+					[5, 5],
+				],
+				"polygon",
+			),
+		).toBe(true);
+		expect(
+			parse(
+				[
+					[-30_000_000, -30_000_000],
+					[30_000_000, -30_000_000],
+					[30_000_000, 30_000_000],
+				],
+				"polygon",
+			),
+		).toBe(true);
 	});
 });

@@ -1,6 +1,7 @@
 import { afterAll, describe, expect, test } from "bun:test";
 import { eq } from "drizzle-orm";
 import { featureRevisions, layers, revisions } from "../src/db/schema";
+import { resetStatsCache } from "../src/routes/stats";
 import { isModClient } from "../src/uploadClient";
 import type { Auth, TileApp } from "./helpers";
 import {
@@ -38,8 +39,11 @@ async function addPin(t: TileApp, user: Auth, layerId: number) {
 	return res.body.feature as { id: number };
 }
 
-const stats = (t: TileApp, user: Auth, range?: string) =>
-	call(t, user, "GET", `/api/stats${range ? `?range=${range}` : ""}`);
+/** Asks for the figures as they are now: the shared part is normally reused for a minute. */
+const stats = (t: TileApp, user: Auth, range?: string) => {
+	resetStatsCache(t.db);
+	return call(t, user, "GET", `/api/stats${range ? `?range=${range}` : ""}`);
+};
 
 const entry = (body: { leaderboard: { userId: string }[] }, id: string) =>
 	body.leaderboard.find((r) => r.userId === id);
@@ -103,12 +107,7 @@ describe("stats", () => {
 		const t = await bootTiles();
 		const first = await upload(t, await solid(T, T, RED), 0, 0);
 		await upload(t, await solid(T, T, RED), 0, 0); // the same tile again
-		const modUpload = await upload(t, await solid(T, T, RED), T * 4, 0, t.mod);
-		// An export dated after its upload (a wrong file name) is dated by the upload.
-		await t.db
-			.update(revisions)
-			.set({ exportedAt: Date.now() + 5 * 24 * 3600_000 })
-			.where(eq(revisions.id, modUpload));
+		await upload(t, await solid(T, T, RED), T * 4, 0, t.mod);
 		await t.db
 			.update(revisions)
 			.set({ exportedAt: Date.now() - 40 * 24 * 3600_000 })
@@ -292,5 +291,43 @@ describe("stats", () => {
 			layersCreated: 1,
 		});
 		expect((await stats(t, null, "1y")).status).toBe(400);
+	});
+
+	test("what is the same for everyone is reused for a minute, your own figures are not", async () => {
+		const t = await bootTiles();
+		const get = () => call(t, t.editor, "GET", "/api/stats");
+		const before = await get();
+		expect(before.body.totals.layersCreated).toBe(0);
+
+		await makeLayer(t, t.editor);
+		await upload(t, await solid(T, T, RED), 0, 0);
+		const cached = await get();
+		expect(cached.body.me).toMatchObject({ layersCreated: 1 });
+		expect(cached.body.totals).toEqual(before.body.totals);
+		expect(cached.body.leaderboard).toEqual(before.body.leaderboard);
+
+		resetStatsCache(t.db);
+		const fresh = await get();
+		expect(fresh.body.totals).toMatchObject({ layersCreated: 1, uploads: 1 });
+		expect(entry(fresh.body, "editor")).toMatchObject({ uploads: 1 });
+	});
+
+	test("the area history dates an upload by its export, else by when it was uploaded", async () => {
+		const t = await bootTiles();
+		const id = await upload(t, await solid(T, T, RED), 0, 0);
+		const tenDays = 10 * 24 * 3600_000;
+		// Uploaded 10 days ago but finished only yesterday: it still counts as 10 days old.
+		await t.db
+			.update(revisions)
+			.set({
+				createdAt: Date.now() - tenDays,
+				completedAt: Date.now() - 24 * 3600_000,
+				exportedAt: null,
+			})
+			.where(eq(revisions.id, id));
+		const week = await stats(t, null, "7d");
+		expect(week.body.areaHistory[0]).toMatchObject({
+			totalBlocks: T * T,
+		});
 	});
 });

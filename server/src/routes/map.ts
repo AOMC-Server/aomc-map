@@ -1,11 +1,16 @@
-import { updateMapSchema } from "@aomc/shared";
+import {
+	MAX_FEATURES_PER_LAYER,
+	MAX_JSON_BYTES,
+	MAX_LAYERS_PER_USER,
+	updateMapSchema,
+} from "@aomc/shared";
 import { Hono } from "hono";
-import { validator } from "hono-openapi";
 import { requireUser } from "../auth/session";
 import { mapInfo } from "../db/schema";
 import { doc } from "../openapi";
 import { canManage } from "../permissions";
 import type { AppEnv } from "../types";
+import { validate } from "../validate";
 
 const mapFields = (m: typeof mapInfo.$inferSelect) => ({
 	name: m.name,
@@ -32,6 +37,9 @@ export const mapRoutes = new Hono<AppEnv>()
 					maxUploadBytes: env.MAX_UPLOAD_BYTES,
 					maxFilesPerUpload: env.MAX_FILES_PER_UPLOAD,
 					selfDeleteWindowHours: env.SELF_DELETE_WINDOW_HOURS,
+					maxJsonBytes: MAX_JSON_BYTES,
+					maxFeaturesPerLayer: MAX_FEATURES_PER_LAYER,
+					maxLayersPerUser: MAX_LAYERS_PER_USER,
 				},
 				dimensions: dims.map((d) => ({
 					id: d.id,
@@ -51,11 +59,11 @@ export const mapRoutes = new Hono<AppEnv>()
 		doc({
 			tag: "Map",
 			summary: "Update the map settings",
-			fails: [403],
+			fails: [400, 403],
 			login: true,
 		}),
 		requireUser,
-		validator("json", updateMapSchema),
+		validate("json", updateMapSchema),
 		async (c) => {
 			if (!canManage(c.var.role)) return c.json({ error: "forbidden" }, 403);
 			const [updated] = await c.var.db

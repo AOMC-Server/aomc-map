@@ -7,12 +7,13 @@ import { loadMap } from "../permissions";
 import { resolvePreviewTarget, viewQuerySchema } from "../previewTarget";
 import type { AppEnv } from "../types";
 
-const API_PREFIXES = ["/auth/", "/blobs/"];
+const notFound = (c: Context<AppEnv>) => c.json({ error: "not found" }, 404);
 
 /** Serves the built web app, with index.html as the fallback for client-side routes. */
 export function staticRoutes(distDir: string) {
 	const app = new Hono<AppEnv>();
-	app.all("/api/*", (c) => c.json({ error: "not found" }, 404));
+	for (const prefix of ["/api", "/auth", "/blobs"])
+		app.all(`${prefix}/*`, notFound);
 	const indexPath = join(distDir, "index.html");
 	if (!existsSync(indexPath)) return app;
 
@@ -73,10 +74,13 @@ export function staticRoutes(distDir: string) {
 			}),
 		)
 		.get("*", async (c, next) => {
-			if (API_PREFIXES.some((p) => c.req.path.startsWith(p))) {
-				return c.json({ error: "not found" }, 404);
-			}
-			const res = await serveStatic({ root, path: "index.html" })(c, next);
+			const res = await serveStatic({
+				root,
+				path: "index.html",
+				onFound: (_path, c) => {
+					c.header("Cache-Control", "no-cache");
+				},
+			})(c, next);
 			return res ?? c.res;
 		});
 }
