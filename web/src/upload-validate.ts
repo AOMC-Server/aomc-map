@@ -57,13 +57,21 @@ export type ExportDates = {
 	undated: number;
 };
 
+/** The browser's IANA time zone, which uploads send along; undefined if it cannot tell. */
+export function localTimeZone(): string | undefined {
+	return Intl.DateTimeFormat().resolvedOptions().timeZone || undefined;
+}
+
 /** Which exports the files are from. Zips are not counted: their contents are read on the server. */
-export function exportDates(paths: string[]): ExportDates {
+export function exportDates(
+	paths: string[],
+	timeZone = localTimeZone(),
+): ExportDates {
 	const dates = new Set<number>();
 	let undated = 0;
 	for (const path of paths) {
 		if (ext(path) !== ".png") continue;
-		const date = parseXaeroExportDate(path);
+		const date = parseXaeroExportDate(path, timeZone);
 		if (date === null) undated++;
 		else dates.add(date);
 	}

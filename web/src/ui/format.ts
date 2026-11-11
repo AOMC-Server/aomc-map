@@ -5,20 +5,8 @@ export function formatTime(ms: number): string {
 	});
 }
 
-/** An export time as written in the file name (it has no time zone), so shown as is. */
-export function formatExportTime(ms: number): string {
-	return new Date(ms).toLocaleString(undefined, {
-		dateStyle: "medium",
-		timeStyle: "short",
-		timeZone: "UTC",
-	});
-}
-
-export function formatExportDay(ms: number): string {
-	return new Date(ms).toLocaleDateString(undefined, {
-		dateStyle: "medium",
-		timeZone: "UTC",
-	});
+export function formatDay(ms: number): string {
+	return new Date(ms).toLocaleDateString(undefined, { dateStyle: "medium" });
 }
 
 const BYTE_UNITS = ["B", "KB", "MB", "GB", "TB", "PB"];
@@ -43,14 +31,12 @@ export function formatDuration(seconds: number): string {
 	return `${m}m`;
 }
 
-/** When an upload was made: its export time (as written), or else when it was uploaded. */
+/** When an upload was made: its export time, or else when it was uploaded. */
 export function formatEventTime(r: {
 	exportedAt: number | null;
 	createdAt: number;
 }): string {
-	return r.exportedAt !== null
-		? formatExportTime(r.exportedAt)
-		: formatTime(r.createdAt);
+	return formatTime(r.exportedAt ?? r.createdAt);
 }
 
 /** The day an upload was made, as a heading for the upload log. */
@@ -58,11 +44,7 @@ export function formatEventDay(r: {
 	exportedAt: number | null;
 	createdAt: number;
 }): string {
-	return r.exportedAt !== null
-		? formatExportDay(r.exportedAt)
-		: new Date(r.createdAt).toLocaleDateString(undefined, {
-				dateStyle: "medium",
-			});
+	return formatDay(r.exportedAt ?? r.createdAt);
 }
 
 /** "3h", "25m": how long until `ms` from now, roughly. */

@@ -17,13 +17,59 @@ export function parseXaeroCoords(
 
 const EXPORT_DATE_RE = /(\d{4})-(\d{2})-(\d{2})_(\d{2})\.(\d{2})\.(\d{2})/;
 
+/** Whether `timeZone` is an IANA time zone name this runtime knows, e.g. "Europe/Berlin". */
+export function isValidTimeZone(timeZone: string): boolean {
+	try {
+		new Intl.DateTimeFormat("en-US", { timeZone });
+		return true;
+	} catch {
+		return false;
+	}
+}
+
+/** How far the clock in `timeZone` is ahead of UTC at instant `ms`. */
+function zoneOffset(timeZone: string, ms: number): number {
+	const parts = new Intl.DateTimeFormat("en-US", {
+		timeZone,
+		hourCycle: "h23",
+		year: "numeric",
+		month: "numeric",
+		day: "numeric",
+		hour: "numeric",
+		minute: "numeric",
+		second: "numeric",
+	}).formatToParts(ms);
+	const get = (type: string) =>
+		Number(parts.find((p) => p.type === type)?.value);
+	const wall = Date.UTC(
+		get("year"),
+		get("month") - 1,
+		get("day"),
+		get("hour"),
+		get("minute"),
+		get("second"),
+	);
+	return wall - Math.floor(ms / 1000) * 1000;
+}
+
+/** The instant at which the clock in `timeZone` shows `wall` (a wall-clock time written as UTC). */
+function fromZone(wall: number, timeZone: string): number {
+	// The offset may differ on either side of a daylight saving change, so check it again.
+	const first = wall - zoneOffset(timeZone, wall);
+	return wall - zoneOffset(timeZone, first);
+}
+
 /**
  * When an export was made, taken from the `YYYY-MM-DD_HH.MM.SS` that Xaero puts in the name of
  * the export file or folder. Looks at the last path segment first (a file's own name beats its
- * folder's). Read as UTC, so a given name always gives the same time wherever it is parsed.
+ * folder's). Xaero writes the local time of the player's computer: `timeZone` (an IANA name)
+ * says which zone that was; without it the time is read as UTC.
  * Returns milliseconds since the epoch, or null when no segment carries a valid date.
  */
-export function parseXaeroExportDate(path: string): number | null {
+export function parseXaeroExportDate(
+	path: string,
+	timeZone?: string,
+): number | null {
 	const segments = path.split(/[\\/]/);
 	for (let i = segments.length - 1; i >= 0; i--) {
 		const m = EXPORT_DATE_RE.exec(segments[i] as string);
@@ -47,7 +93,7 @@ export function parseXaeroExportDate(path: string): number | null {
 			minute < 60 &&
 			second < 60
 		) {
-			return ms;
+			return timeZone ? fromZone(ms, timeZone) : ms;
 		}
 	}
 	return null;

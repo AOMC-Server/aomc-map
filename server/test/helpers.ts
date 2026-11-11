@@ -169,6 +169,7 @@ export async function postUpload(
 		dim?: string;
 		coords?: { x: number; z: number }[];
 		paths?: string[];
+		timeZone?: string;
 		field?: string;
 		headers?: Record<string, string>;
 	} = {},
@@ -182,6 +183,7 @@ export async function postUpload(
 	}
 	if (opts.coords) form.append("coords", JSON.stringify(opts.coords));
 	if (opts.paths) form.append("paths", JSON.stringify(opts.paths));
+	if (opts.timeZone) form.append("timeZone", opts.timeZone);
 	return t.app.request(`/api/dimensions/${opts.dim ?? "overworld"}/uploads`, {
 		method: "POST",
 		body: form,

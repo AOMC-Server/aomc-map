@@ -19,9 +19,6 @@ const DAY = 24 * HOUR;
 /** When an upload counts as made: its export time, or else when it was uploaded (as the server stacks tiles). */
 export const eventTime = (r: TimelineRevision) => r.exportedAt ?? r.createdAt;
 
-/** Export times have no time zone, so they are shown as written (in UTC); upload times are local. */
-export const isExportTime = (r: TimelineRevision) => r.exportedAt !== null;
-
 /** The blocks the camera sees. */
 export function viewBounds(view: View, size: Size): Bounds {
 	const a = screenToBlock(view, size, 0, 0);
@@ -242,52 +239,72 @@ const STEPS: {
 
 export type Tick = { t: number; u: number; label: string };
 
+/** Days since 1970-01-01 of the local calendar date at `t`. */
+const localDay = (t: number) => {
+	const d = new Date(t);
+	return Math.round(Date.UTC(d.getFullYear(), d.getMonth(), d.getDate()) / DAY);
+};
+
+/** Local midnight at the start of day number `day` (see `localDay`). */
+const fromLocalDay = (day: number) => {
+	const d = new Date(day * DAY);
+	return new Date(
+		d.getUTCFullYear(),
+		d.getUTCMonth(),
+		d.getUTCDate(),
+	).getTime();
+};
+
 /**
- * The first tick after `t`. Ticks sit on a fixed calendar grid (counted from the epoch, weeks
- * from a Monday), never relative to what is on screen, so they stay put while panning.
+ * The first tick after `t`. Ticks sit on a fixed grid of the local calendar (days counted from
+ * the epoch, weeks from a Monday), never relative to what is on screen, so they stay put while
+ * panning.
  */
 function tickAfter(t: number, step: (typeof STEPS)[number]): number {
-	const every = (size: number, offset = 0) =>
-		(Math.floor((t - offset) / size) + 1) * size + offset;
+	const d = new Date(t);
 	switch (step.unit) {
-		case "hour":
-			return every(step.n * HOUR);
-		case "day":
+		case "hour": {
+			const hour = (Math.floor(d.getHours() / step.n) + 1) * step.n;
+			const next = new Date(
+				d.getFullYear(),
+				d.getMonth(),
+				d.getDate(),
+				hour,
+			).getTime();
+			// A daylight saving change can land the next hour on or before `t`.
+			return next > t ? next : next + step.n * HOUR;
+		}
+		case "day": {
 			// 1970-01-01 was a Thursday; a 7-day grid starting 4 days later falls on Mondays.
-			return every(step.n * DAY, step.n === 7 ? 4 * DAY : 0);
+			const offset = step.n === 7 ? 4 : 0;
+			const day = localDay(t);
+			return fromLocalDay(
+				(Math.floor((day - offset) / step.n) + 1) * step.n + offset,
+			);
+		}
 		case "month": {
-			const d = new Date(t);
 			const next =
-				(Math.floor((d.getUTCFullYear() * 12 + d.getUTCMonth()) / step.n) + 1) *
+				(Math.floor((d.getFullYear() * 12 + d.getMonth()) / step.n) + 1) *
 				step.n;
-			return Date.UTC(Math.floor(next / 12), next % 12, 1);
+			return new Date(Math.floor(next / 12), next % 12, 1).getTime();
 		}
 		case "year":
-			return Date.UTC(new Date(t).getUTCFullYear() + step.n, 0, 1);
+			return new Date(d.getFullYear() + step.n, 0, 1).getTime();
 	}
 }
 
 /** Years are on their own row (see `yearMarks`), so a yearly tick is just a line. */
 function tickLabel(t: number, step: (typeof STEPS)[number]): string {
 	const d = new Date(t);
-	const utc = { timeZone: "UTC" } as const;
-	if (
-		step.unit === "hour" &&
-		(d.getUTCHours() !== 0 || d.getUTCMinutes() !== 0)
-	)
+	if (step.unit === "hour" && (d.getHours() !== 0 || d.getMinutes() !== 0))
 		return d.toLocaleTimeString(undefined, {
-			...utc,
 			hour: "2-digit",
 			minute: "2-digit",
 		});
 	if (step.unit === "hour" || step.unit === "day")
-		return d.toLocaleDateString(undefined, {
-			...utc,
-			day: "numeric",
-			month: "short",
-		});
+		return d.toLocaleDateString(undefined, { day: "numeric", month: "short" });
 	if (step.unit === "month")
-		return d.toLocaleDateString(undefined, { ...utc, month: "short" });
+		return d.toLocaleDateString(undefined, { month: "short" });
 	return "";
 }
 
@@ -327,10 +344,11 @@ export function yearMarks(
 ): { first: number; marks: { year: number; u: number }[] } {
 	const from = uToTime(axis, u0);
 	const to = uToTime(axis, u1);
-	const first = new Date(from).getUTCFullYear();
+	const first = new Date(from).getFullYear();
+	const newYear = (y: number) => new Date(y, 0, 1).getTime();
 	const marks: { year: number; u: number }[] = [];
-	for (let y = first + 1; Date.UTC(y, 0, 1) <= to && y < first + 200; y++) {
-		const u = timeToU(axis, Date.UTC(y, 0, 1));
+	for (let y = first + 1; newYear(y) <= to && y < first + 200; y++) {
+		const u = timeToU(axis, newYear(y));
 		if (u > u0 && u < u1) marks.push({ year: y, u });
 	}
 	return { first, marks };

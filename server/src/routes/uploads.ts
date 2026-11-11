@@ -1,5 +1,6 @@
 import { basename } from "node:path";
 import {
+	isValidTimeZone,
 	parseXaeroCoords,
 	parseXaeroExportDate,
 	uploadCoordsSchema,
@@ -57,6 +58,11 @@ export const uploadRoutes = new Hono<AppEnv>().post(
 								description:
 									"JSON array of strings, aligned with the uploaded files (before ZIP expansion), naming where each came from; carries the export date",
 							},
+							timeZone: {
+								type: "string",
+								description:
+									'IANA time zone of the computer that made the exports, e.g. "Europe/Berlin". Xaero names exports by local time; without this they are read as UTC',
+							},
 						},
 					},
 				},
@@ -95,6 +101,15 @@ export const uploadRoutes = new Hono<AppEnv>().post(
 		if (uploaded.length === 0) return c.json({ error: "no files" }, 400);
 		if (uploaded.reduce((n, f) => n + f.size, 0) > env.MAX_UPLOAD_BYTES) {
 			return c.json({ error: "upload too large" }, 413);
+		}
+
+		const timeZoneField = form.get("timeZone");
+		const timeZone =
+			typeof timeZoneField === "string" && timeZoneField !== ""
+				? timeZoneField
+				: undefined;
+		if (timeZone !== undefined && !isValidTimeZone(timeZone)) {
+			return c.json({ error: `unknown time zone: ${timeZone}` }, 400);
 		}
 
 		let paths: string[] | null = null;
@@ -208,7 +223,7 @@ export const uploadRoutes = new Hono<AppEnv>().post(
 						`image must be at most ${env.MAX_IMAGE_DIM}x${env.MAX_IMAGE_DIM}`,
 					);
 				}
-				const date = parseXaeroExportDate(entry.path);
+				const date = parseXaeroExportDate(entry.path, timeZone);
 				parsed.push({
 					entry,
 					file: { x: at.x, z: at.z, width, height },

@@ -30,7 +30,6 @@ import { deleteUploadFor } from "./DeleteUploadDialog";
 import {
 	formatEventDay,
 	formatEventTime,
-	formatExportTime,
 	formatRemaining,
 	formatTime,
 } from "./format";
@@ -114,7 +113,7 @@ function RevisionRow(props: { r: RevisionInfo; odd: boolean; now: number }) {
 				</span>
 				<span class="rev-meta">
 					{r.exportedAt !== null
-						? `Exported ${formatExportTime(r.exportedAt)} · uploaded ${formatTime(r.createdAt)}`
+						? `Exported ${formatTime(r.exportedAt)} · uploaded ${formatTime(r.createdAt)}`
 						: `Uploaded ${formatTime(r.createdAt)}`}
 				</span>
 			</button>

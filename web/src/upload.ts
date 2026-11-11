@@ -5,6 +5,7 @@ import type { Bounds } from "./map/geometry";
 import { fetchRevision, loadRevisions, watchRevision } from "./revisions";
 import { currentMap } from "./state";
 import type { UploadItem } from "./upload-files";
+import { localTimeZone } from "./upload-validate";
 
 export type UploadState =
 	| { phase: "idle" }
@@ -57,6 +58,9 @@ export function startUpload(dimSlug: string, items: UploadItem[]) {
 	const form = new FormData();
 	for (const f of files) form.append("files[]", f, f.name);
 	form.append("paths", JSON.stringify(items.map((i) => i.path)));
+	// Xaero names exports by the local time of this computer.
+	const timeZone = localTimeZone();
+	if (timeZone) form.append("timeZone", timeZone);
 
 	uploadState.value = {
 		phase: "uploading",

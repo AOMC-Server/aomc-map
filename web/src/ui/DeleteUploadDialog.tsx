@@ -2,7 +2,7 @@ import { signal } from "@preact/signals";
 import { mapView } from "../controller";
 import { deleteUpload } from "../revisions";
 import { highlightBbox, type RevisionInfo, user } from "../state";
-import { formatExportTime, formatTime } from "./format";
+import { formatTime } from "./format";
 import { Modal } from "./Modal";
 
 /** The upload whose delete is being confirmed. */
@@ -29,7 +29,7 @@ export function DeleteUploadDialog() {
 				{r.exportedAt !== null && (
 					<>
 						<dt>Exported</dt>
-						<dd>{formatExportTime(r.exportedAt)}</dd>
+						<dd>{formatTime(r.exportedAt)}</dd>
 					</>
 				)}
 				<dt>Uploaded</dt>

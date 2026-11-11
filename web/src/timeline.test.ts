@@ -141,7 +141,7 @@ describe("axis", () => {
 		expect(ticks.length).toBeGreaterThan(2);
 		for (const [i, t] of ticks.entries()) {
 			if (i > 0) expect(t.t).toBeGreaterThan((ticks[i - 1] as { t: number }).t);
-			expect(new Date(t.t).getUTCHours()).toBe(0);
+			expect(new Date(t.t).getHours()).toBe(0);
 		}
 	});
 
@@ -186,7 +186,9 @@ describe("axis", () => {
 		const { first, marks } = yearMarks(axis, 0, axis.length);
 		expect(first).toBe(2025);
 		expect(marks.map((m) => m.year)).toEqual([2026, 2027]);
-		expect(marks[0]?.u).toBeCloseTo(timeToU(axis, Date.UTC(2026, 0, 1)));
+		expect(marks[0]?.u).toBeCloseTo(
+			timeToU(axis, new Date(2026, 0, 1).getTime()),
+		);
 		expect(yearMarks(axis, marks[0]?.u as number, axis.length).first).toBe(
 			2026,
 		);

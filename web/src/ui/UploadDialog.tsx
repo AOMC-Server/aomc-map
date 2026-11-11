@@ -15,7 +15,7 @@ import {
 	type UploadItem,
 } from "../upload-files";
 import { exportDates, formatBytes, validateFiles } from "../upload-validate";
-import { formatExportDay } from "./format";
+import { formatDay } from "./format";
 import { Modal } from "./Modal";
 
 function ProgressBar(props: { percent?: number; label: string }) {
@@ -190,9 +190,9 @@ export function UploadDialog() {
 										<div class="muted">
 											{dates.dates.length} export
 											{dates.dates.length === 1 ? "" : "s"} made{" "}
-											{formatExportDay(dates.dates[0] as number)}
+											{formatDay(dates.dates[0] as number)}
 											{dates.dates.length > 1 &&
-												` to ${formatExportDay(dates.dates.at(-1) as number)}`}
+												` to ${formatDay(dates.dates.at(-1) as number)}`}
 										</div>
 									)}
 									{dates.undated > 0 && (

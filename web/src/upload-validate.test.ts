@@ -55,18 +55,26 @@ describe("formatBytes", () => {
 
 describe("exportDates", () => {
 	test("reads dates from file names and folders, once per export", () => {
-		const r = exportDates([
-			"2026-02-09_19.45.47_x-384_z-3776.png",
-			"2026-02-10_15.06.41/0_0_x-1248_z-1472.png",
-			"2026-02-10_15.06.41/0_1_x-1248_z-448.png",
-			"2026-02-10_15.06.41.zip",
-			"stray_x0_z0.png",
-		]);
+		const r = exportDates(
+			[
+				"2026-02-09_19.45.47_x-384_z-3776.png",
+				"2026-02-10_15.06.41/0_0_x-1248_z-1472.png",
+				"2026-02-10_15.06.41/0_1_x-1248_z-448.png",
+				"2026-02-10_15.06.41.zip",
+				"stray_x0_z0.png",
+			],
+			"UTC",
+		);
 		expect(r.dates).toEqual([
 			Date.UTC(2026, 1, 9, 19, 45, 47),
 			Date.UTC(2026, 1, 10, 15, 6, 41),
 		]);
 		expect(r.undated).toBe(1);
+	});
+
+	test("reads names in the given time zone", () => {
+		const r = exportDates(["2026-07-01_12.00.00_x0_z0.png"], "Europe/Berlin");
+		expect(r.dates).toEqual([Date.UTC(2026, 6, 1, 10)]);
 	});
 
 	test("no files, no dates", () => {

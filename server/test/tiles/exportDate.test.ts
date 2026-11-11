@@ -36,6 +36,44 @@ describe("export dates", () => {
 		expect(rev.exportedAt).toBe(Date.UTC(2026, 1, 9, 19, 45, 47));
 	});
 
+	test("names are read in the uploader's time zone, across daylight saving", async () => {
+		const t = await bootTiles();
+		const at = async (name: string, timeZone?: string) => {
+			const res = await postUpload(
+				t,
+				t.editor,
+				[{ name, data: await solid(T, T, RED) }],
+				{ timeZone },
+			);
+			expect(res.status).toBe(202);
+			const { revisionId } = (await res.json()) as { revisionId: number };
+			return (await revisionOf(t, revisionId)).exportedAt;
+		};
+		// Berlin is UTC+1 in winter and UTC+2 in summer.
+		expect(await at(OLD, "Europe/Berlin")).toBe(
+			Date.UTC(2026, 1, 9, 18, 45, 47),
+		);
+		expect(await at("2025-07-01_12.00.00_x0_z0.png", "Europe/Berlin")).toBe(
+			Date.UTC(2025, 6, 1, 10),
+		);
+		expect(await at("2025-07-01_12.00.00_x0_z0.png", "America/New_York")).toBe(
+			Date.UTC(2025, 6, 1, 16),
+		);
+		// Without a time zone the name is read as UTC.
+		expect(await at(OLD)).toBe(Date.UTC(2026, 1, 9, 19, 45, 47));
+	});
+
+	test("an unknown time zone is rejected", async () => {
+		const t = await bootTiles();
+		const res = await postUpload(
+			t,
+			t.editor,
+			[{ name: OLD, data: await solid(T, T, RED) }],
+			{ timeZone: "Mars/Olympus_Mons" },
+		);
+		expect(res.status).toBe(400);
+	});
+
 	test("an older export uploaded later goes underneath the newer one", async () => {
 		const t = await bootTiles();
 		// New export: red over the left half. Old export: blue over the whole tile.
