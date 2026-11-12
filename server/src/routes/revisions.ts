@@ -304,7 +304,7 @@ export const revisionRoutes = new Hono<AppEnv>()
 						lastWaiting = event.message;
 						send(event);
 					}
-				}, 3000);
+				}, 1000);
 				const ping = setInterval(() => {
 					chain = chain.then(() => stream.write(": ping\n\n"));
 				}, 20_000);

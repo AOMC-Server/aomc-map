@@ -2,6 +2,7 @@
 export const messages = {
 	starting: "Starting",
 	upload: {
+		reading: "Reading the uploaded images",
 		tiles: "Combining the images into map tiles",
 		zoom: (level: number) => `Updating zoomed-out tiles (zoom level ${level})`,
 		publishing: "Publishing to the map",

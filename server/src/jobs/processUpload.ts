@@ -124,6 +124,15 @@ export async function processUpload(
 	const tiles = [...byTile.values()];
 	const batchSize = Math.max(1, Math.floor(batchBytes / (T * T * 4)));
 	let n = 0;
+	// Decoding a source image can take a while and nothing else is reported meanwhile, so it
+	// counts as progress too: how many images each batch reads, in total.
+	let reads = 0;
+	for (let start = 0; start < tiles.length; start += batchSize) {
+		reads += new Set(
+			tiles.slice(start, start + batchSize).flatMap((tile) => tile.files),
+		).size;
+	}
+	let read = 0;
 	for (let start = 0; start < tiles.length; start += batchSize) {
 		const batch = tiles.slice(start, start + batchSize);
 		const canvases = batch.map(() => emptyTile(T));
@@ -137,6 +146,7 @@ export async function processUpload(
 		}
 		for (const index of [...covered.keys()].sort((a, b) => a - b)) {
 			const f = files[index] as (typeof files)[number];
+			say(messages.upload.reading, read++, reads);
 			const img = await decodeRaw(
 				`${incomingDir(env, revisionId)}/${index}.png`,
 				env.MAX_IMAGE_DIM,

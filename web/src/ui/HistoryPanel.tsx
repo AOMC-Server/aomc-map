@@ -230,16 +230,24 @@ export function HistoryPanel() {
 	const bounds = useViewBounds(inView);
 	const [now, setNow] = useState(Date.now());
 
+	// Quicker while something is queued, running or being deleted, so its state is not stale.
+	const active =
+		deleting.value.size > 0 ||
+		revisionsData.value.some((r) => inFlight(r) || r.deleting);
+
 	// Reload when a new head, rewritten history or another dimension appears, and keep polling
 	// for running jobs.
 	useEffect(() => {
 		void loadRevisions();
-		const timer = setInterval(() => {
-			void loadRevisions();
-			setNow(Date.now());
-		}, 10_000);
+		const timer = setInterval(
+			() => {
+				void loadRevisions();
+				setNow(Date.now());
+			},
+			active ? 2000 : 10_000,
+		);
 		return () => clearInterval(timer);
-	}, [head, epoch, dim]);
+	}, [head, epoch, dim, active]);
 
 	useEffect(
 		() => () => {

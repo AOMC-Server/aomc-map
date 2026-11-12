@@ -339,13 +339,16 @@ describe("telling people what is going on", () => {
 	test("progress messages read as sentences and say how far", async () => {
 		const t = await bootTiles();
 		const seen: { message?: string; done?: number; total?: number }[] = [];
+		// The first revision of a new map is 1; the worker starts as soon as it is queued.
+		t.services.progress.subscribe(1, (e) => seen.push(e));
 		const res = await postUpload(t, t.editor, [
 			{ name: "a_x0_z0.png", data: await png(T, T, () => RED) },
 		]);
-		const { revisionId } = (await res.json()) as { revisionId: number };
-		t.services.progress.subscribe(revisionId, (e) => seen.push(e));
+		expect(((await res.json()) as { revisionId: number }).revisionId).toBe(1);
 		await t.services.worker.run();
 		const said = seen.map((e) => e.message);
+		expect(said).toContain(messages.starting);
+		expect(said).toContain(messages.upload.reading);
 		expect(said).toContain(messages.upload.tiles);
 		expect(said).toContain(messages.upload.zoom(1));
 		expect(said).toContain(messages.upload.publishing);

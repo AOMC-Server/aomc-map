@@ -6,7 +6,7 @@ import { formatProgress, formatTime } from "./format";
 
 type Status = InferResponseType<typeof api.api.admin.history.$get, 200>;
 
-const POLL_MS = 1000;
+const POLL_MS = 500;
 
 const running = (s: Status | null) =>
 	s?.recompute?.status === "pending" || s?.recompute?.status === "processing";
