@@ -19,6 +19,7 @@ import { describeDimensionScale, formatScale, parseScale } from "../scale";
 import {
 	addDimension,
 	mapScope,
+	setMaintenance,
 	updateDimension,
 	updateMapName,
 } from "../sharing";
@@ -60,23 +61,62 @@ function SettingsTab() {
 	};
 
 	return (
-		<form class="settings-form" onSubmit={save}>
-			<label class="field">
-				<span class="label">Map name</span>
-				<input
-					type="text"
-					value={name}
-					maxLength={MAX_NAME}
-					onInput={(e) => setName(e.currentTarget.value)}
-				/>
-			</label>
-			<p class="muted hint">
-				Tile size: {detail.map.tileSize} blocks per tile edge (fixed).
-			</p>
-			<button type="submit" class="btn primary" disabled={busy || !name.trim()}>
-				Save
-			</button>
-		</form>
+		<>
+			<form class="settings-form" onSubmit={save}>
+				<label class="field">
+					<span class="label">Map name</span>
+					<input
+						type="text"
+						value={name}
+						maxLength={MAX_NAME}
+						onInput={(e) => setName(e.currentTarget.value)}
+					/>
+				</label>
+				<p class="muted hint">
+					Tile size: {detail.map.tileSize} blocks per tile edge (fixed).
+				</p>
+				<button
+					type="submit"
+					class="btn primary"
+					disabled={busy || !name.trim()}
+				>
+					Save
+				</button>
+			</form>
+			<MaintenanceToggle />
+		</>
+	);
+}
+
+function MaintenanceToggle() {
+	const on = currentMap.value?.map.maintenance ?? false;
+	const [busy, setBusy] = useState(false);
+	return (
+		<label class={`toggle ${on ? "maintenance-on" : ""}`}>
+			<input
+				type="checkbox"
+				checked={on}
+				disabled={busy}
+				onChange={async (e) => {
+					const input = e.currentTarget;
+					const next = input.checked;
+					setBusy(true);
+					try {
+						if (!(await setMaintenance(next))) input.checked = !next;
+					} finally {
+						setBusy(false);
+					}
+				}}
+			/>
+			<span>
+				Maintenance mode
+				<span class="muted hint">
+					Makes the map read only for everyone but owners: no uploads, drawing,
+					layer or dimension changes, deletions or invites. Everyone sees a
+					banner saying the map is in maintenance.
+				</span>
+			</span>
+		</label>
 	);
 }
 

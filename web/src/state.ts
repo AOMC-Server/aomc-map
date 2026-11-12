@@ -1,6 +1,6 @@
 import type { Dye } from "@aomc/shared/colors";
 import type { FeatureType, Point } from "@aomc/shared/features";
-import { canEdit, canModerate } from "@aomc/shared/roles";
+import { canEdit, canModerate, isReadOnly } from "@aomc/shared/roles";
 import type { DimensionTheme } from "@aomc/shared/schemas";
 import type { View } from "@aomc/shared/view";
 import { computed, signal } from "@preact/signals";
@@ -161,11 +161,22 @@ export type EditorTarget =
 	| { mode: "edit"; layerId: number; featureId: number };
 export const editor = signal<EditorTarget | null>(null);
 
+/** The map is in maintenance and you are not an owner: you can look, but not change anything. */
+export const readOnly = computed(() => {
+	const detail = currentMap.value;
+	return detail !== null && isReadOnly(detail.role, detail.map.maintenance);
+});
+
 /** Edits are only possible while looking at the present. */
 const viewingHistory = computed(() => rev.value !== null);
 export const canEditMap = computed(() => {
 	const role = currentMap.value?.role;
-	return !viewingHistory.value && role !== undefined && canEdit(role);
+	return (
+		!viewingHistory.value &&
+		!readOnly.value &&
+		role !== undefined &&
+		canEdit(role)
+	);
 });
 
 export const isModerator = computed(() => {

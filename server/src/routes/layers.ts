@@ -114,7 +114,7 @@ export const layerRoutes = new Hono<AppEnv>()
 		}),
 		validate("query", layersQuerySchema),
 		(c) => {
-			const { db, user, map, role } = c.var;
+			const { db, user, map, role, readOnly } = c.var;
 			const query = c.req.valid("query");
 			const at = timeOfRev(
 				db,
@@ -162,8 +162,8 @@ export const layerRoutes = new Hono<AppEnv>()
 				layers: visible.map((l) => ({
 					...serializeLayer(
 						l,
-						canEditLayer(role, l, roleOn(l)),
-						canManageLayer(user, role, l),
+						!readOnly && canEditLayer(role, l, roleOn(l)),
+						!readOnly && canManageLayer(user, role, l),
 					),
 					features: byLayer.get(l.id) ?? [],
 				})),

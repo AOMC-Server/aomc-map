@@ -1,0 +1,1 @@
+ALTER TABLE `map_info` ADD `maintenance` integer DEFAULT false NOT NULL;

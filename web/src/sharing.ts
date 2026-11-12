@@ -157,6 +157,9 @@ const mapChange = (call: Parameters<typeof ok>[0]) => ok(call, refreshMap);
 export const updateMapName = (name: string) =>
 	mapChange(() => api.api.map.$patch({ json: { name } }));
 
+export const setMaintenance = (maintenance: boolean) =>
+	mapChange(() => api.api.map.$patch({ json: { maintenance } }));
+
 export const addDimension = (
 	slug: string,
 	name: string,

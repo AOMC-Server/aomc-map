@@ -40,6 +40,7 @@ type RevisionRow = NonNullable<ReturnType<typeof loadRevision>>;
 type DeleteAccess = {
 	actor: { id: string } | null;
 	role: Role;
+	readOnly: boolean;
 	windowMs: number;
 	now: number;
 };
@@ -48,6 +49,7 @@ function deleteAccess(c: Context<AppEnv>): DeleteAccess {
 	return {
 		actor: c.var.user,
 		role: c.var.role,
+		readOnly: c.var.readOnly,
 		windowMs: c.var.env.SELF_DELETE_WINDOW_HOURS * HOUR,
 		now: Date.now(),
 	};
@@ -76,6 +78,7 @@ function serialize(r: RevisionRow, access: DeleteAccess, deleting: boolean) {
 	const canDelete =
 		r.kind === "upload" &&
 		!deleting &&
+		!access.readOnly &&
 		canDeleteUpload(access.actor, access.role, r, access.windowMs, access.now);
 	const own = access.actor !== null && access.actor.id === r.authorId;
 	const deletableUntil =

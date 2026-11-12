@@ -1323,7 +1323,7 @@ input[type="range"]:disabled {
 	bottom: calc(var(--safe-bottom) + 20px);
 }
 
-/* Boss bar: shown while looking at an older revision or a single upload. */
+/* Boss bars: shown during maintenance, and while looking at an older revision or a single upload. */
 .bossbar-wrap {
 	position: absolute;
 	top: calc(var(--safe-top) + var(--toolbar-h, 48px) + 16px);
@@ -1331,8 +1331,10 @@ input[type="range"]:disabled {
 	right: 8px;
 	z-index: 8;
 	display: flex;
+	flex-direction: column;
+	gap: 8px;
 	/* Fixed under the toolbar, so it does not move when the side panel opens or is resized. */
-	justify-content: flex-start;
+	align-items: flex-start;
 	pointer-events: none;
 }
 
@@ -1383,6 +1385,50 @@ input[type="range"]:disabled {
 
 .bossbar-track.purple > span {
 	background: #a23ee0;
+}
+
+.bossbar.maintenance {
+	border-color: var(--danger);
+}
+
+.bossbar-track.maintenance > span {
+	background: repeating-linear-gradient(
+		-45deg,
+		#e8c41a 0 8px,
+		#1e1e1e 8px 16px
+	);
+}
+
+/* The same warning on the standalone pages, under the title bar. */
+.maintenance-notice {
+	position: relative;
+	display: flex;
+	align-items: center;
+	gap: 12px;
+	flex-wrap: wrap;
+	padding: 16px 16px 10px;
+	font-weight: 600;
+	background: color-mix(in srgb, var(--danger) 30%, var(--s1));
+	border-bottom: var(--bw) solid var(--danger);
+}
+
+.maintenance-notice::before {
+	content: "";
+	position: absolute;
+	top: 0;
+	left: 0;
+	right: 0;
+	height: 6px;
+	background: repeating-linear-gradient(
+		-45deg,
+		#e8c41a 0 8px,
+		#1e1e1e 8px 16px
+	);
+}
+
+.maintenance-notice p {
+	flex: 1;
+	margin: 0;
 }
 
 /* ---------------------------------------------------------------------------------------------
@@ -2822,6 +2868,11 @@ body.resizing {
 	display: block;
 	margin: 2px 0 0;
 	font-weight: 400;
+}
+
+.toggle.maintenance-on {
+	border-color: var(--danger);
+	background: color-mix(in srgb, var(--danger) 30%, var(--s2));
 }
 
 .visually-hidden {

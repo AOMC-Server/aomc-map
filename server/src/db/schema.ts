@@ -71,6 +71,8 @@ export const mapInfo = sqliteTable("map_info", {
 	headRev: integer("head_rev").notNull().default(0),
 	/** Bumped when history is rewritten (an upload is deleted), so cached tiles are not reused. */
 	epoch: integer("epoch").notNull().default(0),
+	/** Read only for everyone but owners. */
+	maintenance: bool("maintenance").notNull().default(false),
 	createdAt: createdAt(),
 });
 

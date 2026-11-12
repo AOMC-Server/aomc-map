@@ -1,7 +1,13 @@
 import { canEdit } from "@aomc/shared/roles";
 import { useEffect, useState } from "preact/hooks";
 import { loginUrl } from "../api";
-import { currentMap, dimSlug, user, visibleDimensions } from "../state";
+import {
+	currentMap,
+	dimSlug,
+	readOnly,
+	user,
+	visibleDimensions,
+} from "../state";
 import {
 	resetUpload,
 	showUploadOnMap,
@@ -105,6 +111,11 @@ export function UploadDialog() {
 								Log in with Discord
 							</a>{" "}
 							to upload.
+						</p>
+					) : readOnly.value ? (
+						<p class="muted">
+							The map is in maintenance, so uploads are paused. Try again once
+							it is over.
 						</p>
 					) : !canUpload ? (
 						<p class="muted">

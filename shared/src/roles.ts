@@ -18,6 +18,10 @@ export const canModerate = (role: Role) => atLeast(role, "moderator");
 /** Members, invites and map settings. */
 export const canManage = (role: Role) => atLeast(role, "owner");
 
+/** In maintenance mode the map is read only for everyone but owners. */
+export const isReadOnly = (role: Role, maintenance: boolean) =>
+	maintenance && !canManage(role);
+
 /** Roles from highest to lowest. */
 export const ROLES_DESCENDING: readonly Role[] = [
 	"owner",

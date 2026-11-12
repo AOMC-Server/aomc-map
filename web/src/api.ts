@@ -1,7 +1,7 @@
 import { hc } from "hono/client";
 import type { AppType } from "../../server/src/app";
 import { type ErrorBody, failureMessage } from "./errors";
-import { notice } from "./state";
+import { currentMap, notice } from "./state";
 
 /** Typed client; request and response types come from the server's route definitions. */
 export const api = hc<AppType>("/");
@@ -34,6 +34,16 @@ export type Success<R extends Res> = Exclude<
 	{ error: string }
 >;
 
+/** A write was refused for maintenance: show the banner now rather than at the next refresh. */
+function noticeMaintenance() {
+	const detail = currentMap.value;
+	if (detail && !detail.map.maintenance)
+		currentMap.value = {
+			...detail,
+			map: { ...detail.map, maintenance: true },
+		};
+}
+
 type Result<T> =
 	| { ok: true; body: T }
 	| { ok: false; error: string; status: number; detail: ErrorBody | null };
@@ -46,6 +56,8 @@ export async function attempt<R extends Res>(
 		const res = await call();
 		if (res.ok) return { ok: true, body: (await res.json()) as Success<R> };
 		const detail = (await res.json().catch(() => null)) as ErrorBody | null;
+		if (res.status === 503 && detail?.reason === "maintenance")
+			noticeMaintenance();
 		return {
 			ok: false,
 			error: failureMessage(res.status, detail),

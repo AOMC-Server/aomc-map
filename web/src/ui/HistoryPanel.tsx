@@ -13,6 +13,7 @@ import {
 	hoveredRevision,
 	isolatedUpload,
 	type RevisionInfo,
+	readOnly,
 	rev,
 	revisionsData,
 	sidePanel,
@@ -62,6 +63,7 @@ function describe(r: RevisionInfo): string {
 /** Whether you may delete the upload now; the server decides, this only hides the button. */
 function deletable(r: RevisionInfo, now: number) {
 	return (
+		!readOnly.value &&
 		r.kind === "upload" &&
 		(r.status === "done" || r.status === "failed") &&
 		r.canDelete &&

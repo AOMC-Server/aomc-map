@@ -24,5 +24,7 @@ export type AppEnv = {
 		/** Set for every /api request. */
 		map: MapRow;
 		role: Role;
+		/** The map is in maintenance and the actor is not an owner: every map write is refused. */
+		readOnly: boolean;
 	};
 };

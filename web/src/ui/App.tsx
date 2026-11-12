@@ -2,11 +2,11 @@ import { useEffect, useRef } from "preact/hooks";
 import { boot } from "../controller";
 import { activeTool, editor, embed, loadError, sidePanel } from "../state";
 import { uploadOpen } from "../upload";
+import { Banners } from "./Banners";
 import { ContextMenu } from "./ContextMenu";
 import { DeleteUploadDialog, deleteUploadFor } from "./DeleteUploadDialog";
 import { FeatureEditor } from "./FeatureEditor";
 import { FeatureHistory, featureHistoryFor } from "./FeatureHistory";
-import { HistoryBanner } from "./HistoryBanner";
 import { HistoryPanel } from "./HistoryPanel";
 import { Hotbar } from "./Hotbar";
 import { LayerPanel } from "./LayerPanel";
@@ -71,7 +71,7 @@ export function App() {
 					<SidePanel />
 					<ContextMenu />
 					<MeasureCard />
-					<HistoryBanner />
+					<Banners />
 					<StatusBar />
 					<CenterCrosshair />
 					<Hotbar />

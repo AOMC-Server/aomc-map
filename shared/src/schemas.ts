@@ -27,7 +27,11 @@ const slugSchema = z
 	.regex(/^[a-z0-9][a-z0-9_-]*$/, "lowercase letters, digits, - and _ only");
 
 export const updateMapSchema = z
-	.object({ name: z.string().trim().min(1).max(MAX_NAME).optional() })
+	.object({
+		name: z.string().trim().min(1).max(MAX_NAME).optional(),
+		/** Read only for everyone but owners. */
+		maintenance: z.boolean().optional(),
+	})
 	.refine(nonEmpty, "nothing to update");
 
 /**

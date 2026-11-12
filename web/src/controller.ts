@@ -288,6 +288,8 @@ export async function boot(container: HTMLElement) {
 	let layersDim: string | null = null;
 	effect(() => {
 		currentMap.value?.map.headRev;
+		// What you may edit changes with maintenance.
+		currentMap.value?.map.maintenance;
 		const dim = dimSlug.value;
 		rev.value;
 		clearTimeout(layersTimer);

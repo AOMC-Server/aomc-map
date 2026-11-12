@@ -17,6 +17,7 @@ const mapFields = (m: typeof mapInfo.$inferSelect) => ({
 	tileSize: m.tileSize,
 	headRev: m.headRev,
 	epoch: m.epoch,
+	maintenance: m.maintenance,
 	createdAt: m.createdAt,
 });
 
@@ -64,6 +65,8 @@ export const mapRoutes = new Hono<AppEnv>()
 		doc({
 			tag: "Map",
 			summary: "Update the map settings",
+			description:
+				'`maintenance` makes the map read only for everyone but owners: their writes answer 503 with `reason: "maintenance"`, except to their own account, tokens and short links.',
 			fails: [400, 403],
 			login: true,
 		}),

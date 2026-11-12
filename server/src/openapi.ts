@@ -7,6 +7,7 @@ export const apiDescription = [
 	"A token has scopes (`read`, `upload`, `features`, `moderate`, `manage`) and never more access than its user: without `read`, GETs are answered as to an anonymous visitor; a write outside its scopes answers 403.",
 	"Writes made with a cookie must come from `PUBLIC_URL` (CSRF check); Bearer requests need no such check.",
 	`Errors are JSON \`{"error": "…"}\`; a request that fails validation (400) also lists \`issues\`, each with a \`path\` and a \`message\`. JSON bodies are limited to ${MAX_JSON_BYTES / 1024 / 1024} MB (413). Resources you may not see answer 404.`,
+	'While the map is in maintenance (`maintenance` in `GET /api/map`), writes by anyone but owners answer 503 with `reason: "maintenance"`.',
 ].join(" ");
 
 export const securitySchemes = {

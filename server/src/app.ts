@@ -1,4 +1,4 @@
-import { MAX_JSON_BYTES } from "@aomc/shared";
+import { isReadOnly, MAX_JSON_BYTES } from "@aomc/shared";
 import { Hono, type MiddlewareHandler } from "hono";
 import { bodyLimit } from "hono/body-limit";
 import { HTTPException } from "hono/http-exception";
@@ -33,6 +33,10 @@ import type { AppEnv } from "./types";
 
 const isUpload = (path: string) =>
 	/^\/api\/dimensions\/[^/]+\/uploads\/?$/.test(path);
+
+/** Writes that leave the map alone: your own account and tokens, and short links. */
+const worksInMaintenance = (path: string) =>
+	/^\/api\/(me|tokens|links)(\/.*)?$/.test(path);
 
 const jsonLimit = bodyLimit({
 	maxSize: MAX_JSON_BYTES,
@@ -70,6 +74,17 @@ export function createApp({ db, env, services, fetch: fetchFn }: AppDeps) {
 			const cap =
 				c.var.scopes && !isRead(c.req.method) ? roleCap(c.var.scopes) : null;
 			c.set("role", cap && !atLeast(cap, role) ? cap : role);
+			const readOnly = isReadOnly(role, map.maintenance);
+			c.set("readOnly", readOnly);
+			if (readOnly && !isRead(c.req.method) && !worksInMaintenance(c.req.path))
+				return c.json(
+					{
+						error:
+							"The map is in maintenance: it is read only until an owner turns maintenance off.",
+						reason: "maintenance",
+					},
+					503,
+				);
 			await next();
 		})
 		.use("/api/layers/*", limitWrites)

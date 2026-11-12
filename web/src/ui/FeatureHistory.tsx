@@ -6,7 +6,7 @@ import {
 	loadFeatureHistory,
 	restoreFeatureRevision,
 } from "../revisions";
-import { isModerator, popup } from "../state";
+import { isModerator, popup, readOnly } from "../state";
 import { formatTime } from "./format";
 import { Modal } from "./Modal";
 
@@ -107,7 +107,7 @@ export function FeatureHistory() {
 								{e.authorName} · {formatTime(e.createdAt)}
 							</div>
 						</div>
-						{isModerator.value && i > 0 && (
+						{isModerator.value && !readOnly.value && i > 0 && (
 							<button
 								type="button"
 								class="btn small"
@@ -132,6 +132,12 @@ export function FeatureHistory() {
 			)}
 			{!isModerator.value && entries && (
 				<p class="muted">Only moderators can restore earlier versions.</p>
+			)}
+			{isModerator.value && readOnly.value && entries && (
+				<p class="muted">
+					The map is in maintenance, so earlier versions can't be restored for
+					now.
+				</p>
 			)}
 		</Modal>
 	);
