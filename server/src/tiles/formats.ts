@@ -8,6 +8,7 @@ import sharp from "sharp";
 export const TILE_FORMATS = {
 	webp: { suffix: "webp", type: "image/webp" },
 	png: { suffix: "png", type: "image/png" },
+	"png-black": { suffix: "black.png", type: "image/png" },
 	"jpg-95": { suffix: "95.jpg", type: "image/jpeg" },
 	"jpg-80": { suffix: "80.jpg", type: "image/jpeg" },
 	"webp-lossy": { suffix: "lossy.webp", type: "image/webp" },
@@ -28,7 +29,7 @@ export function formatOfSuffix(suffix: string): TileFormat | undefined {
 	);
 }
 
-/** Converts a stored lossless WebP tile. JPEG has no transparency, so empty areas become black. */
+/** Converts a stored lossless WebP tile. JPEG and `png-black` have no transparency, so empty areas become black. */
 export function transcode(
 	webp: Buffer,
 	format: DerivedFormat,
@@ -37,6 +38,9 @@ export function transcode(
 	switch (format) {
 		case "png":
 			return img.png().toBuffer();
+		case "png-black":
+			// Opaque RGB like the v1 map's tiles, which had no transparency.
+			return img.flatten({ background: "#000000" }).png().toBuffer();
 		case "jpg-95":
 			// No chroma subsampling: it smears the sharp block edges of a map.
 			return img

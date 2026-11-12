@@ -9,6 +9,7 @@ export default defineConfig({
 		proxy: {
 			"/api": backend,
 			"/blobs": backend,
+			"^/map/": backend,
 			"/auth": backend,
 			"/scalar": backend,
 		},

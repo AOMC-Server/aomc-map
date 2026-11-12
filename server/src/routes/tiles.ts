@@ -61,6 +61,7 @@ export const tileRoutes = new Hono<AppEnv>()
 				"| --- | --- |",
 				"| `webp` (default) | Lossless WebP, as stored |",
 				"| `png` | Lossless PNG |",
+				"| `png-black` | Lossless PNG without transparency: unexplored areas are black |",
 				"| `jpg-95` | JPEG, quality 95 |",
 				"| `jpg-80` | JPEG, quality 80 |",
 				"| `webp-lossy` | Lossy WebP, quality 80 |",
@@ -78,7 +79,7 @@ export const tileRoutes = new Hono<AppEnv>()
 				v: "The map epoch (`epoch` of `GET /api/map`). `rev` and `only` responses are cached for good only when it matches",
 				only: "Upload revision id: show only what that upload added (finished uploads only)",
 				format:
-					"`webp` (default), `png`, `jpg-95`, `jpg-80` or `webp-lossy`; see the table above",
+					"`webp` (default), `png`, `png-black`, `jpg-95`, `jpg-80` or `webp-lossy`; see the table above",
 			},
 		}),
 		async (c) => {

@@ -20,6 +20,7 @@ import { eventRoutes } from "./routes/events";
 import { featureRoutes } from "./routes/features";
 import { inviteRoutes } from "./routes/invites";
 import { layerRoutes } from "./routes/layers";
+import { legacyTileRoutes } from "./routes/legacyTiles";
 import { linkRoutes, shortLinkRedirect } from "./routes/links";
 import { mapRoutes } from "./routes/map";
 import { meRoutes } from "./routes/me";
@@ -64,8 +65,9 @@ export function createApp({ db, env, services, fetch: fetchFn }: AppDeps) {
 		})
 		.use(services.traffic.middleware)
 		.use((c, next) => (isUpload(c.req.path) ? next() : jsonLimit(c, next)))
-		// Registered before auth: blobs are public and need no user lookup.
+		// Registered before auth: blobs and tiles are public and need no user lookup.
 		.route("/blobs", blobRoutes)
+		.route("/map", legacyTileRoutes)
 		.use(authMiddleware)
 		.use(scopeMiddleware)
 		.use("/api/*", async (c, next) => {

@@ -39,7 +39,7 @@ describe("static web app", () => {
 
 	test("unknown API, auth and blob paths are JSON 404s, not the SPA", async () => {
 		const { app } = makeTestApp({ WEB_DIST: makeDist() });
-		for (const path of ["/api/nope", "/auth/nope", "/blobs/"]) {
+		for (const path of ["/api/nope", "/auth/nope", "/blobs/", "/map/nope"]) {
 			const res = await app.request(path);
 			expect(res.status).toBe(404);
 			expect(res.headers.get("content-type")).toContain("application/json");
@@ -57,7 +57,12 @@ describe("static web app", () => {
 	test("unknown API, auth and blob paths are 404s for every method", async () => {
 		const { app } = makeTestApp({ WEB_DIST: makeDist() });
 		for (const method of ["POST", "PUT", "DELETE"]) {
-			for (const path of ["/api/nope", "/auth/nope", "/blobs/nope"]) {
+			for (const path of [
+				"/api/nope",
+				"/auth/nope",
+				"/blobs/nope",
+				"/map/nope",
+			]) {
 				const res = await app.request(path, { method });
 				expect(res.status).toBe(404);
 				expect(res.headers.get("content-type")).toContain("application/json");

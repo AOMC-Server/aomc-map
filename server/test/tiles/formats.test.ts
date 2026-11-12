@@ -49,6 +49,7 @@ const near = (a: number[], b: number[], tolerance: number) =>
 /** format=, the blob suffix, the content type and the colour tolerance. */
 const CASES = [
 	["png", ".png", "image/png", 0],
+	["png-black", ".black.png", "image/png", 0],
 	["jpg-95", ".95.jpg", "image/jpeg", 8],
 	["jpg-80", ".80.jpg", "image/jpeg", 40],
 	["webp-lossy", ".lossy.webp", "image/webp", 40],
@@ -67,8 +68,9 @@ describe("tile formats", () => {
 			expect(got?.location).toEndWith(suffix);
 			const tile = got?.tile as Buffer;
 			expect(near(px(tile, 2, 2), RED_PX, tolerance)).toBe(true);
-			// JPEG cannot be transparent: empty areas are black.
-			const empty = type === "image/jpeg" ? [0, 0, 0, 255] : [0, 0, 0, 0];
+			// JPEG and png-black cannot be transparent: empty areas are black.
+			const opaque = type === "image/jpeg" || format === "png-black";
+			const empty = opaque ? [0, 0, 0, 255] : [0, 0, 0, 0];
 			expect(near(px(tile, 13, 2), empty, tolerance)).toBe(true);
 
 			expect(await fetchImage(t, `${BASE}/0/5/5?${q}`)).toBeNull();

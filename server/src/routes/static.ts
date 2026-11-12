@@ -13,7 +13,7 @@ const notFound = (c: Context<AppEnv>) => c.json({ error: "not found" }, 404);
 /** Serves the built web app, with index.html as the fallback for client-side routes. */
 export function staticRoutes(distDir: string) {
 	const app = new Hono<AppEnv>();
-	for (const prefix of ["/api", "/auth", "/blobs"])
+	for (const prefix of ["/api", "/auth", "/blobs", "/map"])
 		app.all(`${prefix}/*`, notFound);
 	const indexPath = join(distDir, "index.html");
 	if (!existsSync(indexPath)) return app;

@@ -18,6 +18,7 @@ export const blobRoutes = new Hono<AppEnv>().get(
 			"| --- | --- |",
 			"| `.webp` | Lossless WebP, as stored |",
 			"| `.png` | Lossless PNG |",
+			"| `.black.png` | Lossless PNG, transparency becomes black |",
 			"| `.95.jpg` | JPEG, quality 95 (transparency becomes black) |",
 			"| `.80.jpg` | JPEG, quality 80 (transparency becomes black) |",
 			"| `.lossy.webp` | Lossy WebP, quality 80 |",

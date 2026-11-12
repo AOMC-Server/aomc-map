@@ -30,6 +30,7 @@ export const TRAFFIC_CATEGORIES: TrafficCategory[] = [
 export function categoryOf(path: string): TrafficCategory {
 	if (path.startsWith("/blobs/")) return "blobs";
 	if (/^\/api\/dimensions\/[^/]+\/tiles\//.test(path)) return "tiles";
+	if (path.startsWith("/map/")) return "tiles";
 	if (path === "/api/preview.png") return "preview";
 	if (path.startsWith("/auth/")) return "auth";
 	if (path.startsWith("/api/")) return "api";
