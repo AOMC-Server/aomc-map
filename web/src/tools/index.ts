@@ -1,5 +1,5 @@
 import { effect } from "@preact/signals";
-import { isUiKeyTarget } from "../map/input";
+import { isInteractiveTarget, isUiKeyTarget } from "../map/input";
 import type { MapView } from "../map/MapView";
 import {
 	activeTool,
@@ -22,8 +22,12 @@ import {
 	clearMeasure,
 	clickMeasure,
 	drawMeasure,
+	finishMeasure,
 	grabMeasurePoint,
 	hoverMeasure,
+	hoverMeasureHandle,
+	measureFinish,
+	measureFinishTarget,
 	measureHover,
 	measurePoints,
 	undoMeasure,
@@ -99,6 +103,8 @@ export function initTools(map: MapView) {
 		areasLoaded.value;
 		measurePoints.value;
 		measureHover.value;
+		measureFinish.value;
+		measureFinishTarget.value;
 		drawing.value;
 		focusedPoint.value;
 		shiftHeld.value;
@@ -109,8 +115,11 @@ export function initTools(map: MapView) {
 		const block = e ? floorBlock(e) : null;
 		// A new object would repaint the map on every pointer move, even within one block.
 		if (!samePoint(block, cursor.value)) cursor.value = block;
-		if (activeTool.value === "measure" && !noHover.value)
+		if (activeTool.value === "measure" && !noHover.value) {
 			hoverMeasure(cursor.value);
+			if (e) hoverMeasureHandle(map, e.sx, e.sy);
+			else measureFinishTarget.value = -1;
+		}
 	});
 	map.on("click", (e) => {
 		if (drawing.value) return;
@@ -149,6 +158,12 @@ export function initTools(map: MapView) {
 		if (e.key === "Escape") {
 			if (measurePoints.value.length > 0) clearMeasure();
 			else activeTool.value = "none";
+		} else if (
+			e.key === "Enter" &&
+			activeTool.value === "measure" &&
+			!isInteractiveTarget(e.target)
+		) {
+			if (finishMeasure("line")) e.preventDefault();
 		} else if (
 			(e.key === "Backspace" || e.key === "Delete") &&
 			activeTool.value === "measure" &&

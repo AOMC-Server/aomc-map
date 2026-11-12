@@ -10,15 +10,19 @@ import {
 import {
 	clearMeasure,
 	clickMeasure,
+	finishMeasure,
 	formatBlocks,
+	measureFinish,
 	measurePoints,
 	measureStats,
 	undoMeasure,
 } from "../tools/measure";
 import {
 	formatDuration,
+	pathLength,
+	polygonArea,
 	samePoint,
-	segmentLengths,
+	segmentIndices,
 	TRAVEL_SPEEDS,
 } from "../tools/measureMath";
 
@@ -26,15 +30,24 @@ const round1 = (n: number) => Math.round(n * 10) / 10;
 
 async function copySummary() {
 	const points = measurePoints.value;
-	const lengths = segmentLengths(points);
+	const closed = measureFinish.value === "shape";
+	const lengths = segmentIndices(points.length, closed).map(([a, b]) =>
+		pathLength([points[a], points[b]] as typeof points),
+	);
 	const total = lengths.reduce((sum, l) => sum + l, 0);
 	const first = points[0];
 	const last = points.at(-1);
 	if (!first || !last) return;
-	const lines = [
-		`Distance: ${formatBlocks(total)} blocks`,
-		`From ${first.x}, ${first.z} to ${last.x}, ${last.z}`,
-	];
+	const lines = closed
+		? [
+				`Perimeter: ${formatBlocks(total)} blocks`,
+				`Area: ${formatBlocks(polygonArea(points))} blocks²`,
+				`Corners: ${points.map((p) => `${p.x}, ${p.z}`).join(" → ")}`,
+			]
+		: [
+				`Distance: ${formatBlocks(total)} blocks`,
+				`From ${first.x}, ${first.z} to ${last.x}, ${last.z}`,
+			];
 	if (lengths.length > 1)
 		lines.push(`Segments: ${lengths.map(formatBlocks).join(" + ")}`);
 	try {
@@ -68,6 +81,8 @@ export function MeasureCard() {
 			: [];
 	const placed = measurePoints.value.length;
 	const touch = noHover.value;
+	const finished = measureFinish.value;
+	const closed = stats?.closed ?? false;
 
 	return (
 		<aside class="measure-card" aria-label="Measure">
@@ -94,7 +109,8 @@ export function MeasureCard() {
 				) : (
 					<>
 						<div class="measure-total">
-							{formatBlocks(stats.total)} <small>blocks</small>
+							{formatBlocks(stats.total)}{" "}
+							<small>{stats.area !== null ? "blocks around" : "blocks"}</small>
 						</div>
 						{stats.segments.length === 0 && (
 							<p class="muted">
@@ -103,7 +119,10 @@ export function MeasureCard() {
 									: "Click to place the next point."}
 							</p>
 						)}
-						{stats.segments.length > 0 && (
+						{stats.area !== null && (
+							<Row label="Area" value={`${formatBlocks(stats.area)} blocks²`} />
+						)}
+						{stats.segments.length > 0 && !closed && (
 							<>
 								{stats.segments.length > 1 && (
 									<Row
@@ -152,22 +171,41 @@ export function MeasureCard() {
 							type="button"
 							class="btn small primary"
 							// The crosshair is still on the last point: another would add nothing.
-							disabled={samePoint(
-								measurePoints.value.at(-1) ?? null,
-								centerBlock.value,
-							)}
+							disabled={
+								finished !== null ||
+								samePoint(measurePoints.value.at(-1) ?? null, centerBlock.value)
+							}
 							onClick={() => clickMeasure(centerBlock.value)}
 						>
 							Add point
+						</button>
+					)}
+					{touch && finished === null && placed >= 2 && (
+						<button
+							type="button"
+							class="btn small"
+							onClick={() => finishMeasure("line")}
+						>
+							Done
+						</button>
+					)}
+					{touch && finished === null && placed >= 3 && (
+						<button
+							type="button"
+							class="btn small"
+							onClick={() => finishMeasure("shape")}
+						>
+							Close shape
 						</button>
 					)}
 					<button
 						type="button"
 						class="btn small"
 						disabled={placed === 0}
+						title={finished ? "Go back to adding points" : undefined}
 						onClick={undoMeasure}
 					>
-						Undo
+						{finished ? "Resume" : "Undo"}
 					</button>
 					<button
 						type="button"
@@ -187,9 +225,11 @@ export function MeasureCard() {
 					</button>
 				</div>
 				<p class="hint">
-					{touch
-						? "Drag a point to move it."
-						: "Hold Shift to snap to straight lines. Drag a point to move it."}
+					{finished
+						? "Drag a point to move it. Resume to add more points, or Clear to start over."
+						: touch
+							? "Tap the first point to close the shape, or the last to finish. Drag a point to move it."
+							: "Click the first point to close the shape, or the last point (or press Enter) to finish. Hold Shift to snap to straight lines. Drag a point to move it."}
 				</p>
 			</div>
 		</aside>
