@@ -18,6 +18,25 @@ export const isTransitionSpeed = (value: unknown): value is TransitionSpeed =>
 export const transitionFactor = (speed: TransitionSpeed): number =>
 	TRANSITION_SPEEDS.find((t) => t.id === speed)?.factor ?? 1;
 
+/** Which in-game map outlines the debug view draws: one map scale (0–4), all of them, or none. */
+export const MAP_OUTLINE_CHOICES = [
+	{ id: "off", name: "Off", scales: [] },
+	{ id: "0", name: "1:1 (128 blocks)", scales: [0] },
+	{ id: "1", name: "1:2 (256 blocks)", scales: [1] },
+	{ id: "2", name: "1:4 (512 blocks)", scales: [2] },
+	{ id: "3", name: "1:8 (1024 blocks)", scales: [3] },
+	{ id: "4", name: "1:16 (2048 blocks)", scales: [4] },
+	{ id: "all", name: "All scales", scales: [0, 1, 2, 3, 4] },
+] as const;
+export type MapOutlines = (typeof MAP_OUTLINE_CHOICES)[number]["id"];
+
+export const isMapOutlines = (value: unknown): value is MapOutlines =>
+	MAP_OUTLINE_CHOICES.some((c) => c.id === value);
+
+/** The map scales to outline for a choice. */
+export const mapOutlineScales = (choice: MapOutlines): readonly number[] =>
+	MAP_OUTLINE_CHOICES.find((c) => c.id === choice)?.scales ?? [];
+
 /** Per-browser preferences, kept in localStorage. */
 export type Settings = {
 	showCoordinates: boolean;
@@ -44,6 +63,10 @@ export type Settings = {
 	tileOutlines: boolean;
 	/** Draw the edges of Minecraft chunks (16×16 blocks). */
 	chunkOutlines: boolean;
+	/** Draw the edges of region files (512×512 blocks). */
+	regionOutlines: boolean;
+	/** Draw the areas in-game maps show, at one map scale or all of them. */
+	mapOutlines: MapOutlines;
 };
 
 export const DEFAULT_SETTINGS: Settings = {
@@ -62,6 +85,8 @@ export const DEFAULT_SETTINGS: Settings = {
 	debugRender: false,
 	tileOutlines: false,
 	chunkOutlines: false,
+	regionOutlines: false,
+	mapOutlines: "off",
 };
 
 /** Also read by the inline script in index.html, which sets the theme before first paint. */
@@ -92,6 +117,7 @@ export function parseSettings(raw: string | null): Settings {
 		"debugRender",
 		"tileOutlines",
 		"chunkOutlines",
+		"regionOutlines",
 	] as const) {
 		if (typeof stored[key] === "boolean") result[key] = stored[key];
 	}
@@ -105,6 +131,8 @@ export function parseSettings(raw: string | null): Settings {
 	if (isStyle(stored.style)) result.style = stored.style;
 	if (isTransitionSpeed(stored.transitionSpeed))
 		result.transitionSpeed = stored.transitionSpeed;
+	if (isMapOutlines(stored.mapOutlines))
+		result.mapOutlines = stored.mapOutlines;
 	return result;
 }
 

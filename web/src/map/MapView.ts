@@ -14,7 +14,9 @@ import {
 	drawChunkGrid,
 	drawGrid,
 	drawHud,
+	drawMapGrid,
 	drawPreloadDebug,
+	drawRegionGrid,
 	drawTileDebug,
 	NO_DEBUG,
 	preloadHudLines,
@@ -145,7 +147,7 @@ export class MapView {
 		this.motion = Math.max(scale, 0);
 	}
 
-	/** Debug drawing: tile states and statistics, tile outlines, chunk outlines. */
+	/** Debug drawing: tile states and statistics, and tile, chunk, region and in-game map outlines. */
 	setDebug(options: DebugOptions) {
 		this.debug = { ...options };
 		this.tiles.collectDebug = options.debug;
@@ -498,6 +500,8 @@ export class MapView {
 			drawPreloadDebug(ctx, tiles.preload, dpr);
 		}
 		if (debug.chunkOutlines) drawChunkGrid(ctx, view, size, dpr);
+		drawMapGrid(ctx, view, size, dpr, debug.mapScales);
+		if (debug.regionOutlines) drawRegionGrid(ctx, view, size, dpr);
 		if (debug.tileOutlines) {
 			const level = tileLevel(view.zoom, dpr, this.maxZoom);
 			drawGrid(

@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
 	clampPanelWidth,
 	DEFAULT_SETTINGS,
+	mapOutlineScales,
 	PANEL_MIN_WIDTH,
 	parsePosition,
 	parseSettings,
@@ -61,12 +62,32 @@ test("debug toggles default off and are kept when stored", () => {
 	expect(DEFAULT_SETTINGS.debugRender).toBe(false);
 	expect(DEFAULT_SETTINGS.tileOutlines).toBe(false);
 	expect(DEFAULT_SETTINGS.chunkOutlines).toBe(false);
+	expect(DEFAULT_SETTINGS.regionOutlines).toBe(false);
+	expect(DEFAULT_SETTINGS.mapOutlines).toBe("off");
 	const s = parseSettings(
-		JSON.stringify({ debugRender: true, tileOutlines: true, chunkOutlines: 1 }),
+		JSON.stringify({
+			debugRender: true,
+			tileOutlines: true,
+			chunkOutlines: 1,
+			regionOutlines: true,
+			mapOutlines: "2",
+		}),
 	);
 	expect(s.debugRender).toBe(true);
 	expect(s.tileOutlines).toBe(true);
 	expect(s.chunkOutlines).toBe(false);
+	expect(s.regionOutlines).toBe(true);
+	expect(s.mapOutlines).toBe("2");
+});
+
+test("map outlines keep a known choice and turn into scales", () => {
+	for (const bad of [true, 2, "5", "none"])
+		expect(
+			parseSettings(JSON.stringify({ mapOutlines: bad })).mapOutlines,
+		).toBe("off");
+	expect(mapOutlineScales("off")).toEqual([]);
+	expect(mapOutlineScales("3")).toEqual([3]);
+	expect(mapOutlineScales("all")).toEqual([0, 1, 2, 3, 4]);
 });
 
 describe("parsePosition", () => {

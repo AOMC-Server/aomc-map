@@ -1,6 +1,8 @@
 import { useEffect, useState } from "preact/hooks";
 import { api, attempt, loginUrl } from "../api";
 import {
+	isMapOutlines,
+	MAP_OUTLINE_CHOICES,
 	type Settings,
 	settings,
 	TRANSITION_SPEEDS,
@@ -214,6 +216,34 @@ function Debugging() {
 				label="Show chunk outlines"
 				hint="Draw the 16×16 block chunk grid from 1:1 zoom inwards. Zoom in further for chunk coordinates, then the block grid, then each block's coordinates."
 			/>
+			<Toggle
+				field="regionOutlines"
+				label="Show region outlines"
+				hint="Draw the 512×512 block region grid, labelled with each region's file name (r.X.Z)."
+			/>
+			<label class="toggle toggle-select">
+				<select
+					value={settings.value.mapOutlines}
+					onChange={(e) => {
+						const value = e.currentTarget.value;
+						if (isMapOutlines(value)) updateSettings({ mapOutlines: value });
+					}}
+				>
+					{MAP_OUTLINE_CHOICES.map((c) => (
+						<option key={c.id} value={c.id}>
+							{c.name}
+						</option>
+					))}
+				</select>
+				<span>
+					Show in-game map outlines
+					<span class="muted hint">
+						Draw the areas in-game maps of that size cover. Zoom in for each
+						map's centre. All scales draws them nested, each in its own colour:
+						1:1 yellow, 1:2 orange, 1:4 red, 1:8 purple, 1:16 green.
+					</span>
+				</span>
+			</label>
 		</section>
 	);
 }

@@ -2865,6 +2865,16 @@ body.resizing {
 	font-weight: 400;
 }
 
+/* A toggle row with a dropdown where the checkbox would be. */
+.toggle-select {
+	cursor: default;
+}
+
+.toggle-select select {
+	flex: none;
+	width: auto;
+}
+
 .history-recompute {
 	margin-top: 24px;
 }

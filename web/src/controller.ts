@@ -8,6 +8,7 @@ import { MapView } from "./map/MapView";
 import type { TileLookup } from "./map/tileLayer";
 import {
 	loadPosition,
+	mapOutlineScales,
 	savePosition,
 	settings,
 	transitionFactor,
@@ -236,8 +237,20 @@ export async function boot(container: HTMLElement) {
 		mv.setMotionScale(transitionFactor(settings.value.transitionSpeed)),
 	);
 	effect(() => {
-		const { debugRender, tileOutlines, chunkOutlines } = settings.value;
-		mv.setDebug({ debug: debugRender, tileOutlines, chunkOutlines });
+		const {
+			debugRender,
+			tileOutlines,
+			chunkOutlines,
+			regionOutlines,
+			mapOutlines,
+		} = settings.value;
+		mv.setDebug({
+			debug: debugRender,
+			tileOutlines,
+			chunkOutlines,
+			regionOutlines,
+			mapScales: mapOutlineScales(mapOutlines),
+		});
 		mv.setTilesPaused(debugRender && tilesPaused.value);
 	});
 
