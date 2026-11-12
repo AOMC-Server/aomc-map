@@ -11,13 +11,24 @@ export function outlinedPath(
 	pts: Pt[],
 	opts: { color: string; width?: number; dashed?: boolean; closed?: boolean },
 ) {
+	outlinedPaths(ctx, [pts], opts);
+}
+
+/** Several lines drawn as one, so that where they meet no edge is drawn over another's colour. */
+export function outlinedPaths(
+	ctx: CanvasRenderingContext2D,
+	paths: Pt[][],
+	opts: { color: string; width?: number; dashed?: boolean; closed?: boolean },
+) {
 	const width = opts.width ?? 2.5;
 	ctx.beginPath();
-	for (const [i, p] of pts.entries()) {
-		if (i === 0) ctx.moveTo(p.x, p.y);
-		else ctx.lineTo(p.x, p.y);
+	for (const pts of paths) {
+		for (const [i, p] of pts.entries()) {
+			if (i === 0) ctx.moveTo(p.x, p.y);
+			else ctx.lineTo(p.x, p.y);
+		}
+		if (opts.closed) ctx.closePath();
 	}
-	if (opts.closed) ctx.closePath();
 	ctx.setLineDash(opts.dashed ? [8, 6] : []);
 	ctx.lineWidth = width + 3.5;
 	ctx.strokeStyle = OUTLINE;

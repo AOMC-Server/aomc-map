@@ -119,3 +119,9 @@ export function formatDuration(seconds: number): string {
 	const h = Math.floor(m / 60);
 	return `${h}h ${String(m % 60).padStart(2, "0")}m`;
 }
+
+const numberFormat = new Intl.NumberFormat(undefined, {
+	maximumFractionDigits: 1,
+});
+/** A length in blocks, with at most one decimal. */
+export const formatBlocks = (n: number) => numberFormat.format(n);

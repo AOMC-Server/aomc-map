@@ -80,7 +80,7 @@ export function Hotbar() {
 			key: "3",
 			icon: "compass",
 			label: "Measure",
-			hint: "Click points to measure a path (Esc clears)",
+			hint: "Click points to measure a path (Esc stops, then clears)",
 			active: activeTool.value === "measure",
 			run: () => {
 				activeTool.value = activeTool.value === "measure" ? "none" : "measure";

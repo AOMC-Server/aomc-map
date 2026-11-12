@@ -6,7 +6,7 @@ import {
 	screenToBlock,
 	type View,
 } from "@aomc/shared/view";
-import { pointsOf } from "../featureInfo";
+import { pathsOf } from "../featureInfo";
 import { ClusterIndex, type ClusterNode } from "./cluster";
 import {
 	type Bounds,
@@ -25,7 +25,7 @@ type RenderFeature = {
 	name: string;
 	popup: string;
 	color: Dye | null;
-	/** pin: [x, z]; line / polygon: [[x, z], ...] */
+	/** pin: [x, z]; line / polygon: [[x, z], ...]; a line can also be [[[x, z], ...], ...] */
 	geometry: unknown;
 };
 
@@ -62,6 +62,8 @@ type Prepared = {
 	layer: RenderLayer;
 	bounds: Bounds;
 	points: Pt[];
+	/** A pin's one point, an area's outline, or the paths of a line. */
+	paths: Pt[][];
 };
 type DrawnPin = { x: number; y: number; item: Prepared };
 type PinNode = ClusterNode<Prepared>;
@@ -93,8 +95,9 @@ export class FeatureLayer {
 	setFeatures(layers: RenderLayer[]) {
 		this.prepared = layers.flatMap((layer) =>
 			layer.features.map((feature) => {
-				const points = pointsOf(feature);
-				return { feature, layer, points, bounds: boundsOf(points) };
+				const paths = pathsOf(feature);
+				const points = paths.flat();
+				return { feature, layer, points, paths, bounds: boundsOf(points) };
 			}),
 		);
 		this.clusters = new ClusterIndex(
@@ -184,23 +187,25 @@ export class FeatureLayer {
 		const hex = DYE_HEX[this.colorOf(p)];
 
 		ctx.beginPath();
-		let lastX = Number.NaN;
-		let lastY = Number.NaN;
-		p.points.forEach(([x, z], i) => {
-			const s = project(x, z);
-			// Skip vertices that fall on the same pixel; huge shapes stay cheap when zoomed out.
-			const isEnd = i === p.points.length - 1;
-			if (
-				i > 0 &&
-				!isEnd &&
-				Math.abs(s.x - lastX) + Math.abs(s.y - lastY) < 1.5
-			)
-				return;
-			if (i === 0) ctx.moveTo(s.x, s.y);
-			else ctx.lineTo(s.x, s.y);
-			lastX = s.x;
-			lastY = s.y;
-		});
+		for (const path of p.paths) {
+			let lastX = Number.NaN;
+			let lastY = Number.NaN;
+			path.forEach(([x, z], i) => {
+				const s = project(x, z);
+				// Skip vertices that fall on the same pixel; huge shapes stay cheap when zoomed out.
+				const isEnd = i === path.length - 1;
+				if (
+					i > 0 &&
+					!isEnd &&
+					Math.abs(s.x - lastX) + Math.abs(s.y - lastY) < 1.5
+				)
+					return;
+				if (i === 0) ctx.moveTo(s.x, s.y);
+				else ctx.lineTo(s.x, s.y);
+				lastX = s.x;
+				lastY = s.y;
+			});
+		}
 		if (closed) {
 			ctx.closePath();
 			ctx.fillStyle = hex + (emphasised ? "55" : "33");
@@ -384,7 +389,7 @@ export class FeatureLayer {
 			if (
 				p.feature.type === "line" &&
 				near(p) &&
-				distToPolyline(px, pz, p.points, false) <= tolerance
+				p.paths.some((path) => distToPolyline(px, pz, path, false) <= tolerance)
 			)
 				return hit(p);
 		}

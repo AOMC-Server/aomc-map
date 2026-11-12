@@ -7,11 +7,22 @@ import {
 } from "@aomc/shared/features";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { showNotice } from "../api";
-import { pointsOf, TYPE_LABEL } from "../featureInfo";
+import { pathsOf, TYPE_LABEL } from "../featureInfo";
 import { createFeature, deleteFeature, updateFeature } from "../layers";
-import { editor, layersData, popup } from "../state";
 import {
+	editor,
+	isLayerFull,
+	isLayerHidden,
+	lastEditLayer,
+	layersData,
+	popup,
+	setLayersHidden,
+} from "../state";
+import {
+	type DrawState,
 	drawing,
+	drawnGeometry,
+	drawReady,
 	finishDraw,
 	minPoints,
 	resumeDraw,
@@ -32,22 +43,28 @@ const closeEditor = () => {
 	editor.value = null;
 };
 
-function drawHint(
-	type: FeatureType,
-	count: number,
-	mode: "draw" | "placed",
-): string {
-	if (mode === "placed")
-		return type === "pin"
+function drawHint(d: DrawState | null, type: FeatureType): string {
+	const mode = d?.mode ?? "draw";
+	const count = d?.points.length ?? 0;
+	if (type === "pin")
+		return mode === "placed"
 			? "Drag the marker to move it, or type its coordinates."
-			: "Drag a point to move it, or drag a + on a segment to add one.";
-	if (type === "pin") return "Click the map to place the pin.";
+			: "Click the map to place the pin.";
+	if (type === "line") {
+		if (mode === "placed")
+			return "Drag a point to move it (onto another point to join them), or a + to add one. Click a point to draw on from it, which branches the line from the middle. Right-click a point to remove it.";
+		if (count === 0)
+			return "Click the map to start the line. Hold Shift to snap to straight lines.";
+		if (d?.selected === null)
+			return "Click a point to draw on from it, or the map to start a separate part.";
+		return "Click to add points. Click another point to join it, which closes a loop, or the selected point (or press Enter or Esc) to stop, then click any point to branch from it. Hold Shift to snap to straight lines.";
+	}
+	if (mode === "placed")
+		return "Drag a point to move it, or drag a + on a segment to add one. Right-click a point to remove it.";
 	const need = minPoints(type);
 	if (count < need)
 		return `Click the map to add points (${count}/${need} minimum). Hold Shift to snap to straight lines.`;
-	return type === "line"
-		? "Click to add more points. Click the last point or press Enter to finish."
-		: "Click to add more points. Click the first point or press Enter to close the area.";
+	return "Click to add more points. Click the first point or press Enter or Esc to close the area.";
 }
 
 /** Side panel for creating or editing one feature. Geometry is placed on the map with the draw tool. */
@@ -59,7 +76,11 @@ export function FeatureEditor() {
 			? layer?.features.find((f) => f.id === target.featureId)
 			: undefined;
 
-	const [type, setType] = useState<FeatureType>(existing?.type ?? "pin");
+	const shape = target?.mode === "create" ? target.shape : undefined;
+
+	const [type, setType] = useState<FeatureType>(
+		existing?.type ?? shape?.type ?? "pin",
+	);
 	const [name, setName] = useState(existing?.name ?? "");
 	const [text, setText] = useState(existing?.popup ?? "");
 	const [color, setColor] = useState<Dye | null>(existing?.color ?? null);
@@ -77,8 +98,8 @@ export function FeatureEditor() {
 	useEffect(() => {
 		const at = target?.mode === "create" ? target.at : undefined;
 		startDraw(
-			existing?.type ?? "pin",
-			existing ? pointsOf(existing) : at ? [at] : [],
+			existing?.type ?? shape?.type ?? "pin",
+			existing ? pathsOf(existing) : shape ? shape.paths : at ? [[at]] : [],
 			cancelEditing,
 		);
 		return () => stopDraw();
@@ -87,7 +108,11 @@ export function FeatureEditor() {
 	if (!target || !layer) return null;
 	const d = drawing.value;
 	const points = d?.points ?? [];
-	const ready = points.length >= minPoints(type);
+	const ready = !!d && drawReady(d);
+	// A new feature can go to any layer that can take it.
+	const layers = layersData.value.filter(
+		(l) => l.canEdit && (l.id === layer.id || !isLayerFull(l)),
+	);
 
 	const changeType = (next: FeatureType) => {
 		setType(next);
@@ -97,15 +122,14 @@ export function FeatureEditor() {
 	/** `another`: stay in the editor with a blank feature (same type and colour) for the next one. */
 	const save = async (another = false) => {
 		if (!ready || saving) return;
-		const common = { name: name.trim(), popup: text, color };
-		const [first] = points;
-		const input: FeatureInput | null =
-			type !== "pin"
-				? { ...common, type, geometry: points }
-				: first
-					? { ...common, type, geometry: first }
-					: null;
-		if (!input) return;
+		if (!d) return;
+		const input = {
+			name: name.trim(),
+			popup: text,
+			color,
+			type,
+			geometry: drawnGeometry(d),
+		} as FeatureInput;
 		setSaving(true);
 		let saved = false;
 		try {
@@ -121,6 +145,7 @@ export function FeatureEditor() {
 			setSaving(false);
 		}
 		if (!saved) return;
+		lastEditLayer.value = layer.id;
 		if (another && target.mode === "create") {
 			setName("");
 			setText("");
@@ -197,9 +222,32 @@ export function FeatureEditor() {
 				</>
 			}
 		>
-			<p class="editor-layer">
-				<Banner dye={layer.color} /> {layer.name}
-			</p>
+			{target.mode === "create" && layers.length > 1 ? (
+				<label class="field editor-layer-pick">
+					<span class="label">Layer</span>
+					<select
+						value={layer.id}
+						onChange={(e) => {
+							const next = layers.find(
+								(l) => l.id === Number(e.currentTarget.value),
+							);
+							if (!next) return;
+							if (isLayerHidden(next)) setLayersHidden([next], false);
+							editor.value = { ...target, layerId: next.id };
+						}}
+					>
+						{layers.map((l) => (
+							<option key={l.id} value={l.id}>
+								{l.name}
+							</option>
+						))}
+					</select>
+				</label>
+			) : (
+				<p class="editor-layer">
+					<Banner dye={layer.color} /> {layer.name}
+				</p>
+			)}
 
 			<div class="field">
 				<span class="label">Type</span>
@@ -220,7 +268,7 @@ export function FeatureEditor() {
 
 			<div class="field draw-controls">
 				<span class="label">Location</span>
-				<p class="hint">{drawHint(type, points.length, d?.mode ?? "draw")}</p>
+				<p class="hint">{drawHint(d, type)}</p>
 				<ShapeStats />
 				<div class="group">
 					{d?.mode === "draw" && type !== "pin" && (
@@ -240,7 +288,9 @@ export function FeatureEditor() {
 					)}
 					{type !== "pin" && points.length > 0 && (
 						<button type="button" class="btn small" onClick={undoPoint}>
-							Undo last
+							{d?.selected != null
+								? `Remove point ${d.selected + 1}`
+								: "Undo last"}
 						</button>
 					)}
 				</div>

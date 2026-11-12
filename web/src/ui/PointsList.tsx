@@ -1,7 +1,13 @@
 import type { Point } from "@aomc/shared/features";
-import { drawing, focusedPoint, removePoint, setPoint } from "../tools/draw";
-import { formatBlocks } from "../tools/measure";
-import { pathLength, polygonArea } from "../tools/measureMath";
+import {
+	drawing,
+	focusedPoint,
+	removePoint,
+	selectPoint,
+	setPoint,
+} from "../tools/draw";
+import { lineLength } from "../tools/lineGraph";
+import { formatBlocks, pathLength, polygonArea } from "../tools/measureMath";
 
 /** A whole-number field that applies on Enter or when it loses focus, and goes back if it isn't a number. */
 function Coordinate(props: {
@@ -36,13 +42,11 @@ function Coordinate(props: {
 export function ShapeStats() {
 	const d = drawing.value;
 	if (!d || d.type === "pin" || d.points.length < 2) return null;
-	const points = d.points.map(([x, z]) => ({ x, z }));
 	if (d.type === "line")
 		return (
-			<p class="shape-stats">
-				Length: {formatBlocks(pathLength(points))} blocks
-			</p>
+			<p class="shape-stats">Length: {formatBlocks(lineLength(d))} blocks</p>
 		);
+	const points = d.points.map(([x, z]) => ({ x, z }));
 	return (
 		<p class="shape-stats">
 			Perimeter: {formatBlocks(pathLength(points, true))} blocks
@@ -63,6 +67,7 @@ export function PointsList() {
 			{d.points.map((p: Point, i) => (
 				<li
 					key={i}
+					class={i === d.selected ? "selected" : undefined}
 					onMouseEnter={() => {
 						focusedPoint.value = i;
 					}}
@@ -76,7 +81,21 @@ export function PointsList() {
 						focusedPoint.value = null;
 					}}
 				>
-					{!single && <span class="point-no">{i + 1}</span>}
+					{!single && (
+						<button
+							type="button"
+							class="point-no"
+							aria-pressed={i === d.selected}
+							title={
+								d.type === "line"
+									? "Select this point, to remove it or draw on from it"
+									: "Select this point"
+							}
+							onClick={() => selectPoint(i === d.selected ? null : i)}
+						>
+							{i + 1}
+						</button>
+					)}
 					<span class="coord-label">x</span>
 					<Coordinate
 						label={`x of point ${i + 1}`}

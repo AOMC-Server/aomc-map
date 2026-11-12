@@ -99,7 +99,10 @@ export class Input {
 		this.pointers.set(e.pointerId, p);
 		if (this.pointers.size === 1) {
 			this.session = this.map.dragHandler?.(p.x, p.y) ?? null;
-			if (this.session) return;
+			if (this.session) {
+				this.map.setGrabbing(true);
+				return;
+			}
 			this.start = { ...p, t: performance.now() };
 			this.moved = false;
 			this.dragSamples = [{ ...p, t: e.timeStamp }];
@@ -156,6 +159,7 @@ export class Input {
 				Math.hypot(p.x - this.start.x, p.y - this.start.y) > DRAG_THRESHOLD
 			) {
 				this.moved = true;
+				this.map.setGrabbing(true);
 			}
 			this.recordDrag(e);
 			if (!this.moved) return;
@@ -241,11 +245,13 @@ export class Input {
 	private endSession() {
 		this.session?.end();
 		this.session = null;
+		this.map.setGrabbing(false);
 	}
 
 	private cancelSession() {
 		this.session?.cancel();
 		this.session = null;
+		this.map.setGrabbing(false);
 	}
 
 	/**
@@ -279,6 +285,7 @@ export class Input {
 			this.rebase(e.timeStamp, true);
 			return;
 		}
+		this.map.setGrabbing(false);
 		if (!wasSingle || !this.start) return;
 		this.start = null;
 
@@ -297,6 +304,7 @@ export class Input {
 			this.rebase(e.timeStamp, false);
 			return;
 		}
+		this.map.setGrabbing(false);
 		this.start = null;
 		this.lastPinch = null;
 		this.pinchSamples = [];

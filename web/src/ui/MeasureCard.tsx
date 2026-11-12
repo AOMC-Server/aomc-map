@@ -1,57 +1,38 @@
 import { showNotice } from "../api";
 import {
 	activeTool,
+	canEditMap,
 	centerBlock,
 	currentScale,
 	dimSlug,
+	editor,
+	isLayerFull,
+	layersData,
 	noHover,
 	visibleDimensions,
 } from "../state";
 import {
 	clearMeasure,
-	clickMeasure,
-	finishMeasure,
-	formatBlocks,
-	measureFinish,
-	measurePoints,
+	featureFromMeasure,
+	measureAt,
+	measuredShape,
+	measureShape,
 	measureStats,
-	undoMeasure,
+	measureSummary,
 } from "../tools/measure";
 import {
+	formatBlocks,
 	formatDuration,
-	pathLength,
-	polygonArea,
-	samePoint,
-	segmentIndices,
 	TRAVEL_SPEEDS,
 } from "../tools/measureMath";
 
 const round1 = (n: number) => Math.round(n * 10) / 10;
 
 async function copySummary() {
-	const points = measurePoints.value;
-	const closed = measureFinish.value === "shape";
-	const lengths = segmentIndices(points.length, closed).map(([a, b]) =>
-		pathLength([points[a], points[b]] as typeof points),
-	);
-	const total = lengths.reduce((sum, l) => sum + l, 0);
-	const first = points[0];
-	const last = points.at(-1);
-	if (!first || !last) return;
-	const lines = closed
-		? [
-				`Perimeter: ${formatBlocks(total)} blocks`,
-				`Area: ${formatBlocks(polygonArea(points))} blocks²`,
-				`Corners: ${points.map((p) => `${p.x}, ${p.z}`).join(" → ")}`,
-			]
-		: [
-				`Distance: ${formatBlocks(total)} blocks`,
-				`From ${first.x}, ${first.z} to ${last.x}, ${last.z}`,
-			];
-	if (lengths.length > 1)
-		lines.push(`Segments: ${lengths.map(formatBlocks).join(" + ")}`);
+	const shape = measuredShape();
+	if (!shape) return;
 	try {
-		await navigator.clipboard.writeText(lines.join("\n"));
+		await navigator.clipboard.writeText(measureSummary(shape.graph).join("\n"));
 		showNotice("Measurement copied");
 	} catch {
 		showNotice("Copy failed", "error");
@@ -79,10 +60,15 @@ export function MeasureCard() {
 						d.slug !== dimSlug.value && d.scale !== null && d.scale !== scale,
 				)
 			: [];
-	const placed = measurePoints.value.length;
+	const shape = measureShape.state.value;
+	const placed = shape?.points.length ?? 0;
 	const touch = noHover.value;
-	const finished = measureFinish.value;
-	const closed = stats?.closed ?? false;
+	const finished = shape?.mode === "placed";
+	const measured = measuredShape();
+	const canSave =
+		canEditMap.value &&
+		editor.value === null &&
+		layersData.value.some((l) => l.canEdit && !isLayerFull(l));
 
 	return (
 		<aside class="measure-card" aria-label="Measure">
@@ -122,19 +108,22 @@ export function MeasureCard() {
 						{stats.area !== null && (
 							<Row label="Area" value={`${formatBlocks(stats.area)} blocks²`} />
 						)}
-						{stats.segments.length > 0 && !closed && (
+						{stats.segments.length > 0 && stats.ends && (
 							<>
 								{stats.segments.length > 1 && (
 									<Row
 										label={`Straight line`}
-										value={`${formatBlocks(stats.straight)} blocks`}
+										value={`${formatBlocks(stats.ends.straight)} blocks`}
 									/>
 								)}
-								<Row label="Δx / Δz" value={`${stats.dx} / ${stats.dz}`} />
-								{stats.facing && (
+								<Row
+									label="Δx / Δz"
+									value={`${stats.ends.dx} / ${stats.ends.dz}`}
+								/>
+								{stats.ends.facing && (
 									<Row
 										label="Facing"
-										value={`${stats.facing.name} (yaw ${round1(stats.facing.yaw)}°)`}
+										value={`${stats.ends.facing.name} (yaw ${round1(stats.ends.facing.yaw)}°)`}
 									/>
 								)}
 							</>
@@ -170,30 +159,32 @@ export function MeasureCard() {
 						<button
 							type="button"
 							class="btn small primary"
-							// The crosshair is still on the last point: another would add nothing.
+							// The crosshair is still on the point being drawn from: another would add nothing.
 							disabled={
-								finished !== null ||
-								samePoint(measurePoints.value.at(-1) ?? null, centerBlock.value)
+								finished ||
+								(shape?.selected != null &&
+									shape.points[shape.selected]?.[0] === centerBlock.value.x &&
+									shape.points[shape.selected]?.[1] === centerBlock.value.z)
 							}
-							onClick={() => clickMeasure(centerBlock.value)}
+							onClick={() => measureAt(centerBlock.value)}
 						>
 							Add point
 						</button>
 					)}
-					{touch && finished === null && placed >= 2 && (
+					{touch && !finished && measured && (
 						<button
 							type="button"
 							class="btn small"
-							onClick={() => finishMeasure("line")}
+							onClick={() => measureShape.finish()}
 						>
 							Done
 						</button>
 					)}
-					{touch && finished === null && placed >= 3 && (
+					{touch && measureShape.canCloseLine() && (
 						<button
 							type="button"
 							class="btn small"
-							onClick={() => finishMeasure("shape")}
+							onClick={() => measureShape.closeLine()}
 						>
 							Close shape
 						</button>
@@ -203,7 +194,7 @@ export function MeasureCard() {
 						class="btn small"
 						disabled={placed === 0}
 						title={finished ? "Go back to adding points" : undefined}
-						onClick={undoMeasure}
+						onClick={finished ? measureShape.resume : measureShape.undoPoint}
 					>
 						{finished ? "Resume" : "Undo"}
 					</button>
@@ -218,18 +209,50 @@ export function MeasureCard() {
 					<button
 						type="button"
 						class="btn small"
-						disabled={placed < 2}
+						disabled={!measured}
 						onClick={() => void copySummary()}
 					>
 						Copy
 					</button>
 				</div>
+				{measured && canEditMap.value && (
+					<div class="group measure-actions">
+						<button
+							type="button"
+							class="btn small"
+							disabled={!canSave}
+							title={
+								canSave
+									? "Keep this as a line in a layer"
+									: "Needs a layer you can add to, and no feature being edited"
+							}
+							onClick={() => featureFromMeasure("line")}
+						>
+							Save as line
+						</button>
+						{measured.loop && (
+							<button
+								type="button"
+								class="btn small"
+								disabled={!canSave}
+								title={
+									canSave
+										? "Keep this as an area in a layer"
+										: "Needs a layer you can add to, and no feature being edited"
+								}
+								onClick={() => featureFromMeasure("polygon")}
+							>
+								Save as area
+							</button>
+						)}
+					</div>
+				)}
 				<p class="hint">
 					{finished
-						? "Drag a point to move it. Resume to add more points, or Clear to start over."
+						? "Drag a point to move it, or click one to draw on from it (from the middle, that branches). Right-click a point to remove it. Clear starts over."
 						: touch
-							? "Tap the first point to close the shape, or the last to finish. Drag a point to move it."
-							: "Click the first point to close the shape, or the last point (or press Enter) to finish. Hold Shift to snap to straight lines. Drag a point to move it."}
+							? "Tap a point to join the path to it (the first closes a shape), or the last to finish. Drag a point to move it."
+							: "Click another point to join it (the first closes a shape), or the last point (Enter or Esc) to finish. Hold Shift to snap to straight lines. Drag a point to move it, right-click one to remove it."}
 				</p>
 			</div>
 		</aside>

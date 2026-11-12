@@ -26,7 +26,7 @@ function summary(e: FeatureHistoryEntry): string {
 	const where =
 		e.type === "pin" && first
 			? `at ${first[0]}, ${first[1]}`
-			: `${points.length} points`;
+			: `${new Set(points.map(String)).size} points`;
 	const color = e.color ? `, ${dyeLabel(e.color)}` : "";
 	return `${TYPE_LABEL[e.type]} "${e.name || "unnamed"}" ${where}${color}`;
 }

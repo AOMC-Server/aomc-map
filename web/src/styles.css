@@ -970,7 +970,7 @@ input[type="range"]:disabled {
 	position: absolute;
 	inset: 0;
 	background: var(--map-bg);
-	cursor: grab;
+	cursor: crosshair;
 	-webkit-tap-highlight-color: transparent;
 	user-select: none;
 }
@@ -3372,15 +3372,27 @@ body.resizing {
 }
 
 .point-no {
+	border: none;
 	border-radius: var(--radius-sm);
 	flex: none;
 	min-width: 24px;
 	padding: 2px 4px;
+	font: inherit;
 	font-size: 12px;
 	font-weight: 700;
 	text-align: center;
 	color: var(--muted);
 	background: var(--s1);
+	cursor: pointer;
+}
+
+.point-no[aria-pressed="true"] {
+	color: #1e1e1f;
+	background: #ffe866;
+}
+
+.points-list li.selected {
+	background: var(--s2);
 }
 
 .coord-label {

@@ -65,6 +65,9 @@ const ZOOM_FRICTION = 0.006;
 /** Below this zoom speed (levels per ms) a pinch glide has stopped zooming. */
 const ZOOM_STOP_SPEED = 0.00005;
 
+/** The map's cursor where nothing else applies; dragging it shows "grabbing". */
+const BASE_CURSOR = "crosshair";
+
 /**
  * Framework-free canvas map. The UI only talks to the map through this class.
  * Coordinates are Minecraft blocks (x east, z south); overlays draw in css pixels.
@@ -76,6 +79,8 @@ export class MapView {
 	readonly overlays: Overlay[] = [];
 	/** Lets a tool claim pointer-downs (return a session to drag, or null to pan as usual). */
 	dragHandler: DragHandler | null = null;
+	/** Lets a tool pick the cursor for a screen position; null leaves it to the map. */
+	cursorHandler: ((sx: number, sy: number) => string | null) | null = null;
 	doubleClickZoom = true;
 	private ctx: CanvasRenderingContext2D;
 	private view: View;
@@ -95,7 +100,11 @@ export class MapView {
 	};
 	private features: FeatureLayer;
 	private hoverKey: string | null = null;
-	private baseCursor = "grab";
+	/** Where the mouse is over the map and what it is over, for the cursor. */
+	private lastPointer: { sx: number; sy: number; hit: Hit | null } | null =
+		null;
+	/** Something is being dragged: the map, or a point of a tool. */
+	private grabbing = false;
 	/** How long animations take relative to the default; 0 skips them. */
 	private motion = 1;
 	private tileSize: number;
@@ -224,9 +233,22 @@ export class MapView {
 		return () => this.listeners[name].delete(cb);
 	}
 
-	setCursor(cursor: string) {
-		this.baseCursor = cursor;
-		this.canvas.style.cursor = cursor;
+	/** Picks the cursor again, for when what a click would do has changed without the mouse moving. */
+	refreshCursor() {
+		const p = this.lastPointer;
+		const cursor = this.grabbing
+			? "grabbing"
+			: p
+				? (this.cursorHandler?.(p.sx, p.sy) ??
+					(p.hit ? "pointer" : BASE_CURSOR))
+				: BASE_CURSOR;
+		if (this.canvas.style.cursor !== cursor) this.canvas.style.cursor = cursor;
+	}
+
+	setGrabbing(grabbing: boolean) {
+		if (this.grabbing === grabbing) return;
+		this.grabbing = grabbing;
+		this.refreshCursor();
 	}
 
 	/** Replaces the features drawn on the map (only the layers that should be visible). */
@@ -294,6 +316,8 @@ export class MapView {
 		else {
 			this.emit("move", e);
 			this.updateHover(hit, sx, sy);
+			this.lastPointer = { sx, sy, hit };
+			this.refreshCursor();
 		}
 	}
 
@@ -307,6 +331,7 @@ export class MapView {
 	}
 
 	pointerLeft() {
+		this.lastPointer = null;
 		this.emit("move", null);
 		this.updateHover(null, 0, 0);
 	}
@@ -449,7 +474,6 @@ export class MapView {
 		if (key === this.hoverKey) return;
 		this.hoverKey = key;
 		this.features.hoveredId = hit?.kind === "feature" ? hit.feature.id : null;
-		this.canvas.style.cursor = hit ? "pointer" : this.baseCursor;
 		this.renderer.invalidate();
 		this.emit("hover", { hit, sx, sy });
 	}

@@ -1,5 +1,4 @@
 import { effect } from "@preact/signals";
-import { isInteractiveTarget, isUiKeyTarget } from "../map/input";
 import type { MapView } from "../map/MapView";
 import {
 	activeTool,
@@ -9,29 +8,10 @@ import {
 	noHover,
 } from "../state";
 import { areasLoaded, type Edge, type Rect, uploadArea } from "../uploadArea";
-import {
-	drawGeometry,
-	drawing,
-	focusedPoint,
-	grabDrawPoint,
-	initDrawTool,
-} from "./draw";
+import { featureShape } from "./draw";
 import { initFeatureInteraction } from "./features";
 import { floorBlock, shiftHeld } from "./handles";
-import {
-	clearMeasure,
-	clickMeasure,
-	drawMeasure,
-	finishMeasure,
-	grabMeasurePoint,
-	hoverMeasure,
-	hoverMeasureHandle,
-	measureFinish,
-	measureFinishTarget,
-	measureHover,
-	measurePoints,
-	undoMeasure,
-} from "./measure";
+import { drawMeasure, endMeasure, measureShape, startMeasure } from "./measure";
 import { samePoint } from "./measureMath";
 
 /**
@@ -90,59 +70,57 @@ function drawHighlight(ctx: CanvasRenderingContext2D, map: MapView) {
 
 /** Connects the overlays, click, hover and keyboard handling of the tools to the map. */
 export function initTools(map: MapView) {
-	map.overlays.push(drawHighlight, drawMeasure, drawGeometry);
-	initDrawTool(map);
+	map.overlays.push(drawHighlight, drawMeasure, featureShape.draw);
+	featureShape.init(map);
+	measureShape.init(map);
 	initFeatureInteraction(map);
+	// Each editor passes on a press that is not on one of its own points.
 	map.dragHandler = (sx, sy) =>
-		grabDrawPoint(map, sx, sy) ??
-		(activeTool.value === "measure" ? grabMeasurePoint(map, sx, sy) : null);
+		featureShape.grab(map, sx, sy) ?? measureShape.grab(map, sx, sy);
+	map.cursorHandler = (sx, sy) =>
+		featureShape.cursor(map, sx, sy) ?? measureShape.cursor(map, sx, sy);
 
 	// Everything the overlays draw from; any change repaints the map.
 	effect(() => {
 		highlightedUpload.value;
 		areasLoaded.value;
-		measurePoints.value;
-		measureHover.value;
-		measureFinish.value;
-		measureFinishTarget.value;
-		drawing.value;
-		focusedPoint.value;
+		featureShape.state.value;
+		featureShape.focused.value;
+		featureShape.hover.value;
+		featureShape.hoverVertex.value;
+		measureShape.state.value;
+		measureShape.aimed.value;
 		shiftHeld.value;
+		activeTool.value;
 		map.invalidate();
+		// What a click would do may have changed under a mouse that has not moved.
+		map.refreshCursor();
 	});
 
 	map.on("move", (e) => {
 		const block = e ? floorBlock(e) : null;
 		// A new object would repaint the map on every pointer move, even within one block.
 		if (!samePoint(block, cursor.value)) cursor.value = block;
-		if (activeTool.value === "measure" && !noHover.value) {
-			hoverMeasure(cursor.value);
-			if (e) hoverMeasureHandle(map, e.sx, e.sy);
-			else measureFinishTarget.value = -1;
-		}
-	});
-	map.on("click", (e) => {
-		if (drawing.value) return;
-		// On touch screens points go at the crosshair (the measure card's Add point) instead.
-		if (activeTool.value === "measure" && !noHover.value)
-			clickMeasure(floorBlock(e));
 	});
 	// On touch screens the measure tool aims at the crosshair in the middle of the screen.
 	effect(() => {
-		if (activeTool.value === "measure" && noHover.value)
-			hoverMeasure(centerBlock.value);
+		if (activeTool.value === "measure" && noHover.value) {
+			const c = centerBlock.value;
+			measureShape.setHover([c.x, c.z]);
+		}
+	});
+
+	// The measurement lasts as long as the tool is open.
+	effect(() => {
+		if (activeTool.value === "measure") startMeasure();
+		else endMeasure();
 	});
 
 	// Double-click zoom would fight with two quick tool clicks.
 	effect(() => {
-		const tool = activeTool.value;
-		const idle = tool === "none" && drawing.value === null;
+		const idle =
+			activeTool.value === "none" && featureShape.state.value === null;
 		map.doubleClickZoom = idle;
-		map.setCursor(idle ? "grab" : "crosshair");
-		if (tool !== "measure") {
-			clearMeasure();
-			hoverMeasure(null);
-		}
 	});
 
 	const shift = (e: KeyboardEvent) => {
@@ -154,23 +132,5 @@ export function initTools(map: MapView) {
 	});
 	window.addEventListener("keydown", (e) => {
 		shift(e);
-		if (isUiKeyTarget(e.target) || drawing.value) return;
-		if (e.key === "Escape") {
-			if (measurePoints.value.length > 0) clearMeasure();
-			else activeTool.value = "none";
-		} else if (
-			e.key === "Enter" &&
-			activeTool.value === "measure" &&
-			!isInteractiveTarget(e.target)
-		) {
-			if (finishMeasure("line")) e.preventDefault();
-		} else if (
-			(e.key === "Backspace" || e.key === "Delete") &&
-			activeTool.value === "measure" &&
-			measurePoints.value.length > 0
-		) {
-			undoMeasure();
-			e.preventDefault();
-		}
 	});
 }

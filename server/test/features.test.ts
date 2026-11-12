@@ -209,6 +209,41 @@ describe("feature validation", () => {
 			{ type: "line", name: "x", geometry: [[0, 0]] },
 			false,
 		],
+		[
+			"closed line",
+			{ type: "line", name: "x", geometry: [...triangle, [0, 0]] },
+			true,
+		],
+		[
+			"branching line",
+			{
+				type: "line",
+				name: "x",
+				geometry: [
+					line,
+					[
+						[5, 5],
+						[9, 0],
+					],
+				],
+			},
+			true,
+		],
+		[
+			"line with a one-point path",
+			{ type: "line", name: "x", geometry: [line, [[5, 5]]] },
+			false,
+		],
+		["line with no paths", { type: "line", name: "x", geometry: [] }, false],
+		[
+			"line with too many points across its paths",
+			{
+				type: "line",
+				name: "x",
+				geometry: Array.from({ length: 1001 }, () => line),
+			},
+			false,
+		],
 		["polygon", { type: "polygon", name: "x", geometry: triangle }, true],
 		[
 			"polygon with two points",

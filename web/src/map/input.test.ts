@@ -51,6 +51,7 @@ beforeEach(() => {
 		cancelAnimation() {},
 		pointer: (...a: unknown[]) => calls.push(["pointer", ...a]),
 		pointerLeft() {},
+		setGrabbing() {},
 		contextMenu: (...a: unknown[]) => calls.push(["contextMenu", ...a]),
 		getView: (): View => views.at(-1) ?? { centerX: 0, centerZ: 0, zoom: 0 },
 		setView: (v: View) => views.push(v),

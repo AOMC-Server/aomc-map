@@ -23,7 +23,7 @@ export type FeatureData = {
 	name: string;
 	popup: string;
 	color: Dye | null;
-	geometry: Point | Point[];
+	geometry: Point | Point[] | Point[][];
 	authorId: string;
 	updatedAt: number;
 };
@@ -156,10 +156,17 @@ export const contextMenu = signal<{
 } | null>(null);
 
 export type EditorTarget =
-	/** `at`: start with a pin placed on this block. */
-	| { mode: "create"; layerId: number; at?: Point }
+	/** `at`: start with a pin placed on this block. `shape`: start with this geometry (a measurement). */
+	| {
+			mode: "create";
+			layerId: number;
+			at?: Point;
+			shape?: { type: FeatureType; paths: Point[][] };
+	  }
 	| { mode: "edit"; layerId: number; featureId: number };
 export const editor = signal<EditorTarget | null>(null);
+/** The layer a feature was last saved to, which new features start in. */
+export const lastEditLayer = signal<number | null>(null);
 
 /** The map is in maintenance and you are not an owner: you can look, but not change anything. */
 export const readOnly = computed(() => {

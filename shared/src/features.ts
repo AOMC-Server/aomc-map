@@ -36,11 +36,36 @@ function doubleArea(points: Point[]): bigint {
 	return sum;
 }
 
-const lineGeometry = z
+const linePath = z
 	.array(pointSchema)
 	.min(2)
 	.max(MAX_VERTICES)
 	.refine((g) => distinctPoints(g) >= 2, "a line needs two different points");
+
+/**
+ * A line is one path, `[[x, z], ...]`, or several, `[[[x, z], ...], ...]`. A path that ends
+ * where it starts is a closed loop, and paths that share a block are joined there, which is how
+ * a line branches.
+ */
+const lineGeometry = z.union([
+	linePath,
+	z
+		.array(linePath)
+		.min(1)
+		.refine(
+			(paths) => paths.reduce((n, p) => n + p.length, 0) <= MAX_VERTICES,
+			`a line can have at most ${MAX_VERTICES} points`,
+		),
+]);
+export type LineGeometry = z.infer<typeof lineGeometry>;
+
+/** The paths of a line, whichever of the two forms it is stored in. */
+export function linePaths(geometry: LineGeometry): Point[][] {
+	const [first] = geometry;
+	return first !== undefined && Array.isArray(first[0])
+		? (geometry as Point[][])
+		: [geometry as Point[]];
+}
 const polygonGeometry = z
 	.array(pointSchema)
 	.min(3)

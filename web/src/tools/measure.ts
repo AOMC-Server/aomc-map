@@ -1,254 +1,237 @@
-import { computed, signal } from "@preact/signals";
-import type { DragSession } from "../map/input";
+import type { Point as BlockPoint } from "@aomc/shared/features";
+import { computed } from "@preact/signals";
 import type { MapView } from "../map/MapView";
-import { activeTool } from "../state";
-import { blockAt, blockCenter, nearestHandle, shiftHeld } from "./handles";
 import {
-	facing,
-	type Point,
-	polygonArea,
-	samePoint,
-	segmentIndices,
-	snapToLine,
-} from "./measureMath";
-import { handleSquare, labelBox, outlinedPath } from "./overlay";
+	activeTool,
+	contextMenu,
+	editor,
+	isLayerFull,
+	isLayerHidden,
+	lastEditLayer,
+	layersData,
+	noHover,
+	popup,
+	setLayersHidden,
+} from "../state";
+import { drawing } from "./draw";
+import { blockCenter } from "./handles";
+import {
+	dropLoose,
+	type LineGraph,
+	loopOf,
+	pathsFromGraph,
+	simplePath,
+} from "./lineGraph";
+import { facing, formatBlocks, type Point, polygonArea } from "./measureMath";
+import { labelBox } from "./overlay";
+import { createShapeEditor } from "./shape";
 
 export type { Point };
 
-/** The points placed so far (block coordinates), in order. */
-export const measurePoints = signal<Point[]>([]);
-/** The block under the cursor while measuring. */
-export const measureHover = signal<Point | null>(null);
 /**
- * How the measurement was finished: `line` by clicking its last point, `shape` by clicking its
- * first point, which joins the path back to the start. Null while points are still being placed.
+ * The measure tool: the shape editor (see shape.ts) in white, so a measurement can branch, close
+ * into a loop and have points moved or removed like a line, plus the numbers and the lengths
+ * written on the map.
  */
-export const measureFinish = signal<"line" | "shape" | null>(null);
-/** The placed point the pointer is over that a click would finish on (first or last), or -1. */
-export const measureFinishTarget = signal(-1);
-
-/** A press on a point only drags once the pointer has moved this far; a smaller move is a click. */
-const DRAG_START_PX = 5;
-
-/** Which placed point a click at this screen position would finish the measurement on, or -1. */
-function finishTargetAt(map: MapView, sx: number, sy: number): number {
-	const points = measurePoints.value;
-	if (measureFinish.value || points.length < 2) return -1;
-	const index = nearestHandle(map, points, sx, sy);
-	if (index === 0 && points.length >= 3) return 0;
-	if (index === points.length - 1) return index;
-	return -1;
-}
-
-/** `p`, or with Shift held the nearest point on a straight line from the last placed one. */
-function snapped(p: Point): Point {
-	const last = measurePoints.value.at(-1);
-	return shiftHeld.value && last ? snapToLine(last, p) : p;
-}
-
-/** Where a click would put the next point; on the first point when it would close the shape. */
-const measureAim = computed(() => {
-	if (measureFinish.value) return null;
-	const target = measureFinishTarget.value;
-	if (target === 0) return measurePoints.value[0] ?? null;
-	const hover = measureHover.value;
-	return hover && measurePoints.value.length > 0 ? snapped(hover) : hover;
+export const measureShape = createShapeEditor({
+	style: {
+		line: "#fff",
+		first: "#52a535",
+		markFirst: true,
+		fillLoops: true,
+	},
+	// The feature editor, when open, has the pointer and the keys.
+	active: () => activeTool.value === "measure" && drawing.value === null,
+	// On touch screens points go at the crosshair (the measure card's Add point) instead.
+	pointerAims: () => !noHover.value,
+	escapeClears: true,
 });
 
-export type MeasureStats = {
-	points: Point[];
-	segments: number[];
-	/** Length of the whole path. */
-	total: number;
-	/** From the first point to the last, as the crow flies. */
-	straight: number;
-	dx: number;
-	dz: number;
-	facing: { name: string; yaw: number } | null;
-	/** True when the last point is the cursor rather than a placed point. */
-	preview: boolean;
-	/** The path is a closed shape: its last segment runs back to the first point. */
-	closed: boolean;
-	/** Area enclosed by a closed shape (or by the one the cursor would close), in square blocks. */
-	area: number | null;
+const stopTool = () => {
+	activeTool.value = "none";
 };
 
-/** Numbers for the measure card, including the segment to the cursor while aiming. */
-export const measureStats = computed<MeasureStats | null>(() => {
-	const placed = measurePoints.value;
-	if (placed.length === 0) return null;
-	const closed = measureFinish.value === "shape" && placed.length >= 3;
-	const aim = measureAim.value;
-	const last = placed.at(-1) as Point;
-	const preview = aim !== null && (aim.x !== last.x || aim.z !== last.z);
-	const points = preview ? [...placed, aim] : placed;
-	const closing = !closed && preview && measureFinishTarget.value === 0;
-	const first = points[0] as Point;
-	const end = points.at(-1) as Point;
-	const dx = end.x - first.x;
-	const dz = end.z - first.z;
-	const segments = segmentIndices(points.length, closed).map(([a, b]) => {
-		const p = points[a] as Point;
-		const q = points[b] as Point;
-		return Math.hypot(q.x - p.x, q.z - p.z);
-	});
-	return {
-		points,
-		segments,
-		total: segments.reduce((sum, length) => sum + length, 0),
-		straight: Math.hypot(dx, dz),
-		dx,
-		dz,
-		facing: dx === 0 && dz === 0 ? null : facing(dx, dz),
-		preview,
-		closed,
-		area: closed || closing ? polygonArea(placed) : null,
-	};
-});
-
-export function clickMeasure(p: Point) {
-	if (measureFinish.value) return;
-	measurePoints.value = [...measurePoints.value, snapped(p)];
+/** Starts an empty measurement, if there is none yet. */
+export function startMeasure() {
+	if (!measureShape.state.peek()) measureShape.start("line", [], stopTool);
 }
 
-/** Ends the measurement, keeping it on the map; `shape` joins the last point back to the first. */
-export function finishMeasure(how: "line" | "shape") {
-	const n = measurePoints.value.length;
-	if (measureFinish.value || n < (how === "shape" ? 3 : 2)) return false;
-	measureFinish.value = how;
-	measureFinishTarget.value = -1;
-	return true;
+/** Drops the measurement; the tool was closed. */
+export function endMeasure() {
+	measureShape.stop();
+	measureShape.setHover(null);
 }
 
 /** Starts a new measurement with its first point at `p`. */
 export function measureFrom(p: Point) {
 	activeTool.value = "measure";
-	measureFinish.value = null;
-	measurePoints.value = [p];
-}
-
-/** Removes the last point, or on a finished measurement goes back to placing points. */
-export function undoMeasure() {
-	if (measureFinish.value) measureFinish.value = null;
-	else measurePoints.value = measurePoints.value.slice(0, -1);
+	measureShape.start("line", [[[p.x, p.z]]], stopTool);
 }
 
 export function clearMeasure() {
-	measureFinish.value = null;
-	measureFinishTarget.value = -1;
-	measurePoints.value = [];
+	if (measureShape.state.peek()) measureShape.start("line", [], stopTool);
 }
 
-export function hoverMeasure(p: Point | null) {
-	if (!samePoint(p, measureHover.value)) measureHover.value = p;
-}
+/** Puts a point at a block, as a click there would. */
+export const measureAt = (p: Point) => measureShape.place([p.x, p.z]);
 
-/** Notes the first or last point under the pointer, which a click would finish on. */
-export function hoverMeasureHandle(map: MapView, sx: number, sy: number) {
-	const target = finishTargetAt(map, sx, sy);
-	if (target !== measureFinishTarget.value) measureFinishTarget.value = target;
-}
+export type MeasureStats = {
+	/** Length of each segment. */
+	segments: number[];
+	/** Length of everything. */
+	total: number;
+	/** From one end to the other, as the crow flies; only for a single path. */
+	ends: {
+		straight: number;
+		dx: number;
+		dz: number;
+		facing: { name: string; yaw: number } | null;
+	} | null;
+	/** The last segment is the one to the cursor rather than a placed one. */
+	preview: boolean;
+	/** The line is one closed loop. */
+	closed: boolean;
+	/** Area enclosed by a closed loop (or by the one the cursor would close), in square blocks. */
+	area: number | null;
+};
 
-/**
- * Lets a placed point be dragged to a new block (Shift snaps it to a line from its neighbour).
- * A press that does not move is a click: on the first point it closes the shape, on the last
- * it ends the measurement.
- */
-export function grabMeasurePoint(
-	map: MapView,
-	sx: number,
-	sy: number,
-): DragSession | null {
-	const index = nearestHandle(map, measurePoints.value, sx, sy);
-	if (index < 0) return null;
-	const target = finishTargetAt(map, sx, sy);
-	let dragging = false;
+const asXZ = ([x, z]: BlockPoint): Point => ({ x, z });
+
+/** The numbers of a measurement. */
+export function measureOf(g: LineGraph, preview = false): MeasureStats {
+	const segments = g.edges.map(([a, b]) => {
+		const p = g.points[a] as BlockPoint;
+		const q = g.points[b] as BlockPoint;
+		return Math.hypot(q[0] - p[0], q[1] - p[1]);
+	});
+	const loop = loopOf(g);
+	const path = loop ? null : simplePath(g);
+	let ends: MeasureStats["ends"] = null;
+	if (path) {
+		const first = path[0] as BlockPoint;
+		const last = path.at(-1) as BlockPoint;
+		const dx = last[0] - first[0];
+		const dz = last[1] - first[1];
+		ends = {
+			straight: Math.hypot(dx, dz),
+			dx,
+			dz,
+			facing: dx === 0 && dz === 0 ? null : facing(dx, dz),
+		};
+	}
 	return {
-		move(mx, my) {
-			if (!dragging) {
-				if (Math.hypot(mx - sx, my - sy) < DRAG_START_PX) return;
-				dragging = true;
-				measureHover.value = null;
-				measureFinishTarget.value = -1;
-			}
-			const points = [...measurePoints.value];
-			const raw = blockAt(map, mx, my);
-			const neighbour = points[index - 1] ?? points[index + 1];
-			const next =
-				shiftHeld.value && neighbour ? snapToLine(neighbour, raw) : raw;
-			if (samePoint(next, points[index] ?? null)) return;
-			points[index] = next;
-			measurePoints.value = points;
-		},
-		end() {
-			if (dragging || target < 0) return;
-			finishMeasure(target === 0 ? "shape" : "line");
-		},
-		cancel() {},
+		segments,
+		total: segments.reduce((sum, length) => sum + length, 0),
+		ends,
+		preview,
+		closed: loop !== null,
+		area: loop ? polygonArea(loop.map(asXZ)) : null,
 	};
 }
 
-const numberFormat = new Intl.NumberFormat(undefined, {
-	maximumFractionDigits: 1,
+/** Numbers for the measure card, including the segment to the cursor while aiming. */
+export const measureStats = computed<MeasureStats | null>(() => {
+	const aim = measureShape.aimed.value;
+	if (!aim || aim.points.length === 0) return null;
+	return measureOf(aim, aim.preview);
 });
-export const formatBlocks = (n: number) => numberFormat.format(n);
 
-/** Overlay: the measured path, its segment lengths, the segment to the cursor and the points. */
+/** The lines the card's Copy puts on the clipboard. */
+export function measureSummary(g: LineGraph): string[] {
+	const stats = measureOf(g);
+	const lengths = stats.segments.map(formatBlocks);
+	let lines: string[];
+	const loop = loopOf(g);
+	const path = loop ? null : simplePath(g);
+	if (loop)
+		lines = [
+			`Perimeter: ${formatBlocks(stats.total)} blocks`,
+			`Area: ${formatBlocks(stats.area ?? 0)} blocks²`,
+			`Corners: ${loop.map(([x, z]) => `${x}, ${z}`).join(" → ")}`,
+		];
+	else if (path) {
+		const first = path[0] as BlockPoint;
+		const last = path.at(-1) as BlockPoint;
+		lines = [
+			`Distance: ${formatBlocks(stats.total)} blocks`,
+			`From ${first[0]}, ${first[1]} to ${last[0]}, ${last[1]}`,
+		];
+	} else
+		lines = [
+			`Total length: ${formatBlocks(stats.total)} blocks`,
+			`Points: ${g.points.map(([x, z]) => `${x}, ${z}`).join("; ")}`,
+		];
+	if (lengths.length > 1) lines.push(`Segments: ${lengths.join(" + ")}`);
+	return lines;
+}
+
+/** What the measurement can become: a line, and an area when it is a closed loop. */
+export function measuredShape() {
+	const d = measureShape.state.value;
+	if (d?.type !== "line") return null;
+	const g = dropLoose(d);
+	if (g.edges.length === 0) return null;
+	return { graph: g, loop: loopOf(g) };
+}
+
+/**
+ * Opens the feature editor on the measured shape, as a line or (for a closed loop) an area, in
+ * the layer last used or else the first one that can take it. Returns false when there is none.
+ */
+export function featureFromMeasure(type: "line" | "polygon"): boolean {
+	const shape = measuredShape();
+	if (!shape) return false;
+	const paths =
+		type === "polygon"
+			? shape.loop
+				? [shape.loop]
+				: null
+			: pathsFromGraph(shape.graph);
+	if (!paths) return false;
+	const layers = layersData.value.filter((l) => l.canEdit && !isLayerFull(l));
+	const layer = layers.find((l) => l.id === lastEditLayer.value) ?? layers[0];
+	if (!layer) return false;
+	if (isLayerHidden(layer)) setLayersHidden([layer], false);
+	activeTool.value = "none";
+	popup.value = null;
+	contextMenu.value = null;
+	editor.value = { mode: "create", layerId: layer.id, shape: { type, paths } };
+	return true;
+}
+
+/** Overlay: the shape, the length of each segment, and the total. */
 export function drawMeasure(ctx: CanvasRenderingContext2D, map: MapView) {
+	measureShape.draw(ctx, map);
+	const aim = measureShape.aimed.value;
 	const stats = measureStats.value;
-	if (!stats) return;
-	const screen = stats.points.map((p) => blockCenter(map, p));
-	const placedCount = stats.preview ? screen.length - 1 : screen.length;
+	if (!aim || !stats) return;
+	const at = (i: number) => blockCenter(map, asXZ(aim.points[i] as BlockPoint));
+
 	ctx.save();
-	ctx.lineJoin = "round";
-	ctx.lineCap = "round";
-
-	if (stats.area !== null && placedCount >= 3) {
-		ctx.beginPath();
-		for (const [i, p] of screen.slice(0, placedCount).entries()) {
-			if (i === 0) ctx.moveTo(p.x, p.y);
-			else ctx.lineTo(p.x, p.y);
-		}
-		ctx.closePath();
-		ctx.fillStyle = "rgba(255, 255, 255, 0.14)";
-		ctx.fill();
-	}
-
-	outlinedPath(ctx, screen.slice(0, placedCount), {
-		color: "#fff",
-		closed: stats.closed,
-	});
-	if (stats.preview)
-		outlinedPath(ctx, screen.slice(placedCount - 1), {
-			color: "#fff",
-			dashed: true,
-		});
-
 	// Segment lengths at their midpoints, where there is room for them.
-	stats.segments.forEach((length, i) => {
-		const a = screen[i] as { x: number; y: number };
-		const b = screen[(i + 1) % screen.length] as { x: number; y: number };
-		const isPreview = stats.preview && i === stats.segments.length - 1;
-		if (Math.hypot(b.x - a.x, b.y - a.y) < 70 && !isPreview) return;
+	aim.edges.forEach(([a, b], i) => {
+		const pa = at(a);
+		const pb = at(b);
+		const isPreview = aim.preview && i === aim.edges.length - 1;
+		if (Math.hypot(pb.x - pa.x, pb.y - pa.y) < 70 && !isPreview) return;
 		labelBox(
 			ctx,
-			formatBlocks(length),
-			(a.x + b.x) / 2,
-			(a.y + b.y) / 2,
+			formatBlocks(stats.segments[i] as number),
+			(pa.x + pb.x) / 2,
+			(pa.y + pb.y) / 2,
 			isPreview ? "#ffe866" : "#fff",
 		);
 	});
 
-	// The point a click would finish on is drawn larger, so it is clear what the click will do.
-	const target = measureFinishTarget.value;
-	screen.slice(0, placedCount).forEach((s, i) => {
-		const color = i === target ? "#ffe866" : i === 0 ? "#52a535" : "#fff";
-		handleSquare(ctx, s.x, s.y, i === target ? 9 : 6, color);
-	});
-
-	// The total follows the end of the path once there is more than one segment.
+	// The total follows the end being drawn once there is more than one segment.
 	if (stats.segments.length > 1) {
-		const end = screen.at(-1) as { x: number; y: number };
+		const d = measureShape.state.value;
+		const lastEdge = aim.edges.at(-1);
+		const index =
+			aim.preview && lastEdge
+				? lastEdge[1]
+				: (d?.selected ?? aim.points.length - 1);
+		const end = at(index);
 		const text =
 			stats.area !== null
 				? `Perimeter ${formatBlocks(stats.total)} · Area ${formatBlocks(stats.area)}`

@@ -73,6 +73,40 @@ describe("FeatureLayer.hitTest", () => {
 		const y = 350 - 110 / 8;
 		expect(name(l.hitTest(far, size, x, y + 5))).toBe("Road");
 	});
+
+	test("every path of a branching line is hit", () => {
+		const l = new FeatureLayer(() => {});
+		l.setFeatures([
+			{
+				id: 1,
+				color: "red",
+				features: [
+					{
+						id: 3,
+						layerId: 1,
+						type: "line",
+						name: "Junction",
+						popup: "",
+						color: null,
+						geometry: [
+							[
+								[-100, 0],
+								[100, 0],
+							],
+							[
+								[0, 0],
+								[0, 100],
+							],
+						],
+					},
+				],
+			},
+		]);
+		const v: View = { centerX: 0, centerZ: 0, zoom: 0 };
+		expect(name(l.hitTest(v, size, 450.5, 350.5))).toBe("Junction");
+		expect(name(l.hitTest(v, size, 500.5, 400.5))).toBe("Junction");
+		expect(l.hitTest(v, size, 450.5, 400.5)).toBeNull();
+	});
 });
 
 describe("FeatureLayer hit order", () => {
