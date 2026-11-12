@@ -15,7 +15,10 @@ import { ManagePage } from "./ui/ManagePage";
 import { PrivacyPage } from "./ui/PrivacyPage";
 import { SettingsPage } from "./ui/SettingsPage";
 import { StatsPage } from "./ui/StatsPage";
+import { initToggleDrag } from "./ui/toggleDrag";
 import "./styles.css";
+
+initToggleDrag();
 
 // Browser zoom changes the pixel ratio, so keep the pixel font of the headings crisp as it changes.
 const applyFontSize = () =>

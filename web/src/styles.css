@@ -282,6 +282,7 @@
 	--radius: 0;
 	--radius-sm: 0;
 	--toggle-radius: 0;
+	--toggle-mark: block;
 	--bw: 2px;
 	--line: var(--ink);
 
@@ -331,6 +332,7 @@
 	--radius: 0;
 	--radius-sm: 0;
 	--toggle-radius: 0;
+	--toggle-mark: none;
 	--bw: 0px;
 	--line: #000;
 
@@ -366,6 +368,7 @@
 	--radius: 6px;
 	--radius-sm: 3px;
 	--toggle-radius: 3px;
+	--toggle-mark: none;
 	--bw: 1px;
 	--line: color-mix(in srgb, var(--chrome) 55%, #000);
 
@@ -403,6 +406,7 @@
 	--radius: 14px;
 	--radius-sm: 9px;
 	--toggle-radius: 999px;
+	--toggle-mark: none;
 	--bw: 1px;
 	--line: color-mix(in srgb, var(--text) 14%, transparent);
 
@@ -694,8 +698,24 @@ option {
 	color: var(--text);
 }
 
-/* Checkboxes are drawn as Bedrock toggles: a square knob that slides over a green track. */
+/*
+ * How far the knob is from the off side: 0 when off, 22px (the track's 48px less the knob's 26px)
+ * when on, anywhere between while dragged (ui/toggleDrag.ts sets it inline). Registered so it can
+ * be animated, which moves the knob and the colour of the track together.
+ */
+@property --knob-x {
+	syntax: "<length>";
+	inherits: true;
+	initial-value: 0px;
+}
+
+/*
+ * Checkboxes are drawn as Bedrock toggles: a square knob that slides over a green track. The
+ * track is green up to the knob and grey past it; the split moves from the knob's left edge (off)
+ * to its right edge (on), so it stays hidden under the knob as it slides.
+ */
 input[type="checkbox"] {
+	--knob-x: 0px;
 	border-radius: var(--toggle-radius);
 	appearance: none;
 	position: relative;
@@ -703,18 +723,28 @@ input[type="checkbox"] {
 	width: 48px;
 	height: 26px;
 	margin: 0;
-	background: var(--s3);
+	background: linear-gradient(
+		to right,
+		var(--accent) calc(var(--knob-x) * 48 / 22),
+		var(--s3) 0
+	);
 	border: var(--bw) solid var(--line);
 	box-shadow: inset 0 2px 0 rgba(0, 0, 0, 0.35);
 	cursor: pointer;
+	touch-action: pan-y;
+	transition: --knob-x 0.1s;
 }
 
+/* The knob covers the track's full height, border included. Pseudo-elements are not matched by
+ * the `*` box-sizing rule, so it is set here to keep the knob's border inside its 26px. */
 input[type="checkbox"]::before {
 	border-radius: var(--toggle-radius);
+	box-sizing: border-box;
 	content: "";
 	position: absolute;
-	top: -2px;
-	left: -2px;
+	top: calc(-1 * var(--bw));
+	left: calc(var(--knob-x) - var(--bw));
+	z-index: 1;
 	width: 26px;
 	height: 26px;
 	background: var(--light);
@@ -722,20 +752,24 @@ input[type="checkbox"]::before {
 	box-shadow:
 		inset var(--edge-lo) 0 var(--light-lo),
 		inset var(--edge-hi) 0 var(--light-hi);
-	transition: left 0.1s;
 }
 
 input[type="checkbox"]:checked {
-	background: var(--accent);
+	--knob-x: 22px;
 }
 
-input[type="checkbox"]:checked::before {
-	left: calc(100% - 24px);
+input[type="checkbox"].dragging {
+	cursor: grabbing;
+	transition: none;
 }
 
-/* The "on" mark, left of the knob. */
-input[type="checkbox"]:checked::after {
+/*
+ * Bedrock's "on" mark, on the green left of the knob; the knob covers it when off. The other
+ * styles (--toggle-mark: none) copy switches that show their state by colour alone.
+ */
+input[type="checkbox"]::after {
 	content: "";
+	display: var(--toggle-mark, block);
 	position: absolute;
 	top: 6px;
 	left: 9px;
@@ -3536,14 +3570,8 @@ body.resizing {
 	}
 
 	input[type="checkbox"]::before {
-		top: 0;
-		left: 0;
 		background: var(--s1);
 		box-shadow: var(--bevel-out);
-	}
-
-	input[type="checkbox"]:checked::before {
-		left: calc(100% - 26px);
 	}
 
 	input[type="range"]::-webkit-slider-thumb {
