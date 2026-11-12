@@ -1,8 +1,8 @@
 import { join } from "node:path";
 import type { Db } from "../db/client";
 import type { Env } from "../env";
+import type { EventHub } from "../events";
 import { incomingRoot } from "../paths";
-import type { ProgressBus } from "../progress";
 import type { BlobStore } from "../tiles/blobstore";
 
 /** An error whose message is meant for the person who uploaded; any other error is only logged. */
@@ -12,7 +12,7 @@ export type JobContext = {
 	db: Db;
 	env: Env;
 	blobs: BlobStore;
-	progress: ProgressBus;
+	events: EventHub;
 };
 
 export type UploadFile = {

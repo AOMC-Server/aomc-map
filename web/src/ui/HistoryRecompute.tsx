@@ -1,12 +1,11 @@
 import type { InferResponseType } from "hono/client";
-import { useEffect, useState } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { api, attempt, run, showNotice } from "../api";
 import { refreshMap } from "../controller";
+import { subscribe } from "../events";
 import { formatProgress, formatTime } from "./format";
 
 type Status = InferResponseType<typeof api.api.admin.history.$get, 200>;
-
-const POLL_MS = 500;
 
 const running = (s: Status | null) =>
 	s?.recompute?.status === "pending" || s?.recompute?.status === "processing";
@@ -16,39 +15,52 @@ export function HistoryRecompute() {
 	const [status, setStatus] = useState<Status | null>(null);
 	const [starting, setStarting] = useState(false);
 
+	/** The status of the recompute as last seen, to tell when one ends. */
+	const seen = useRef<Status["recompute"]>(null);
+
+	/** Takes a new state of the recompute; when one just ended, picks up the new revision numbers. */
+	const apply = (next: Status["recompute"]) => {
+		const was = seen.current?.status;
+		seen.current = next;
+		if (was !== "pending" && was !== "processing") return;
+		if (next?.status === "done") {
+			showNotice("History recomputed in export order.");
+			void refreshMap();
+			void load();
+		} else if (next?.status === "failed") {
+			showNotice(
+				`Recomputing history failed: ${next.error ?? "unknown error"}`,
+				"error",
+			);
+		}
+	};
+
 	const load = async () => {
 		const res = await attempt(() => api.api.admin.history.$get());
-		if (res.ok) setStatus(res.body);
-		return res.ok ? res.body : null;
+		if (!res.ok) return null;
+		setStatus(res.body);
+		apply(res.body.recompute);
+		return res.body;
 	};
+
+	useEffect(
+		() =>
+			subscribe("recompute", {
+				onEvent: ({ recompute }) => {
+					setStatus((cur) => (cur ? { ...cur, recompute } : cur));
+					apply(recompute);
+				},
+				poll: () => void load(),
+				pollMs: 2000,
+			}),
+		[],
+	);
 
 	useEffect(() => {
 		void load();
 	}, []);
 
-	// Follow a running recompute; when it ends, pick up the new revision numbers.
 	const busy = running(status);
-	useEffect(() => {
-		if (!busy) return;
-		let stopped = false;
-		const timer = setInterval(async () => {
-			const next = await load();
-			if (stopped || !next || running(next)) return;
-			if (next.recompute?.status === "done") {
-				showNotice("History recomputed in export order.");
-				await refreshMap();
-			} else {
-				showNotice(
-					`Recomputing history failed: ${next.recompute?.error ?? "unknown error"}`,
-					"error",
-				);
-			}
-		}, POLL_MS);
-		return () => {
-			stopped = true;
-			clearInterval(timer);
-		};
-	}, [busy]);
 
 	const start = async () => {
 		if (

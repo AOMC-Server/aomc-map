@@ -340,7 +340,9 @@ describe("telling people what is going on", () => {
 		const t = await bootTiles();
 		const seen: { message?: string; done?: number; total?: number }[] = [];
 		// The first revision of a new map is 1; the worker starts as soon as it is queued.
-		t.services.progress.subscribe(1, (e) => seen.push(e));
+		t.services.events.subscribe("revision:1", (e) => {
+			if (e.status !== "gone") seen.push(e);
+		});
 		const res = await postUpload(t, t.editor, [
 			{ name: "a_x0_z0.png", data: await png(T, T, () => RED) },
 		]);

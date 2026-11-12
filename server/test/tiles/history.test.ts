@@ -2,6 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { rm } from "node:fs/promises";
 import { eq } from "drizzle-orm";
 import { dimensions, jobs, mapInfo, revisions } from "../../src/db/schema";
+import type { RevisionEvent } from "../../src/events";
 import { messages } from "../../src/jobs/messages";
 import { incomingDir } from "../../src/jobs/types";
 
@@ -238,17 +239,20 @@ describe("deleting an upload", () => {
 
 	test("an erase reports its progress", async () => {
 		const { t, ids } = await history();
-		const events: { message?: string; done?: number; total?: number }[] = [];
-		const unsubscribe = t.services.progress.subscribe(ids[0] as number, (e) =>
-			events.push(e),
+		const events: RevisionEvent[] = [];
+		const unsubscribe = t.services.events.subscribe(
+			`revision:${ids[0] as number}`,
+			(e) => events.push(e),
 		);
 		await erase(t, ids[0] as number);
 		unsubscribe();
-		const tiles = events.filter((e) => e.message === messages.erase.tiles);
+		const steps = events.filter((e) => e.status !== "gone");
+		const tiles = steps.filter((e) => e.message === messages.erase.tiles);
 		expect(tiles.length).toBeGreaterThan(0);
 		expect(tiles.at(-1)?.done).toBe(tiles.at(-1)?.total);
-		expect(events.map((e) => e.message)).toContain(messages.erase.publishing);
-		expect(events.at(-1)).toMatchObject({ status: "done" });
+		expect(steps.map((e) => e.message)).toContain(messages.erase.publishing);
+		// The erased upload is gone.
+		expect(events.at(-1)).toEqual({ status: "gone" });
 	});
 
 	test("an erase bumps the map epoch, so cached tiles are not reused", async () => {

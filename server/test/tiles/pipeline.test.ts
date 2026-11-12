@@ -174,7 +174,7 @@ describe("publishing", () => {
 			new Uint8Array(await solid(T, T, RED)),
 			null,
 		);
-		t.services.progress.subscribe(revisionId, (e) => {
+		t.services.events.subscribe(`revision:${revisionId}`, (e) => {
 			if (e.status === "done") throw new Error("listener broke");
 		});
 		await t.services.worker.run();
@@ -402,7 +402,7 @@ describe("decoding sources once", () => {
 				db: t.db,
 				env: t.env,
 				blobs: t.services.blobs,
-				progress: t.services.progress,
+				events: t.services.events,
 			},
 			{ revisionId, files },
 			(job as { id: number }).id,

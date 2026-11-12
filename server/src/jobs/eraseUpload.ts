@@ -20,6 +20,7 @@ import {
 import { parseKey, tileKey } from "../tiles/pyramid";
 import { parentRows, type Row, sameRows } from "../tiles/rows";
 import { messages } from "./messages";
+import { type ProgressStep, throttled } from "./report";
 import { jobRevisionId } from "./target";
 import { type EraseUploadPayload, type JobContext, UserError } from "./types";
 
@@ -37,14 +38,12 @@ export async function eraseUpload(
 	ctx: JobContext,
 	payload: EraseUploadPayload,
 ) {
-	const { db, env, blobs, progress } = ctx;
+	const { db, env, blobs, events } = ctx;
+	const report = throttled((p: ProgressStep) =>
+		events.emit("revision", payload.revisionId, { status: "processing", ...p }),
+	);
 	const say = (message: string, done?: number, total?: number) =>
-		progress.emit(payload.revisionId, {
-			status: "processing",
-			message,
-			done,
-			total,
-		});
+		report({ message, done, total });
 
 	const [target] = await db
 		.select()

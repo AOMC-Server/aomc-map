@@ -13,6 +13,7 @@ import { and, eq, inArray, ne } from "drizzle-orm";
 import { unzipSync } from "fflate";
 import { Hono } from "hono";
 import sharp from "sharp";
+import { announceUploads } from "../announce";
 import { requireUser, userOf } from "../auth/session";
 import { jobs, revisions, uploadFiles } from "../db/schema";
 import { dimensionBySlug } from "../dimensionLookup";
@@ -385,6 +386,7 @@ export const uploadRoutes = new Hono<AppEnv>().post(
 		} finally {
 			await rm(staging, { recursive: true, force: true });
 		}
+		announceUploads(c, dim.id);
 		svc.worker.kick();
 		return c.json(
 			{ revisionId: revisionIds.at(-1) as number, revisionIds, skipped },

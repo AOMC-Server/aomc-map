@@ -1,48 +1,89 @@
 import { z } from "zod";
 import type { Env } from "./env";
-import type { ProgressEvent } from "./progress";
-
-// Typed against ProgressEvent so the document cannot drift from what the jobs emit.
-const rev = z.number().int().nullable().optional();
-const error = z.string().nullable().optional();
-
-const payloads = {
-	pending: z.object({ status: z.literal("pending"), rev, error }),
-	processing: z.object({
-		status: z.literal("processing"),
-		message: z.string().optional(),
-		done: z.number().int().optional(),
-		total: z.number().int().optional(),
-		rev,
-		error,
-	}),
-	done: z.object({ status: z.literal("done"), rev, error }),
-	failed: z.object({ status: z.literal("failed"), rev, error }),
-} satisfies Record<string, z.ZodType<ProgressEvent>>;
+import type { Family } from "./events";
+import { type TopicDef, topics } from "./topics";
 
 const jsonSchema = (schema: z.ZodType) => {
 	const { $schema: _, ...rest } = z.toJSONSchema(schema, { target: "draft-7" });
 	return rest;
 };
 
-const message = (name: string, summary: string, schema: z.ZodType) => ({
-	name,
-	title: `${name} event`,
-	summary,
-	contentType: "application/json",
-	payload: jsonSchema(schema),
-});
+const envelope = (data: z.ZodType) =>
+	z.object({
+		topic: z.string(),
+		seq: z.string(),
+		snapshot: z.boolean(),
+		final: z.literal(true).optional(),
+		data,
+	});
 
-/** AsyncAPI 3 description of the server-sent events the API pushes. */
+const errorMessage = {
+	name: "error",
+	title: "error event",
+	summary:
+		"Sent once, instead of anything else, for a topic you may not follow, that does not exist, or is not known.",
+	contentType: "application/json",
+	payload: jsonSchema(
+		z.object({
+			topic: z.string(),
+			error: z.enum(["not found", "forbidden", "unknown topic"]),
+		}),
+	),
+};
+
+/**
+ * AsyncAPI 3 description of the server-sent events the API pushes, generated from the topic
+ * registry so it cannot drift from what is sent.
+ */
 export function asyncApiDocument(env: Env) {
 	const url = new URL(env.PUBLIC_URL);
+	const channels: Record<string, unknown> = {};
+	const operations: Record<string, unknown> = {};
+	for (const [family, def] of Object.entries(topics) as unknown as [
+		string,
+		TopicDef<Family>,
+	][]) {
+		const messages = Object.fromEntries(
+			Object.entries(def.messages).map(([name, m]) => [
+				name,
+				{
+					name,
+					title: `${name} event`,
+					summary: m.summary,
+					contentType: "application/json",
+					payload: jsonSchema(envelope(m.schema)),
+				},
+			]),
+		);
+		channels[family] = {
+			address: `/api/events?topics=${family}${def.key ? ":{key}" : ""}`,
+			title: def.title,
+			description: `${def.description}${def.authorize ? "" : " Anyone may follow it."}`,
+			servers: [{ $ref: "#/servers/default" }],
+			...(def.key ? { parameters: { key: { description: def.key } } } : {}),
+			messages: { ...messages, error: errorMessage },
+		};
+		operations[`receive_${family}`] = {
+			action: "send",
+			title: `Follow ${def.title.toLowerCase()}`,
+			channel: { $ref: `#/channels/${family}` },
+			messages: [...Object.keys(messages), "error"].map((name) => ({
+				$ref: `#/channels/${family}/messages/${name}`,
+			})),
+		};
+	}
 	return {
 		asyncapi: "3.0.0",
 		info: {
 			title: "AOMC Map events",
-			version: "1.0.0",
-			description:
-				"Server-sent events (`text/event-stream`) the API pushes. The HTTP request/response API is described in `/api/openapi.json`.",
+			version: "2.0.0",
+			description: [
+				"Server-sent events (`text/event-stream`) the API pushes, all from one stream: `GET /api/events?topics=a,b,…` follows any number of topics at once. Each topic is a channel below.",
+				"Events are unnamed; the data of each is a JSON envelope `{topic, seq, snapshot, data}`. For every topic the first event is its current state (`snapshot: true`), and the last one of a topic that ends (a revision) has `final: true`; `seq` counts the topic's events, so a snapshot after a reconnect with the `seq` you saw last means you missed nothing. Collection topics (`revisions`, `layers`) carry no data: they say to fetch again.",
+				"A `: ping` comment is sent every 20 seconds. The stream ends once every topic in it is done.",
+				"`GET /api/revisions/{id}/events` is the `revision:{id}` topic on its own, with events named after the status and the bare data (no envelope); it answers 404 for an unknown revision.",
+				"The HTTP request/response API is described in `/api/openapi.json`.",
+			].join("\n\n"),
 		},
 		servers: {
 			default: {
@@ -51,51 +92,7 @@ export function asyncApiDocument(env: Env) {
 				description: "The map server (`PUBLIC_URL`).",
 			},
 		},
-		channels: {
-			revisionEvents: {
-				address: "/api/revisions/{id}/events",
-				title: "Revision progress",
-				description:
-					"Progress of an upload or of its deletion. The first event is the revision's current status; after that an event is sent for each step. The stream ends after `done` or `failed`. A `: ping` comment is sent every 20 seconds to keep the connection open. Answers 404 when the revision does not exist.",
-				servers: [{ $ref: "#/servers/default" }],
-				parameters: { id: { description: "Revision id" } },
-				messages: {
-					pending: message(
-						"pending",
-						"The revision is queued. `message` says what it waits for (for example a running history recompute, or how many jobs are ahead); a new event follows whenever that changes.",
-						payloads.pending,
-					),
-					processing: message(
-						"processing",
-						"The job is running; `message`, `done` and `total` tell how far. As the first event, with a `message` that says what it waits for, the upload is waiting for its queued delete to start and is otherwise unchanged.",
-						payloads.processing,
-					),
-					done: message(
-						"done",
-						"The job finished; `rev` is the revision number.",
-						payloads.done,
-					),
-					failed: message(
-						"failed",
-						"The job failed; `error` says why.",
-						payloads.failed,
-					),
-				},
-			},
-		},
-		operations: {
-			receiveRevisionEvents: {
-				action: "send",
-				title: "Follow a revision",
-				summary: "The server sends progress events for one revision.",
-				channel: { $ref: "#/channels/revisionEvents" },
-				messages: [
-					{ $ref: "#/channels/revisionEvents/messages/pending" },
-					{ $ref: "#/channels/revisionEvents/messages/processing" },
-					{ $ref: "#/channels/revisionEvents/messages/done" },
-					{ $ref: "#/channels/revisionEvents/messages/failed" },
-				],
-			},
-		},
+		channels,
+		operations,
 	};
 }

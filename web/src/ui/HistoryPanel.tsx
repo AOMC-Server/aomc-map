@@ -1,6 +1,7 @@
 import { effect } from "@preact/signals";
 import { useEffect, useMemo, useRef, useState } from "preact/hooks";
 import { isolateUpload, mapView, setRev } from "../controller";
+import { subscribe } from "../events";
 import type { Bounds } from "../map/geometry";
 import { inFlight } from "../revisionLog";
 import { deleting, loadRevisions } from "../revisions";
@@ -230,24 +231,38 @@ export function HistoryPanel() {
 	const bounds = useViewBounds(inView);
 	const [now, setNow] = useState(Date.now());
 
-	// Quicker while something is queued, running or being deleted, so its state is not stale.
-	const active =
-		deleting.value.size > 0 ||
-		revisionsData.value.some((r) => inFlight(r) || r.deleting);
-
-	// Reload when a new head, rewritten history or another dimension appears, and keep polling
-	// for running jobs.
+	// Reload when a new head, rewritten history or another dimension appears.
 	useEffect(() => {
 		void loadRevisions();
-		const timer = setInterval(
-			() => {
-				void loadRevisions();
-				setNow(Date.now());
+	}, [head, epoch, dim]);
+
+	// The server says when the log changes (an upload added, started, finished or deleted);
+	// polling is only the fallback while its stream is down.
+	const dimensionId = currentMap.value?.dimensions.find(
+		(d) => d.slug === dim,
+	)?.id;
+	useEffect(() => {
+		if (dimensionId === undefined) return;
+		let timer: ReturnType<typeof setTimeout> | undefined;
+		const unsubscribe = subscribe(`revisions:${dimensionId}`, {
+			onEvent: () => {
+				clearTimeout(timer);
+				timer = setTimeout(() => void loadRevisions(), 200);
 			},
-			active ? 2000 : 10_000,
-		);
+			poll: () => void loadRevisions(),
+			pollMs: 10_000,
+		});
+		return () => {
+			unsubscribe();
+			clearTimeout(timer);
+		};
+	}, [dimensionId]);
+
+	// Times shown relative to now (how long an upload can still be deleted) move on.
+	useEffect(() => {
+		const timer = setInterval(() => setNow(Date.now()), 30_000);
 		return () => clearInterval(timer);
-	}, [head, epoch, dim, active]);
+	}, []);
 
 	useEffect(
 		() => () => {

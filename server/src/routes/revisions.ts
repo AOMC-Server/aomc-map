@@ -1,17 +1,19 @@
 import { HOUR, type Role } from "@aomc/shared";
-import { and, asc, desc, eq, inArray, lt, type SQL } from "drizzle-orm";
+import { and, desc, eq, inArray, lt, type SQL } from "drizzle-orm";
 import { type Context, Hono } from "hono";
-import { streamSSE } from "hono/streaming";
+import { announceUploads } from "../announce";
 import { requireUser, userOf } from "../auth/session";
 import type { Db } from "../db/client";
 import { jobs, revisions, uploadPatches, users } from "../db/schema";
 import { dimensionBySlug } from "../dimensionLookup";
-import { waitingMessage } from "../jobs/messages";
+import type { RevisionEvent } from "../events";
+import { erasing } from "../jobs/queue";
 import { jobRevisionId } from "../jobs/target";
 import { doc } from "../openapi";
 import { canDeleteUpload, canModerate, loadMap } from "../permissions";
-import type { ProgressEvent } from "../progress";
+import { topics } from "../topics";
 import type { AppEnv } from "../types";
+import { streamTopics } from "./events";
 import { parseId } from "./util";
 
 const revisionFields = {
@@ -52,51 +54,6 @@ function deleteAccess(c: Context<AppEnv>): DeleteAccess {
 		windowMs: c.var.env.SELF_DELETE_WINDOW_HOURS * HOUR,
 		now: Date.now(),
 	};
-}
-
-/** Ids of the uploads that have an erase queued or running. */
-function erasing(db: Db, ids?: number[]): Set<number> {
-	return new Set(
-		db
-			.select({ id: jobRevisionId })
-			.from(jobs)
-			.where(
-				and(
-					eq(jobs.type, "erase_upload"),
-					inArray(jobs.status, ["pending", "processing"]),
-					ids ? inArray(jobRevisionId, ids) : undefined,
-				),
-			)
-			.all()
-			.map((row) => row.id),
-	);
-}
-
-/**
- * Why the revision's queued job has not started, or null when it has no queued job (it is
- * running, or finished): the history recompute in the way, or how many jobs are ahead of it.
- */
-function waiting(db: Db, revisionId: number): string | null {
-	const job = db
-		.select({ id: jobs.id })
-		.from(jobs)
-		.where(and(eq(jobRevisionId, revisionId), eq(jobs.status, "pending")))
-		.orderBy(desc(jobs.id))
-		.get();
-	if (!job) return null;
-	return waitingMessage(
-		db
-			.select({ type: jobs.type, status: jobs.status })
-			.from(jobs)
-			.where(
-				and(
-					lt(jobs.id, job.id),
-					inArray(jobs.status, ["pending", "processing"]),
-				),
-			)
-			.orderBy(asc(jobs.id))
-			.all(),
-	);
 }
 
 function serialize(r: RevisionRow, access: DeleteAccess, deleting: boolean) {
@@ -244,75 +201,23 @@ export const revisionRoutes = new Hono<AppEnv>()
 			tag: "Revisions",
 			summary: "Stream a revision's progress",
 			description:
-				"Server-sent events named after the status (`pending`, `processing`, `done`, `failed`); the stream ends when the revision is done or failed. The first event is the current status (for a queued job with a `message` that says what it waits for, repeated when that changes); for an upload whose delete is waiting in the queue it is `processing` with a `message` that says what it waits for.",
+				"The `revision:<id>` topic of `GET /api/events` on its own, as server-sent events named after the status (`pending`, `processing`, `done`, `failed`, `gone`); the stream ends when the revision is done, failed or gone (an erased upload ends with `gone`). The first event is the current status (for a queued job with a `message` that says what it waits for, repeated when that changes); for an upload whose delete is waiting in the queue it is `processing` with a `message` that says what it waits for.",
 			ok: { 200: "text/event-stream" },
 			fails: [404],
 		}),
 		async (c) => {
-			const { db, svc } = c.var;
+			const { db } = c.var;
 			const id = parseId(c.req.param("id"));
 			if (!loadRevision(db, id)) return c.json({ error: "not found" }, 404);
 
-			return streamSSE(c, async (stream) => {
-				let chain: Promise<unknown> = Promise.resolve();
-				let finish: () => void = () => {};
-				const finished = new Promise<void>((resolve) => {
-					finish = resolve;
-				});
-				const send = (event: ProgressEvent) => {
-					chain = chain.then(() =>
-						stream.writeSSE({
-							event: event.status,
-							data: JSON.stringify(event),
+			return streamTopics(c, [`revision:${id}`], (stream, envelope) =>
+				"error" in envelope
+					? Promise.resolve()
+					: stream.writeSSE({
+							event: topics.revision.name(envelope.data as RevisionEvent),
+							data: JSON.stringify(envelope.data),
 						}),
-					);
-					if (event.status === "done" || event.status === "failed")
-						chain.then(finish);
-				};
-				const unsubscribe = svc.progress.subscribe(id, send);
-				stream.onAbort(() => {
-					unsubscribe();
-					finish();
-				});
-
-				const current = loadRevision(db, id);
-				if (!current) {
-					unsubscribe();
-					return;
-				}
-				// A delete waiting in the queue leaves the upload itself as it is until it starts.
-				const queued = (): ProgressEvent | null => {
-					const message = waiting(db, id);
-					if (message === null) return null;
-					return erasing(db, [id]).has(id)
-						? { status: "processing", message }
-						: { status: "pending", message };
-				};
-				let lastWaiting = "";
-				send(
-					queued() ?? {
-						status: current.status,
-						rev: current.rev,
-						error: current.error,
-					},
-				);
-				lastWaiting = waiting(db, id) ?? "";
-				// While it waits, say so again whenever what it waits for changes.
-				const watch = setInterval(() => {
-					const event = queued();
-					if (event?.message && event.message !== lastWaiting) {
-						lastWaiting = event.message;
-						send(event);
-					}
-				}, 1000);
-				const ping = setInterval(() => {
-					chain = chain.then(() => stream.write(": ping\n\n"));
-				}, 20_000);
-				await finished;
-				clearInterval(watch);
-				clearInterval(ping);
-				unsubscribe();
-			});
+			);
 		},
 	)
 	/**
@@ -359,6 +264,9 @@ export const revisionRoutes = new Hono<AppEnv>()
 					tx.delete(jobs).where(eq(jobRevisionId, id)).run();
 					tx.delete(revisions).where(eq(revisions.id, id)).run();
 				});
+				svc.events.emit("revision", id, { status: "gone" });
+				announceUploads(c, target.dimensionId);
+				svc.worker.kick();
 				return c.json({ ok: true });
 			}
 
@@ -376,6 +284,7 @@ export const revisionRoutes = new Hono<AppEnv>()
 					.values({ type: "erase_upload", payload: { revisionId: id } })
 					.run();
 			});
+			announceUploads(c, target.dimensionId);
 			svc.worker.kick();
 			return c.json({ ok: true }, 202);
 		},

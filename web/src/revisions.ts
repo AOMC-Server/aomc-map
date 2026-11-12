@@ -1,8 +1,8 @@
 import { signal } from "@preact/signals";
 import { api, attempt, run, showNotice } from "./api";
 import { refreshMap, setRev } from "./controller";
+import { subscribe } from "./events";
 import { loadLayers } from "./layers";
-import { pollUntil } from "./poll";
 import { inFlight, mergeRevisions, pageHasGap } from "./revisionLog";
 import {
 	dimSlug,
@@ -115,85 +115,135 @@ async function refresh(dim: string) {
 		setRevisions(merged);
 }
 
+type Followed = { status: "done" | "failed" | "gone"; error: string | null };
+
+type FollowOptions = {
+	/** Following a delete: the revision going away is what success looks like. */
+	erase?: boolean;
+	onProgress?: (p: Progress) => void;
+	signal?: AbortSignal;
+	/** What to report when `FOLLOW_TIMEOUT_MS` passes first. */
+	timeoutError: string;
+};
+
 /**
- * Follows a revision until it finishes, using server-sent events and falling back to polling if
- * the stream breaks. Resolves once with the outcome; gives up after repeated failures, after
- * `FOLLOW_TIMEOUT_MS`, or when `signal` aborts (the job itself keeps running).
+ * Follows a revision's job on the shared event stream (polling it while the stream is down)
+ * until it ends: done, failed or gone (erased). Resolves once; gives up after repeated failures
+ * to reach the server, after `FOLLOW_TIMEOUT_MS`, or when `signal` aborts (the job itself keeps
+ * running). Giving up is reported as a failure.
  */
-export function watchRevision(
+function followRevision(
 	revisionId: number,
-	onProgress?: (p: Progress) => void,
-	signal?: AbortSignal,
-): Promise<Outcome> {
+	opts: FollowOptions,
+): Promise<Followed> {
 	return new Promise((resolve) => {
+		const { erase, onProgress, signal } = opts;
 		let settled = false;
-		let source: EventSource | undefined;
-		const stop = new AbortController();
-		const settle = (outcome: Outcome) => {
+		let failures = 0;
+		let looking = false;
+		let unsubscribe: (() => void) | undefined;
+		let fallback: ReturnType<typeof setInterval> | undefined;
+		const settle = (outcome: Followed) => {
 			if (settled) return;
 			settled = true;
-			source?.close();
-			stop.abort();
+			unsubscribe?.();
+			clearInterval(fallback);
 			clearTimeout(timer);
 			signal?.removeEventListener("abort", onAbort);
 			resolve(outcome);
 		};
-		const onAbort = () => settle({ status: "failed", error: "Cancelled." });
+		const fail = (error: string | null): Followed => ({
+			status: "failed",
+			error,
+		});
+		const onAbort = () => settle(fail("Cancelled."));
 		const timer = setTimeout(
-			() =>
-				settle({
-					status: "failed",
-					error: "Still processing; check the history panel later.",
-				}),
+			() => settle(fail(opts.timeoutError)),
 			FOLLOW_TIMEOUT_MS,
 		);
 		if (signal?.aborted) return onAbort();
 		signal?.addEventListener("abort", onAbort);
 
-		const poll = async () => {
-			let failures = 0;
-			const out = await pollUntil<Outcome>(
-				async () => {
-					const r = await fetchRevision(revisionId);
-					if (r?.status === "done") return { status: "done", error: null };
-					if (r?.status === "failed")
-						return { status: "failed", error: r.error };
-					failures = r ? 0 : failures + 1;
-					if (failures >= MAX_POLL_FAILURES)
-						return { status: "failed", error: "Lost contact with the server." };
-				},
-				{
-					intervalMs: POLL_MS,
-					timeoutMs: FOLLOW_TIMEOUT_MS,
-					signal: stop.signal,
-				},
-			);
-			if (out.done) settle(out.value);
+		const look = async () => {
+			if (looking || settled) return;
+			looking = true;
+			const found = await lookupRevision(revisionId);
+			looking = false;
+			if (settled) return;
+			if (found.kind === "gone") return settle({ status: "gone", error: null });
+			if (found.kind === "error") {
+				if (++failures >= MAX_POLL_FAILURES)
+					settle(fail("Lost contact with the server."));
+				return;
+			}
+			failures = 0;
+			const r = found.revision;
+			if (r.status === "failed") settle(fail(r.error));
+			else if (r.status === "done") {
+				if (!erase) settle({ status: "done", error: null });
+				// A delete that failed leaves the upload in place, with the reason.
+				else if (r.error) settle(fail(r.error));
+			}
+		};
+		/** For when the stream cannot say how it ended: ask until the revision answers. */
+		const lookUntilSettled = () => {
+			if (fallback) return;
+			void look();
+			fallback = setInterval(look, POLL_MS);
 		};
 
-		source = new EventSource(`/api/revisions/${revisionId}/events`);
-		const progress = (e: MessageEvent) => {
-			if (!settled) onProgress?.(JSON.parse(e.data) as Progress);
-		};
-		source.addEventListener("pending", progress);
-		source.addEventListener("processing", progress);
-		source.addEventListener("done", () => {
-			settle({ status: "done", error: null });
+		unsubscribe = subscribe(`revision:${revisionId}`, {
+			onEvent: (e) => {
+				if (settled) return;
+				switch (e.status) {
+					case "gone":
+						return settle({ status: "gone", error: null });
+					case "failed":
+						return settle(
+							fail(
+								erase
+									? `delete failed: ${e.error ?? "unknown error"}`
+									: (e.error ?? null),
+							),
+						);
+					case "done":
+						if (!erase) return settle({ status: "done", error: null });
+						if (e.error) return settle(fail(e.error));
+						// The erase has not touched it yet; the stream has nothing more to say.
+						return lookUntilSettled();
+					default:
+						onProgress?.(e);
+				}
+			},
+			onError: (error) => {
+				if (error === "not found") settle({ status: "gone", error: null });
+				else lookUntilSettled();
+			},
+			poll: look,
+			pollMs: POLL_MS,
 		});
-		source.addEventListener("failed", (e) => {
-			settle({
-				status: "failed",
-				error:
-					(JSON.parse((e as MessageEvent).data) as { error?: string }).error ??
-					null,
-			});
-		});
-		source.onerror = () => {
-			if (settled) return;
-			source?.close();
-			void poll();
-		};
+		if (settled) unsubscribe();
 	});
+}
+
+/**
+ * Follows an upload until it finishes. Resolves once with the outcome; gives up after repeated
+ * failures to reach the server, after `FOLLOW_TIMEOUT_MS`, or when `signal` aborts (the job
+ * itself keeps running).
+ */
+export async function watchRevision(
+	revisionId: number,
+	onProgress?: (p: Progress) => void,
+	signal?: AbortSignal,
+): Promise<Outcome> {
+	const out = await followRevision(revisionId, {
+		onProgress,
+		signal,
+		timeoutError: "Still processing; check the history panel later.",
+	});
+	return out.status === "gone"
+		? { status: "failed", error: "The upload was deleted." }
+		: { status: out.status, error: out.error };
 }
 
 /**
@@ -240,40 +290,20 @@ export async function deleteUpload(id: number): Promise<boolean> {
 			r.id === id ? busy : r,
 		);
 
-	// Progress only; whether it is finished is decided by the polling below.
-	const events = new EventSource(`/api/revisions/${id}/events`);
-	events.addEventListener("processing", (e) => {
-		const p = JSON.parse((e as MessageEvent).data) as Progress;
-		setDeleting(id, {
-			label: p.total
-				? `deleting ${Math.round(((p.done ?? 0) / p.total) * 100)}%`
-				: "deleting…",
-			detail: formatProgress(p.message ?? "Deleting", p.done, p.total),
-		});
+	const result = await followRevision(id, {
+		erase: true,
+		timeoutError: "Still deleting; check the history panel later.",
+		onProgress: (p) =>
+			setDeleting(id, {
+				label: p.total
+					? `deleting ${Math.round(((p.done ?? 0) / p.total) * 100)}%`
+					: "deleting…",
+				detail: formatProgress(p.message ?? "Deleting", p.done, p.total),
+			}),
 	});
-	events.onerror = () => events.close();
+	const error =
+		result.status === "gone" ? null : (result.error ?? "unknown error");
 
-	let failures = 0;
-	const result = await pollUntil<{ error: string | null }>(
-		async () => {
-			const found = await lookupRevision(id);
-			if (found.kind === "gone") return { error: null };
-			if (found.kind === "error") {
-				if (++failures >= MAX_POLL_FAILURES)
-					return { error: "Lost contact with the server." };
-				return undefined;
-			}
-			failures = 0;
-			const r = found.revision;
-			if (r.status === "done" && r.error) return { error: r.error };
-		},
-		{ intervalMs: POLL_MS, timeoutMs: FOLLOW_TIMEOUT_MS },
-	);
-	const error = result.done
-		? result.value.error
-		: "Still deleting; check the history panel later.";
-
-	events.close();
 	setDeleting(id, null);
 	if (isolatedUpload.value?.id === id) isolatedUpload.value = null;
 	showNotice(error ?? "Upload deleted.", error ? "error" : "info");

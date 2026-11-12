@@ -2,6 +2,7 @@ import { convertView, type View } from "@aomc/shared/view";
 import { effect, signal } from "@preact/signals";
 import type { InferResponseType } from "hono/client";
 import { api, showNotice } from "./api";
+import { subscribe } from "./events";
 import { loadLayers } from "./layers";
 import { MapView } from "./map/MapView";
 import type { TileLookup } from "./map/tileLayer";
@@ -331,5 +332,67 @@ export async function boot(container: HTMLElement) {
 		}, 200);
 	});
 
-	setInterval(refreshMap, 30_000);
+	// The server announces map changes; polling is only the fallback while the stream is down.
+	subscribe("map", {
+		onEvent: (m, { snapshot }) => {
+			const current = currentMap.value?.map;
+			const same =
+				current?.headRev === m.headRev &&
+				current.epoch === m.epoch &&
+				current.maintenance === m.maintenance;
+			if (snapshot && same) return;
+			void refreshMap();
+		},
+		poll: () => void refreshMap(),
+		pollMs: 30_000,
+	});
+
+	followLayers();
+}
+
+/**
+ * Reloads the layers when someone else changes those of the dimension being viewed. A feature
+ * being edited keeps its draft in the editor itself, so a reload would not lose it, but the
+ * feature or layer under it could vanish or move; so while the editor is open the reload waits
+ * until it closes.
+ */
+function followLayers() {
+	let timer: ReturnType<typeof setTimeout> | undefined;
+	let stale = false;
+	const reload = () => {
+		clearTimeout(timer);
+		timer = setTimeout(() => {
+			if (editor.peek() !== null) stale = true;
+			else void loadLayers();
+		}, 300);
+	};
+	effect(() => {
+		if (editor.value === null && stale) {
+			stale = false;
+			reload();
+		}
+	});
+
+	let followed: number | null = null;
+	let unsubscribe: (() => void) | undefined;
+	effect(() => {
+		const id =
+			currentMap.value?.dimensions.find((d) => d.slug === dimSlug.value)?.id ??
+			null;
+		if (id === followed) return;
+		followed = id;
+		unsubscribe?.();
+		unsubscribe = undefined;
+		stale = false;
+		clearTimeout(timer);
+		if (id === null) return;
+		// Layers are loaded when the dimension changes; the first delivery is only their state.
+		let first = true;
+		unsubscribe = subscribe(`layers:${id}`, {
+			onEvent: () => {
+				if (first) first = false;
+				else reload();
+			},
+		});
+	});
 }

@@ -20,6 +20,7 @@ import {
 import { buildPyramid, type TileWrite, tileKey } from "../tiles/pyramid";
 import { blackToAlpha } from "../tiles/xaero";
 import { messages } from "./messages";
+import { type ProgressStep, throttled } from "./report";
 import {
 	incomingDir,
 	type JobContext,
@@ -36,10 +37,13 @@ export async function processUpload(
 	jobId?: number,
 	batchBytes = BATCH_BYTES,
 ) {
-	const { db, env, blobs, progress } = ctx;
+	const { db, env, blobs, events } = ctx;
 	const { revisionId, files } = payload;
+	const report = throttled((p: ProgressStep) =>
+		events.emit("revision", revisionId, { status: "processing", ...p }),
+	);
 	const say = (message: string, done?: number, total?: number) =>
-		progress.emit(revisionId, { status: "processing", message, done, total });
+		report({ message, done, total });
 
 	const [revision] = await db
 		.select()

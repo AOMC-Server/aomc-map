@@ -5,6 +5,7 @@ import {
 	updateMapSchema,
 } from "@aomc/shared";
 import { Hono } from "hono";
+import { announceEverything, announceMap } from "../announce";
 import { requireUser } from "../auth/session";
 import { mapInfo } from "../db/schema";
 import { doc } from "../openapi";
@@ -78,6 +79,9 @@ export const mapRoutes = new Hono<AppEnv>()
 				.update(mapInfo)
 				.set(c.req.valid("json"))
 				.returning();
+			// Maintenance changes what everyone but owners may do in the layers and the upload log.
+			if (c.req.valid("json").maintenance !== undefined) announceEverything(c);
+			else announceMap(c);
 			return c.json({ map: mapFields(updated as typeof mapInfo.$inferSelect) });
 		},
 	);

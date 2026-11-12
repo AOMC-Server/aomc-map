@@ -1,4 +1,5 @@
 import { afterAll, describe, expect, test } from "bun:test";
+import { topics } from "../src/topics";
 import { cleanupTempDirs, makeTestApp } from "./helpers";
 
 afterAll(cleanupTempDirs);
@@ -52,7 +53,7 @@ describe("OpenAPI spec", () => {
 		expect(bundle.headers.get("content-type")).toContain("javascript");
 	});
 
-	test("describes the progress events as AsyncAPI 3", async () => {
+	test("describes every event topic as AsyncAPI 3", async () => {
 		const { app } = makeTestApp();
 		const res = await app.request("/api/asyncapi.json");
 		expect(res.status).toBe(200);
@@ -61,14 +62,19 @@ describe("OpenAPI spec", () => {
 			channels: Record<string, { address: string; messages: object }>;
 		};
 		expect(doc.asyncapi).toStartWith("3.");
-		expect(doc.channels.revisionEvents?.address).toBe(
-			"/api/revisions/{id}/events",
+		expect(Object.keys(doc.channels).sort()).toEqual(
+			Object.keys(topics).sort(),
 		);
-		expect(Object.keys(doc.channels.revisionEvents?.messages ?? {})).toEqual([
+		expect(doc.channels.revision?.address).toBe(
+			"/api/events?topics=revision:{key}",
+		);
+		expect(Object.keys(doc.channels.revision?.messages ?? {})).toEqual([
 			"pending",
 			"processing",
 			"done",
 			"failed",
+			"gone",
+			"error",
 		]);
 	});
 

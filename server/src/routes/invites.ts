@@ -1,6 +1,7 @@
 import { createLayerInviteSchema, createMapInviteSchema } from "@aomc/shared";
 import { desc, eq, isNull, type SQL } from "drizzle-orm";
 import { Hono } from "hono";
+import { announceEverything, announceLayers } from "../announce";
 import { requireUser, userOf } from "../auth/session";
 import type { Db } from "../db/client";
 import { invites, users } from "../db/schema";
@@ -214,7 +215,10 @@ export const inviteRoutes = new Hono<AppEnv>()
 				authVia !== "token" || (scopes?.includes("manage") ?? false);
 			const result = acceptInvite(c.var.db, userOf(c).id, token, allowMap);
 			if (!result.ok) return c.json({ error: result.error }, result.status);
-			const { ok: _ok, ...rest } = result;
+			const { ok: _ok, layerDimensionId, ...rest } = result;
+			if (layerDimensionId !== undefined) announceLayers(c, layerDimensionId);
+			else if (result.kind === "map" && !result.alreadyMember)
+				announceEverything(c);
 			return c.json(rest);
 		},
 	)

@@ -162,6 +162,8 @@ export type AcceptResult =
 			kind: "map" | "layer";
 			role: string;
 			alreadyMember: boolean;
+			/** Set when a layer invite changed access: the layer's dimension. */
+			layerDimensionId?: number;
 	  }
 	| { ok: false; status: 403 | 404 | 410; error: string };
 
@@ -214,6 +216,12 @@ export function acceptInvite(
 			.set({ uses: sql`${invites.uses} + 1` })
 			.where(eq(invites.id, inv.id))
 			.run();
-		return { ok: true, kind, role: inv.role, alreadyMember: false };
+		return {
+			ok: true,
+			kind,
+			role: inv.role,
+			alreadyMember: false,
+			...(layer && { layerDimensionId: layer.dimensionId }),
+		};
 	});
 }

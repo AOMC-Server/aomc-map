@@ -1,10 +1,10 @@
 import type { Db } from "./db/client";
 import { blobFiles } from "./db/schema";
 import type { Env } from "./env";
+import { createEventHub } from "./events";
 import { createWorker } from "./jobs/worker";
 import { blobsDir, previewCacheDir } from "./paths";
 import { createPreviewService } from "./preview";
-import { createProgressBus } from "./progress";
 import {
 	createRateLimiter,
 	PREVIEW_RATE_LIMIT,
@@ -20,8 +20,8 @@ export function createServices(db: Db, env: Env) {
 	const blobs = createBlobStore(blobsDir(env.DATA_DIR), (hash, bytes) => {
 		db.insert(blobFiles).values({ hash, bytes }).onConflictDoNothing().run();
 	});
-	const progress = createProgressBus();
-	const worker = createWorker({ db, env, blobs, progress });
+	const events = createEventHub();
+	const worker = createWorker({ db, env, blobs, events });
 	const limiter = createRateLimiter(env.UPLOAD_RATE_LIMIT);
 	const writeLimiter = createRateLimiter(WRITE_RATE_LIMIT);
 	const previewLimiter = createRateLimiter(PREVIEW_RATE_LIMIT);
@@ -33,7 +33,7 @@ export function createServices(db: Db, env: Env) {
 	const traffic = createTraffic(db, env);
 	return {
 		blobs,
-		progress,
+		events,
 		worker,
 		limiter,
 		writeLimiter,

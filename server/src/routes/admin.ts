@@ -10,14 +10,11 @@ import { sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { requireUser } from "../auth/session";
 import type { Db } from "../db/client";
-import {
-	lastRecompute,
-	lateUploads,
-	queueRecompute,
-} from "../jobs/recomputeHistory";
+import { lateUploads, queueRecompute } from "../jobs/recomputeHistory";
 import { doc } from "../openapi";
 import { canManage } from "../permissions";
 import { measureStorage } from "../storage";
+import { recomputeSnapshot } from "../topics";
 import { TRAFFIC_CATEGORIES, type TrafficCategory } from "../traffic";
 import type { AppEnv } from "../types";
 import { validate } from "../validate";
@@ -301,26 +298,10 @@ export const adminRoutes = new Hono<AppEnv>()
 		(c) => {
 			if (!canManage(c.var.role)) return c.json({ error: "forbidden" }, 403);
 			const { db, svc } = c.var;
-			const job = lastRecompute(db);
-			const progress = svc.worker.recomputeProgress();
 			return c.json({
 				lateUploads: lateUploads(db),
-				recompute: job
-					? {
-							status: job.status,
-							error: job.error,
-							queuedAt: job.createdAt,
-							completedAt: job.completedAt,
-							progress:
-								job.status === "processing" && progress
-									? {
-											message: progress.message,
-											done: progress.done ?? null,
-											total: progress.total ?? null,
-										}
-									: null,
-						}
-					: null,
+				recompute: recomputeSnapshot(db, svc.worker.recomputeProgress())
+					.recompute,
 			});
 		},
 	)
@@ -343,6 +324,10 @@ export const adminRoutes = new Hono<AppEnv>()
 					{ error: "a recompute is already queued or running" },
 					409,
 				);
+			svc.events.emit(
+				"recompute",
+				recomputeSnapshot(db, svc.worker.recomputeProgress()),
+			);
 			svc.worker.kick();
 			return c.json({ ok: true }, 202);
 		},

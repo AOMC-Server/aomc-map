@@ -1,6 +1,7 @@
 import { layerMemberRoleSchema, layerMemberSchema } from "@aomc/shared";
 import { and, eq } from "drizzle-orm";
 import { Hono } from "hono";
+import { announceLayers } from "../announce";
 import { requireUser, userOf } from "../auth/session";
 import { layerMembers, users } from "../db/schema";
 import { doc } from "../openapi";
@@ -72,6 +73,7 @@ export const layerMemberRoutes = new Hono<AppEnv>()
 					target: [layerMembers.layerId, layerMembers.userId],
 					set: { role: body.role },
 				});
+			announceLayers(c, found.layer.dimensionId);
 			return c.json({ ok: true }, 201);
 		},
 	)
@@ -104,9 +106,9 @@ export const layerMemberRoutes = new Hono<AppEnv>()
 					),
 				)
 				.returning({ userId: layerMembers.userId });
-			return rows.length > 0
-				? c.json({ ok: true })
-				: c.json({ error: "not found" }, 404);
+			if (rows.length === 0) return c.json({ error: "not found" }, 404);
+			announceLayers(c, found.layer.dimensionId);
+			return c.json({ ok: true });
 		},
 	)
 	.delete(
@@ -143,8 +145,8 @@ export const layerMemberRoutes = new Hono<AppEnv>()
 					),
 				)
 				.returning({ userId: layerMembers.userId });
-			return rows.length > 0
-				? c.json({ ok: true })
-				: c.json({ error: "not found" }, 404);
+			if (rows.length === 0) return c.json({ error: "not found" }, 404);
+			announceLayers(c, found.layer.dimensionId);
+			return c.json({ ok: true });
 		},
 	);

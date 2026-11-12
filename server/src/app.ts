@@ -16,6 +16,7 @@ import { adminRoutes } from "./routes/admin";
 import { authRoutes } from "./routes/auth";
 import { blobRoutes } from "./routes/blobs";
 import { dimensionRoutes } from "./routes/dimensions";
+import { eventRoutes } from "./routes/events";
 import { featureRoutes } from "./routes/features";
 import { inviteRoutes } from "./routes/invites";
 import { layerRoutes } from "./routes/layers";
@@ -104,6 +105,7 @@ export function createApp({ db, env, services, fetch: fetchFn }: AppDeps) {
 		.route("/api/links", linkRoutes)
 		.route("/s", shortLinkRedirect)
 		.route("/api/admin", adminRoutes)
+		.route("/api/events", eventRoutes)
 		.get("/api/asyncapi.json", (c) => c.json(asyncApiDocument(env)))
 		.route("/scalar", docsRoutes)
 		.get("/api/openapi.json", (c, next) => {

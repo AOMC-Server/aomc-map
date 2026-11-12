@@ -11,6 +11,7 @@ import {
 import { and, count, eq, gt, isNull, lte, or } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
+import { announceLayers } from "../announce";
 import { requireUser, userOf } from "../auth/session";
 import type { Db } from "../db/client";
 import { features, layerMembers, layers, revisions } from "../db/schema";
@@ -231,6 +232,7 @@ export const layerRoutes = new Hono<AppEnv>()
 					{ error: `you can have at most ${MAX_LAYERS_PER_USER} layers` },
 					409,
 				);
+			announceLayers(c, dim.id);
 			return c.json(
 				{ layer: { ...serializeLayer(layer, true, true), features: [] } },
 				201,
@@ -275,9 +277,10 @@ export const layerRoutes = new Hono<AppEnv>()
 						.run();
 				return true;
 			});
-			return done
-				? c.json({ ok: true })
-				: c.json({ error: "the list of layers is out of date" }, 409);
+			if (!done)
+				return c.json({ error: "the list of layers is out of date" }, 409);
+			announceLayers(c, dim.id);
+			return c.json({ ok: true });
 		},
 	)
 	.patch(
@@ -329,6 +332,7 @@ export const layerRoutes = new Hono<AppEnv>()
 				return row;
 			});
 			if (!updated) return c.json({ error: "not found" }, 404);
+			announceLayers(c, updated.dimensionId);
 			return c.json({
 				layer: serializeLayer(
 					updated,
@@ -359,6 +363,7 @@ export const layerRoutes = new Hono<AppEnv>()
 				.update(layers)
 				.set({ deletedAt: Date.now() })
 				.where(eq(layers.id, found.layer.id));
+			announceLayers(c, found.layer.dimensionId);
 			return c.json({ ok: true });
 		},
 	)
@@ -397,6 +402,7 @@ export const layerRoutes = new Hono<AppEnv>()
 			});
 			if (view === "gone") return c.json({ error: "not found" }, 404);
 			if (view === "full") return c.json({ error: "layer is full" }, 409);
+			announceLayers(c, found.layer.dimensionId);
 			return c.json({ feature: view }, 201);
 		},
 	)
@@ -438,9 +444,10 @@ export const layerRoutes = new Hono<AppEnv>()
 						.run();
 				return true;
 			});
-			return done
-				? c.json({ ok: true })
-				: c.json({ error: "the list of features is out of date" }, 409);
+			if (!done)
+				return c.json({ error: "the list of features is out of date" }, 409);
+			announceLayers(c, found.layer.dimensionId);
+			return c.json({ ok: true });
 		},
 	)
 	.get(
@@ -514,6 +521,7 @@ export const layerRoutes = new Hono<AppEnv>()
 					{ error: `a layer holds at most ${MAX_FEATURES_PER_LAYER} features` },
 					409,
 				);
+			announceLayers(c, found.layer.dimensionId);
 			return c.json({ imported: items.length, replaced: out }, 201);
 		},
 	)

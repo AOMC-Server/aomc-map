@@ -1,6 +1,7 @@
 import { Hono } from "hono";
 import { deleteCookie } from "hono/cookie";
 import { deleteAccount, exportAccount } from "../account";
+import { announceEverything } from "../announce";
 import { requireUser, SESSION_COOKIE, userOf } from "../auth/session";
 import { doc } from "../openapi";
 import type { AppEnv } from "../types";
@@ -60,6 +61,7 @@ export const meRoutes = new Hono<AppEnv>()
 					},
 					409,
 				);
+			announceEverything(c);
 			deleteCookie(c, SESSION_COOKIE, { path: "/" });
 			return c.json({ ok: true });
 		},

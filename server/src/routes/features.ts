@@ -7,6 +7,7 @@ import {
 } from "@aomc/shared";
 import { and, desc, eq, lt } from "drizzle-orm";
 import { Hono } from "hono";
+import { announceLayers } from "../announce";
 import { requireUser, userOf } from "../auth/session";
 import type { Db } from "../db/client";
 import { featureRevisions, features, users } from "../db/schema";
@@ -120,6 +121,7 @@ export const featureRoutes = new Hono<AppEnv>()
 						400,
 					);
 				default:
+					announceLayers(c, found.layer.dimensionId);
 					return c.json({ feature: toView(found.feature, out.row) });
 			}
 		},
@@ -150,9 +152,9 @@ export const featureRoutes = new Hono<AppEnv>()
 				});
 				return true;
 			});
-			return deleted
-				? c.json({ ok: true })
-				: c.json({ error: "not found" }, 404);
+			if (!deleted) return c.json({ error: "not found" }, 404);
+			announceLayers(c, found.layer.dimensionId);
+			return c.json({ ok: true });
 		},
 	)
 	.get(
@@ -260,6 +262,7 @@ export const featureRoutes = new Hono<AppEnv>()
 						409,
 					);
 				default:
+					if (out.status === 201) announceLayers(c, found.layer.dimensionId);
 					return c.json(
 						{
 							feature: toView(found.feature, out.row),

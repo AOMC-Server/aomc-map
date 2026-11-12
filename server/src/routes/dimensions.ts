@@ -6,6 +6,7 @@ import {
 } from "@aomc/shared";
 import { eq } from "drizzle-orm";
 import { Hono } from "hono";
+import { announceMap } from "../announce";
 import { requireUser } from "../auth/session";
 import { dimensions } from "../db/schema";
 import { doc } from "../openapi";
@@ -53,6 +54,7 @@ export const dimensionRoutes = new Hono<AppEnv>()
 						sortOrder: nextSortOrder(existing),
 					})
 					.returning();
+				announceMap(c);
 				return c.json({ dimension }, 201);
 			} catch {
 				return c.json({ error: "dimension slug already in use" }, 409);
@@ -79,9 +81,9 @@ export const dimensionRoutes = new Hono<AppEnv>()
 				.set(body)
 				.where(eq(dimensions.slug, c.req.param("dim")))
 				.returning();
-			return dimension
-				? c.json({ dimension })
-				: c.json({ error: "not found" }, 404);
+			if (!dimension) return c.json({ error: "not found" }, 404);
+			announceMap(c);
+			return c.json({ dimension });
 		},
 	)
 	.route("/:dim/tiles", tileRoutes)

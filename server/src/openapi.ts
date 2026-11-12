@@ -36,6 +36,7 @@ export const tags = [
 	{ name: "Images", description: "Blobs and link previews" },
 	{ name: "Stats", description: "Contribution statistics and leaderboard" },
 	{ name: "Admin", description: "Storage, traffic and server statistics" },
+	{ name: "Events", description: "Live updates (server-sent events)" },
 ];
 
 const requiresLogin: Record<string, string[]>[] = [

@@ -5,6 +5,7 @@ import {
 } from "@aomc/shared";
 import { count, eq } from "drizzle-orm";
 import { Hono } from "hono";
+import { announceEverything } from "../announce";
 import { requireUser, userOf } from "../auth/session";
 import type { Db } from "../db/client";
 import { members, users } from "../db/schema";
@@ -99,6 +100,7 @@ export const memberRoutes = new Hono<AppEnv>()
 				return null;
 			});
 			if (err) return c.json({ error: err }, 409);
+			announceEverything(c);
 			return c.json({ ok: true }, 201);
 		},
 	)
@@ -135,6 +137,7 @@ export const memberRoutes = new Hono<AppEnv>()
 			});
 			if (result === "missing") return c.json({ error: "not found" }, 404);
 			if (result) return c.json({ error: result }, 409);
+			announceEverything(c);
 			return c.json({ ok: true });
 		},
 	)
@@ -169,6 +172,7 @@ export const memberRoutes = new Hono<AppEnv>()
 			});
 			if (result === "missing") return c.json({ error: "not found" }, 404);
 			if (result) return c.json({ error: result }, 409);
+			announceEverything(c);
 			return c.json({ ok: true });
 		},
 	);
