@@ -2,6 +2,7 @@ import { afterAll, describe, expect, test } from "bun:test";
 import { rm } from "node:fs/promises";
 import { eq } from "drizzle-orm";
 import { dimensions, jobs, mapInfo, revisions } from "../../src/db/schema";
+import { messages } from "../../src/jobs/messages";
 import { incomingDir } from "../../src/jobs/types";
 
 afterAll(cleanupTempDirs);
@@ -110,7 +111,9 @@ describe("upload", () => {
 	test("an unchanged re-upload adds a revision but no tile writes", async () => {
 		const t = await bootTiles();
 		await upload(t, await solid(T, T, RED), 0, 0);
-		const again = await upload(t, await solid(T, T, RED), 0, 0);
+		// Not the same file (that would be skipped), but nothing new: black is "no data".
+		const partial = await png(T, T, (_, y) => (y === 0 ? BLACK : RED));
+		const again = await upload(t, partial, 0, 0);
 		expect((await revisionOf(t, again)).rev).toBe(2);
 		const rows = await t.db.query.tileVersions.findMany();
 		expect(rows.filter((r) => r.rev === 2)).toHaveLength(0);
@@ -241,10 +244,10 @@ describe("deleting an upload", () => {
 		);
 		await erase(t, ids[0] as number);
 		unsubscribe();
-		const tiles = events.filter((e) => e.message === "rewriting tiles");
+		const tiles = events.filter((e) => e.message === messages.erase.tiles);
 		expect(tiles.length).toBeGreaterThan(0);
 		expect(tiles.at(-1)?.done).toBe(tiles.at(-1)?.total);
-		expect(events.map((e) => e.message)).toContain("publishing");
+		expect(events.map((e) => e.message)).toContain(messages.erase.publishing);
 		expect(events.at(-1)).toMatchObject({ status: "done" });
 	});
 
@@ -259,31 +262,6 @@ describe("deleting an upload", () => {
 		expect(await epoch()).toBe(0);
 		await erase(t, ids[0] as number);
 		expect(await epoch()).toBe(1);
-	});
-
-	test("uploads reverted in older versions of the server stay hidden", async () => {
-		const t = await bootTiles();
-		const a = await upload(t, await solid(T, T, RED), 0, 0);
-		const b = await upload(t, await solid(T, T, BLUE), 0, 0);
-		// What the old revert did: a revision pointing at the upload, and the flag.
-		const dim = (await revisionOf(t, a)).dimensionId as number;
-		await t.db.insert(revisions).values({
-			kind: "revert",
-			dimensionId: dim,
-			authorId: "mod",
-			targetRevisionId: a,
-			status: "done",
-			rev: 3,
-		});
-		await t.db
-			.update(revisions)
-			.set({ reverted: true })
-			.where(eq(revisions.id, a));
-		await t.db.update(mapInfo).set({ headRev: 3 });
-
-		await erase(t, b);
-		expect(await readTile(t, 0, 0, 0)).toBeNull();
-		expect(px((await readTile(t, 0, 0, 0, 1)) as Buffer, 2, 2)).toEqual(RED_PX);
 	});
 
 	test("a failed erase leaves the upload exactly as it was", async () => {
@@ -309,17 +287,6 @@ describe("deleting an upload", () => {
 		expect((await del(a, null)).status).toBe(401);
 		expect((await del(a, other)).status).toBe(403);
 		expect((await del(9999, t.mod)).status).toBe(404);
-
-		await t.db.insert(revisions).values({
-			kind: "revert",
-			authorId: "mod",
-			targetRevisionId: a,
-			status: "done",
-		});
-		const op = (
-			await t.db.select().from(revisions).where(eq(revisions.kind, "revert"))
-		)[0];
-		expect((await del(op?.id as number, t.mod)).status).toBe(404);
 
 		await t.db
 			.update(revisions)

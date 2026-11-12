@@ -87,7 +87,6 @@ export const effectiveTime = sql<number>`coalesce(${revisions.exportedAt}, ${rev
 
 export type TilePatch = {
 	id: number;
-	reverted: boolean;
 	hash: string;
 	/** `effectiveTime` of the upload. */
 	at: number;
@@ -112,7 +111,6 @@ export function tilePatches(
 	return db
 		.select({
 			id: revisions.id,
-			reverted: revisions.reverted,
 			hash: uploadPatches.blobHash,
 			at: effectiveTime,
 		})

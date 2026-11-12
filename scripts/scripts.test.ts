@@ -676,6 +676,32 @@ describe("import-v1", () => {
 		expect(seen.some((s) => s.includes("/uploads"))).toBe(false);
 	});
 
+	test("tiles the server already has are skipped, even without the state file", async () => {
+		const src = await makeV1();
+		const t = await server();
+		const run = (statePath: string) =>
+			runImport({
+				url: "http://map.test",
+				token: t.token,
+				src,
+				batch: 2,
+				statePath,
+				pollMs: 5,
+				fetch: inProcess(t.app),
+				log: () => {},
+			});
+		expect(await run(join(tmp("state"), "a.json"))).toEqual({
+			uploaded: 5,
+			skipped: 0,
+			batches: 3,
+		});
+		expect(await run(join(tmp("state"), "b.json"))).toEqual({
+			uploaded: 0,
+			skipped: 5,
+			batches: 3,
+		});
+	});
+
 	test("--dims and --dim-map select and rename dimensions", async () => {
 		const src = await makeV1();
 		const t = await server();

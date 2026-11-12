@@ -73,6 +73,8 @@ export const mapInfo = sqliteTable("map_info", {
 	epoch: integer("epoch").notNull().default(0),
 	/** Read only for everyone but owners. */
 	maintenance: bool("maintenance").notNull().default(false),
+	/** Set when history must be rebuilt in export order (after legacy reverts were removed); queued on boot. */
+	recomputePending: bool("recompute_pending").notNull().default(false),
 	createdAt: createdAt(),
 });
 
@@ -120,13 +122,11 @@ export const revisions = sqliteTable(
 	{
 		id: id(),
 		rev: integer("rev").unique(), // assigned when the job completes
-		// "revert" and "unrevert" only exist in history from before uploads could be deleted.
-		kind: text("kind", { enum: ["upload", "revert", "unrevert"] }).notNull(),
+		kind: text("kind", { enum: ["upload"] }).notNull(),
 		dimensionId: integer("dimension_id").references(() => dimensions.id),
 		authorId: text("author_id")
 			.notNull()
 			.references(() => users.id),
-		targetRevisionId: integer("target_revision_id"),
 		status: text("status", {
 			enum: ["pending", "processing", "done", "failed"],
 		})
@@ -140,7 +140,6 @@ export const revisions = sqliteTable(
 		fileCount: integer("file_count").notNull().default(0),
 		/** Sent by the in-game mod (its User-Agent matched MOD_USER_AGENTS); for statistics only. */
 		viaMod: bool("via_mod").notNull().default(false),
-		reverted: bool("reverted").notNull().default(false),
 		createdAt: createdAt(),
 		/** When the uploaded export was made (from its file name); null = when it was uploaded. */
 		exportedAt: integer("exported_at"),
@@ -168,6 +167,27 @@ export const uploadPatches = sqliteTable(
 	],
 );
 
+/** The files an upload was made of, so sending the same file again can be skipped. */
+export const uploadFiles = sqliteTable(
+	"upload_files",
+	{
+		revisionId: integer("revision_id")
+			.notNull()
+			.references(() => revisions.id, { onDelete: "cascade" }),
+		dimensionId: integer("dimension_id")
+			.notNull()
+			.references(() => dimensions.id, { onDelete: "cascade" }),
+		x: integer("x").notNull(),
+		z: integer("z").notNull(),
+		/** sha256 of the PNG as sent. */
+		hash: text("hash").notNull(),
+	},
+	(t) => [
+		index("upload_files_dimension_hash").on(t.dimensionId, t.hash),
+		index("upload_files_revision").on(t.revisionId),
+	],
+);
+
 export const tileVersions = sqliteTable(
 	"tile_versions",
 	{
@@ -179,6 +199,22 @@ export const tileVersions = sqliteTable(
 		tileY: integer("tile_y").notNull(),
 		rev: integer("rev").notNull(),
 		blobHash: text("blob_hash"), // null = empty tile at this rev
+	},
+	(t) => [
+		primaryKey({ columns: [t.dimensionId, t.zoom, t.tileX, t.tileY, t.rev] }),
+	],
+);
+
+/** Where a history recompute writes the new tile_versions before swapping them in. */
+export const tileVersionsRebuild = sqliteTable(
+	"tile_versions_rebuild",
+	{
+		dimensionId: integer("dimension_id").notNull(),
+		zoom: integer("zoom").notNull(),
+		tileX: integer("tile_x").notNull(),
+		tileY: integer("tile_y").notNull(),
+		rev: integer("rev").notNull(),
+		blobHash: text("blob_hash"),
 	},
 	(t) => [
 		primaryKey({ columns: [t.dimensionId, t.zoom, t.tileX, t.tileY, t.rev] }),
@@ -289,13 +325,18 @@ export const shortLinks = sqliteTable("short_links", {
 
 export const jobs = sqliteTable("jobs", {
 	id: id(),
-	type: text("type", { enum: ["process_upload", "erase_upload"] }).notNull(),
+	type: text("type", {
+		enum: ["process_upload", "erase_upload", "recompute_history"],
+	}).notNull(),
 	payload: text("payload", { mode: "json" }).notNull(),
 	status: text("status", { enum: ["pending", "processing", "done", "failed"] })
 		.notNull()
 		.default("pending"),
 	attempts: integer("attempts").notNull().default(0),
+	/** Why a job that has no revision to carry it (a history recompute) failed. */
+	error: text("error"),
 	createdAt: createdAt(),
+	completedAt: integer("completed_at"),
 });
 
 /** The size of every stored tile image, recorded when it is written, so storage is summed rather than measured. */

@@ -51,13 +51,8 @@ function showRevision(r: RevisionInfo) {
 }
 
 function describe(r: RevisionInfo): string {
-	if (r.kind === "upload") {
-		const files = `${r.fileCount} file${r.fileCount === 1 ? "" : "s"}`;
-		return r.viaMod ? `${files} via mod` : files;
-	}
-	const target = revisionsData.value.find((x) => x.id === r.targetRevisionId);
-	const what = target?.rev ? `revision ${target.rev}` : "an upload";
-	return r.kind === "revert" ? `Reverted ${what}` : `Restored ${what}`;
+	const files = `${r.fileCount} file${r.fileCount === 1 ? "" : "s"}`;
+	return r.viaMod ? `${files} via mod` : files;
 }
 
 /** Whether you may delete the upload now; the server decides, this only hides the button. */
@@ -79,7 +74,13 @@ function RevisionRow(props: { r: RevisionInfo; odd: boolean; now: number }) {
 		r.rev !== null && rev.value !== null && effectiveRev.value === r.rev;
 	// Started in this browser (with progress), or queued by someone else.
 	const removing =
-		deleting.value.get(r.id) ?? (r.deleting ? "deleting…" : undefined);
+		deleting.value.get(r.id) ??
+		(r.deleting
+			? {
+					label: "deleting…",
+					detail: "Queued for deletion, one job at a time",
+				}
+			: undefined);
 	const busy = inFlight(r) || removing !== undefined;
 	const canView = r.rev !== null && r.status === "done" && !removing;
 	const canDelete = deletable(r, props.now) && !busy;
@@ -98,7 +99,7 @@ function RevisionRow(props: { r: RevisionInfo; odd: boolean; now: number }) {
 	return (
 		<li
 			ref={row}
-			class={`revision ${active || isolated ? "active" : ""} ${hovered ? "hovered" : ""} ${r.reverted ? "reverted" : ""} ${r.status}`}
+			class={`revision ${active || isolated ? "active" : ""} ${hovered ? "hovered" : ""} ${r.status}`}
 			onMouseEnter={() => pointAt(r, "log")}
 			onMouseLeave={() => pointAt(null, "log")}
 		>
@@ -129,10 +130,18 @@ function RevisionRow(props: { r: RevisionInfo; odd: boolean; now: number }) {
 						late
 					</span>
 				)}
-				{r.reverted && <span class="badge warn">reverted</span>}
 				{busy && (
-					<span class="badge">
-						{removing ?? (r.status === "pending" ? "queued" : "processing…")}
+					<span
+						class="badge"
+						title={
+							removing?.detail ??
+							(r.status === "pending"
+								? "Queued: uploads, deletions and history recomputes run one at a time"
+								: "Being added to the map")
+						}
+					>
+						{removing?.label ??
+							(r.status === "pending" ? "queued" : "processing…")}
 					</span>
 				)}
 				{r.status === "done" && r.error && (
@@ -213,6 +222,7 @@ function useViewBounds(enabled: boolean): Bounds | null {
 /** A time line over the dimension's uploads and the upload log; uploads can be deleted here. */
 export function HistoryPanel() {
 	const head = currentMap.value?.map.headRev ?? 0;
+	const epoch = currentMap.value?.map.epoch ?? 0;
 	const dim = dimSlug.value;
 	const me = user.value;
 	const { historyInView: inView, historyMineOnly } = settings.value;
@@ -220,7 +230,8 @@ export function HistoryPanel() {
 	const bounds = useViewBounds(inView);
 	const [now, setNow] = useState(Date.now());
 
-	// Reload when a new head or another dimension appears, and keep polling for running jobs.
+	// Reload when a new head, rewritten history or another dimension appears, and keep polling
+	// for running jobs.
 	useEffect(() => {
 		void loadRevisions();
 		const timer = setInterval(() => {
@@ -228,7 +239,7 @@ export function HistoryPanel() {
 			setNow(Date.now());
 		}, 10_000);
 		return () => clearInterval(timer);
-	}, [head, dim]);
+	}, [head, epoch, dim]);
 
 	useEffect(
 		() => () => {

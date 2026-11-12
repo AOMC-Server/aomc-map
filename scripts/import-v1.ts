@@ -166,7 +166,7 @@ export async function runImport(opts: ImportOptions): Promise<ImportResult> {
 		for (const [i, batch] of batches.entries()) {
 			const outcome = await uploadBatch(batch);
 			result.batches++;
-			if (outcome === "empty") result.skipped += batch.length;
+			if (outcome !== "done") result.skipped += batch.length;
 			else result.uploaded += batch.length;
 			state.done[folder] = [...(state.done[folder] ?? []), ...batch];
 			await saveState(opts.statePath, state);
@@ -175,7 +175,9 @@ export async function runImport(opts: ImportOptions): Promise<ImportResult> {
 			);
 		}
 
-		async function uploadBatch(batch: string[]): Promise<"done" | "empty"> {
+		async function uploadBatch(
+			batch: string[],
+		): Promise<"done" | "empty" | "already uploaded"> {
 			const form = new FormData();
 			for (const name of batch)
 				form.append("files[]", new File([Bun.file(join(dir, name))], name));
@@ -212,8 +214,11 @@ export async function runImport(opts: ImportOptions): Promise<ImportResult> {
 					const body = (await res.json()) as {
 						revisionId: number;
 						revisionIds?: number[];
+						skipped?: unknown[];
 					};
 					revisionIds = body.revisionIds ?? [body.revisionId];
+					if (body.skipped?.length)
+						log(`${body.skipped.length} tiles were already uploaded, skipped`);
 					break;
 				}
 				if (res.status === 429 && attempt < 20) {
@@ -224,7 +229,10 @@ export async function runImport(opts: ImportOptions): Promise<ImportResult> {
 				const body = (await res.json().catch(() => ({}))) as {
 					error?: string;
 					errors?: { file: string; error: string }[];
+					skipped?: unknown[];
 				};
+				// The server already has every tile of the batch (e.g. a re-run after a lost state file).
+				if (res.status === 409 && body.skipped) return "already uploaded";
 				const detail = body.errors
 					?.slice(0, 3)
 					.map((e) => `${e.file}: ${e.error}`)
@@ -321,7 +329,7 @@ if (import.meta.main) {
 			dimMap,
 		});
 		console.log(
-			`done: ${r.uploaded} tiles uploaded, ${r.skipped} empty tiles skipped, ${r.batches} batches`,
+			`done: ${r.uploaded} tiles uploaded, ${r.skipped} empty or already uploaded tiles skipped, ${r.batches} batches`,
 		);
 	} catch (err) {
 		console.error(

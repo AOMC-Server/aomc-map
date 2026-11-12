@@ -2,6 +2,7 @@ import { mkdirSync } from "node:fs";
 import { createApp } from "./app";
 import { createDb, runMigrations } from "./db/client";
 import { parseEnv } from "./env";
+import { queueRecomputeIfPending } from "./jobs/recomputeHistory";
 import { blobsDir, dbFile } from "./paths";
 import { createServices } from "./services";
 import { runSetup } from "./setup";
@@ -13,6 +14,8 @@ mkdirSync(env.DATA_DIR, { recursive: true });
 const db = createDb(dbFile(env.DATA_DIR));
 runMigrations(db);
 runSetup(db, env);
+if (queueRecomputeIfPending(db))
+	console.log("history will be recomputed in export order");
 
 const services = createServices(db, env);
 await recordMissingBlobSizes(db, blobsDir(env.DATA_DIR));

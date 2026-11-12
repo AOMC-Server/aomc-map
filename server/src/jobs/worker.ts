@@ -1,11 +1,13 @@
 import { rmSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { asc, eq } from "drizzle-orm";
-import { jobs, revisions } from "../db/schema";
+import { jobs, revisions, tileVersionsRebuild } from "../db/schema";
 import { recordStorage } from "../storage";
 import { isPublished } from "../tiles/history";
 import { eraseUpload } from "./eraseUpload";
+import { messages } from "./messages";
 import { processUpload } from "./processUpload";
+import { type RecomputeProgress, recomputeHistory } from "./recomputeHistory";
 import {
 	type EraseUploadPayload,
 	incomingDir,
@@ -21,6 +23,8 @@ export function createWorker(ctx: JobContext) {
 	const { db, env, progress } = ctx;
 	let running: Promise<void> | null = null;
 	let timer: ReturnType<typeof setInterval> | undefined;
+	/** How far a running history recompute is; null when none is running. */
+	let recompute: RecomputeProgress | null = null;
 
 	const markJob = (id: number, status: "pending" | "done" | "failed") =>
 		db.update(jobs).set({ status }).where(eq(jobs.id, id)).run();
@@ -57,7 +61,39 @@ export function createWorker(ctx: JobContext) {
 		job.type === "process_upload" &&
 		isPublished(db, (job.payload as { revisionId: number }).revisionId);
 
+	/** A history recompute has no revision of its own: its state and error live on the job. */
+	async function runRecompute(job: typeof jobs.$inferSelect) {
+		db.update(jobs)
+			.set({ status: "processing", attempts: job.attempts + 1, error: null })
+			.where(eq(jobs.id, job.id))
+			.run();
+		recompute = { message: messages.starting };
+		try {
+			// Publishing marks the job done in the same transaction.
+			await recomputeHistory(ctx, job.id, (p) => {
+				recompute = p;
+			});
+		} catch (err) {
+			console.error(`job ${job.id} failed:`, err);
+			db.delete(tileVersionsRebuild).run();
+			db.update(jobs)
+				.set({
+					status: "failed",
+					error: (err instanceof UserError
+						? err.message
+						: "internal error"
+					).slice(0, 500),
+					completedAt: Date.now(),
+				})
+				.where(eq(jobs.id, job.id))
+				.run();
+		} finally {
+			recompute = null;
+		}
+	}
+
 	async function runJob(job: typeof jobs.$inferSelect) {
+		if (job.type === "recompute_history") return runRecompute(job);
 		const payload = job.payload as { revisionId: number };
 		const isErase = job.type === "erase_upload";
 		if (alreadyPublished(job)) {
@@ -83,7 +119,7 @@ export function createWorker(ctx: JobContext) {
 			.where(eq(revisions.id, payload.revisionId));
 		progress.emit(payload.revisionId, {
 			status: "processing",
-			message: "started",
+			message: messages.starting,
 		});
 		try {
 			// Publishing marks the job done in the same transaction (an erase deletes its job row).
@@ -165,6 +201,8 @@ export function createWorker(ctx: JobContext) {
 
 	return {
 		run,
+		/** Progress of the history recompute that is running, if one is. */
+		recomputeProgress: () => recompute,
 		kick() {
 			run().catch((err) => console.error("worker loop crashed:", err));
 		},
@@ -178,6 +216,22 @@ export function createWorker(ctx: JobContext) {
 				.from(jobs)
 				.where(eq(jobs.status, "processing"))
 				.all()) {
+				if (job.type === "recompute_history") {
+					// Nothing of it was published; it starts over, unless it keeps crashing.
+					db.update(jobs)
+						.set(
+							job.attempts >= MAX_ATTEMPTS
+								? {
+										status: "failed",
+										error: "interrupted too many times",
+										completedAt: Date.now(),
+									}
+								: { status: "pending" },
+						)
+						.where(eq(jobs.id, job.id))
+						.run();
+					continue;
+				}
 				const { revisionId } = job.payload as { revisionId: number };
 				const isErase = job.type === "erase_upload";
 				if (alreadyPublished(job)) {

@@ -18,6 +18,7 @@ import {
 	postUpload,
 	px,
 	RED,
+	type Rgb,
 	readTile,
 	revisionOf,
 	solid,
@@ -275,7 +276,7 @@ describe("a delete waiting in the queue", () => {
 		const reader = (events.body as ReadableStream).getReader();
 		const first = new TextDecoder().decode((await reader.read()).value);
 		expect(first).toContain("event: processing");
-		expect(first).toContain("queued");
+		expect(first).toContain("Starting");
 		await reader.cancel();
 
 		await t.services.worker.run();
@@ -437,11 +438,11 @@ describe("stacking order", () => {
 	/** Uploads the same tile in the given order, in different colours; `skip` leaves one out. */
 	async function build(order: string[], skip?: number) {
 		const t = await bootTiles();
-		const colors = [RED, GREEN, BLUE, RED] as const;
+		const colors: Rgb[] = [RED, GREEN, BLUE, [255, 255, 0]];
 		const ids: number[] = [];
 		for (const [i, path] of order.entries()) {
 			if (i === skip) continue;
-			const data = await solid(T, T, colors[i] as (typeof colors)[number]);
+			const data = await solid(T, T, colors[i] as Rgb);
 			ids.push(await uploadFrom(t, data, 0, 0, path));
 		}
 		return { t, ids };

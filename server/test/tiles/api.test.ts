@@ -140,9 +140,88 @@ describe("upload validation", () => {
 		expect(
 			(await postUpload(t, t.editor, [{ name: "a_x0_z0.png", data }])).status,
 		).toBe(429);
+		const other = await solid(T, T, BLUE);
 		expect(
-			(await postUpload(t, t.mod, [{ name: "a_x0_z0.png", data }])).status,
+			(await postUpload(t, t.mod, [{ name: "a_x0_z0.png", data: other }]))
+				.status,
 		).toBe(202);
+		await t.services.worker.run();
+	});
+});
+
+describe("duplicate files", () => {
+	test("files already uploaded, or sent twice, are skipped and listed", async () => {
+		const t = await bootTiles();
+		const red = await solid(T, T, RED);
+		const blue = await solid(T, T, BLUE);
+		expect(
+			(await postUpload(t, t.editor, [{ name: "a_x0_z0.png", data: red }]))
+				.status,
+		).toBe(202);
+		await t.services.worker.run();
+
+		const res = await postUpload(t, t.mod, [
+			{ name: "again_x0_z0.png", data: red },
+			// The same image elsewhere is new.
+			{ name: "moved_x16_z0.png", data: red },
+			{ name: "b_x32_z0.png", data: blue },
+			{ name: "b-copy_x32_z0.png", data: blue },
+		]);
+		expect(res.status).toBe(202);
+		const body = (await res.json()) as {
+			revisionId: number;
+			skipped: { file: string; reason: string }[];
+		};
+		expect(body.skipped).toEqual([
+			{ file: "again_x0_z0.png", reason: "already uploaded" },
+			{
+				file: "b-copy_x32_z0.png",
+				reason: "same as b_x32_z0.png in this upload",
+			},
+		]);
+		await t.services.worker.run();
+		expect((await revisionOf(t, body.revisionId)).fileCount).toBe(2);
+	});
+
+	test("an upload of nothing but duplicates is refused with 409", async () => {
+		const t = await bootTiles();
+		const red = await solid(T, T, RED);
+		const send = () =>
+			postUpload(t, t.editor, [{ name: "a_x0_z0.png", data: red }]);
+		expect((await send()).status).toBe(202);
+		// Still queued counts too, so a double submit is caught.
+		const res = await send();
+		expect(res.status).toBe(409);
+		expect(await res.json()).toEqual({
+			error: "this file was already uploaded",
+			skipped: [{ file: "a_x0_z0.png", reason: "already uploaded" }],
+		});
+		await t.services.worker.run();
+		expect((await send()).status).toBe(409);
+		// Other dimensions are separate.
+		expect(
+			(
+				await postUpload(t, t.editor, [{ name: "a_x0_z0.png", data: red }], {
+					dim: "nether",
+				})
+			).status,
+		).toBe(202);
+		await t.services.worker.run();
+	});
+
+	test("after a delete, or a failed upload, the file can be sent again", async () => {
+		const t = await bootTiles();
+		const id = await upload(t, await solid(T, T, RED), 0, 0);
+		await erase(t, id);
+		await upload(t, await solid(T, T, RED), 0, 0);
+
+		// Entirely black: the job fails with "no map data".
+		const black = await solid(T, T, [0, 0, 0]);
+		const send = () =>
+			postUpload(t, t.editor, [{ name: "k_x64_z0.png", data: black }]);
+		expect((await send()).status).toBe(202);
+		await t.services.worker.run();
+		expect((await send()).status).toBe(202);
 		await t.services.worker.run();
 	});
 });

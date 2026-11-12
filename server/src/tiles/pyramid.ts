@@ -1,4 +1,5 @@
 import { floorDiv } from "@aomc/shared";
+import { mapLimit } from "../concurrency";
 import type { BlobStore } from "./blobstore";
 import { composeParent, loadTile, storeTile } from "./compose";
 
@@ -26,6 +27,10 @@ export async function buildPyramid(opts: {
 	maxZoom: number;
 	changed: Map<string, string | null>;
 	current: (zoom: number, x: number, y: number) => Promise<string | null>;
+	/** Parents built at once (they are independent within a level). */
+	concurrency?: number;
+	/** Called as parents are built: the zoom level, how many are done and how many there are. */
+	onProgress?: (zoom: number, done: number, total: number) => void;
 }): Promise<TileWrite[]> {
 	const { blobs, tileSize, maxZoom, current } = opts;
 	const writes: TileWrite[] = [];
@@ -38,27 +43,35 @@ export async function buildPyramid(opts: {
 			parents.add(tileKey(floorDiv(x, 2), floorDiv(y, 2)));
 		}
 
-		const next = new Map<string, string | null>();
-		for (const parentKey of parents) {
-			const [px, py] = parseKey(parentKey);
-			const children: (Buffer | null)[] = [];
-			for (let q = 0; q < 4; q++) {
-				const cx = 2 * px + (q % 2);
-				const cy = 2 * py + Math.floor(q / 2);
-				const key = tileKey(cx, cy);
-				const childHash = level.has(key)
-					? (level.get(key) as string | null)
-					: await current(zoom - 1, cx, cy);
-				children.push(
-					childHash ? await loadTile(blobs, childHash, tileSize) : null,
+		let finished = 0;
+		const built = await mapLimit(
+			[...parents],
+			opts.concurrency ?? 1,
+			async (parentKey) => {
+				const [px, py] = parseKey(parentKey);
+				const children = await Promise.all(
+					[0, 1, 2, 3].map(async (q) => {
+						const cx = 2 * px + (q % 2);
+						const cy = 2 * py + Math.floor(q / 2);
+						const key = tileKey(cx, cy);
+						const childHash = level.has(key)
+							? (level.get(key) as string | null)
+							: await current(zoom - 1, cx, cy);
+						return childHash ? loadTile(blobs, childHash, tileSize) : null;
+					}),
 				);
-			}
-			const canvas = composeParent(tileSize, children);
-			const hash = canvas ? await storeTile(blobs, canvas, tileSize) : null;
-			if (hash !== (await current(zoom, px, py))) {
-				next.set(parentKey, hash);
-				writes.push({ zoom, x: px, y: py, hash });
-			}
+				const canvas = composeParent(tileSize, children);
+				const hash = canvas ? await storeTile(blobs, canvas, tileSize) : null;
+				const changed = hash !== (await current(zoom, px, py));
+				opts.onProgress?.(zoom, ++finished, parents.size);
+				return { parentKey, px, py, hash, changed };
+			},
+		);
+		const next = new Map<string, string | null>();
+		for (const { parentKey, px, py, hash, changed } of built) {
+			if (!changed) continue;
+			next.set(parentKey, hash);
+			writes.push({ zoom, x: px, y: py, hash });
 		}
 		level = next;
 	}

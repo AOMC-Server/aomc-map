@@ -1,20 +1,16 @@
 import { floorDiv } from "@aomc/shared";
 import { and, asc, eq, gte, inArray, isNotNull, max, sql } from "drizzle-orm";
+import { mapLimit } from "../concurrency";
 import {
 	jobs,
 	mapInfo,
 	revisions,
 	tileVersions,
+	uploadFiles,
 	uploadPatches,
 } from "../db/schema";
 import { loadMap } from "../permissions";
-import {
-	composeParent,
-	emptyTile,
-	loadTile,
-	overRegion,
-	storeTile,
-} from "../tiles/compose";
+import { emptyTile, loadTile, overRegion, storeTile } from "../tiles/compose";
 import {
 	stackOrder,
 	type TilePatch,
@@ -22,14 +18,10 @@ import {
 	tilePatches,
 } from "../tiles/history";
 import { parseKey, tileKey } from "../tiles/pyramid";
+import { parentRows, type Row, sameRows } from "../tiles/rows";
+import { messages } from "./messages";
 import { jobRevisionId } from "./target";
 import { type EraseUploadPayload, type JobContext, UserError } from "./types";
-
-type Row = { rev: number; hash: string | null };
-
-const sameRows = (a: Row[], b: Row[]) =>
-	a.length === b.length &&
-	a.every((r, i) => r.rev === b[i]?.rev && r.hash === b[i]?.hash);
 
 /**
  * Deletes an upload as if it had never been made: it leaves the map, every past revision, the
@@ -69,23 +61,9 @@ export async function eraseUpload(
 	const dimId = target.dimensionId;
 	const T = (await loadMap(db)).tileSize;
 
-	// The upload and any revert or restore that was made of it.
-	const removed = new Set<number>([target.id]);
-	for (const op of await db
-		.select({ id: revisions.id })
-		.from(revisions)
-		.where(eq(revisions.targetRevisionId, target.id))) {
-		removed.add(op.id);
-	}
-
-	// What happened to this dimension, in order: which uploads were live is replayed from this.
+	// The uploads of this dimension in the order they were published, which is replayed below.
 	const timeline = await db
-		.select({
-			id: revisions.id,
-			rev: revisions.rev,
-			kind: revisions.kind,
-			target: revisions.targetRevisionId,
-		})
+		.select({ id: revisions.id, rev: revisions.rev })
 		.from(revisions)
 		.where(
 			and(
@@ -133,7 +111,7 @@ export async function eraseUpload(
 
 	let level = new Map<string, Row[]>();
 	let n = 0;
-	for (const { x, y } of touched) {
+	await mapLimit(touched, env.JOB_CONCURRENCY, async ({ x, y }) => {
 		const patches = new Map(
 			(await tilePatches(db, dimId, x, y))
 				.filter((p) => p.id !== target.id)
@@ -167,11 +145,8 @@ export async function eraseUpload(
 		let prev = await baseHash(0, x, y);
 		const rows: Row[] = [];
 		for (const e of timeline) {
-			if (removed.has(e.id) || e.rev === null) continue;
-			const subject = e.kind === "upload" ? e.id : (e.target ?? -1);
-			if (!patches.has(subject)) continue;
-			if (e.kind === "revert") live.delete(subject);
-			else live.add(subject);
+			if (e.id === target.id || e.rev === null || !patches.has(e.id)) continue;
+			live.add(e.id);
 			if (e.rev < R) continue;
 			const hash = await contentHash();
 			if (hash !== prev) {
@@ -183,8 +158,8 @@ export async function eraseUpload(
 			rewrites.push({ zoom: 0, x, y, rows });
 			level.set(tileKey(x, y), rows);
 		}
-		say("rewriting tiles", ++n, touched.length);
-	}
+		say(messages.erase.tiles, ++n, touched.length);
+	});
 
 	// Zoomed out: each parent follows its four children, wherever any of them changes.
 	for (let zoom = 1; zoom <= env.MAX_ZOOM && level.size > 0; zoom++) {
@@ -196,7 +171,8 @@ export async function eraseUpload(
 
 		const next = new Map<string, Row[]>();
 		const mixes = new Map<string, string | null>();
-		for (const parentKey of parents) {
+		let built = 0;
+		await mapLimit([...parents], env.JOB_CONCURRENCY, async (parentKey) => {
 			const [px, py] = parseKey(parentKey);
 			const kids = await Promise.all(
 				[0, 1, 2, 3].map(async (q) => {
@@ -209,44 +185,24 @@ export async function eraseUpload(
 					};
 				}),
 			);
-			const revs = [
-				...new Set(kids.flatMap((k) => k.rows.map((r) => r.rev))),
-			].sort((a, b) => a - b);
-
-			let prev = await baseHash(zoom, px, py);
-			const rows: Row[] = [];
-			for (const rev of revs) {
-				const hashes = kids.map((k) => {
-					const row = k.rows.findLast((r) => r.rev <= rev);
-					return row ? row.hash : k.base;
-				});
-				const mixKey = hashes.join("|");
-				if (!mixes.has(mixKey)) {
-					const canvas = composeParent(
-						T,
-						await Promise.all(
-							hashes.map((hash) => (hash ? loadTile(blobs, hash, T) : null)),
-						),
-					);
-					mixes.set(mixKey, canvas ? await storeTile(blobs, canvas, T) : null);
-				}
-				const hash = mixes.get(mixKey) ?? null;
-				if (hash !== prev) {
-					rows.push({ rev, hash });
-					prev = hash;
-				}
-			}
+			const rows = await parentRows({
+				blobs,
+				tileSize: T,
+				kids,
+				base: await baseHash(zoom, px, py),
+				mixes,
+			});
 			if (!sameRows(rows, await oldRows(zoom, px, py))) {
 				rewrites.push({ zoom, x: px, y: py, rows });
 				next.set(parentKey, rows);
 			}
-		}
+			say(messages.erase.zoom(zoom), ++built, parents.size);
+		});
 		level = next;
-		say(`rebuilding zoom level ${zoom}`);
 	}
 
-	say("publishing");
-	const ids = [...removed];
+	say(messages.erase.publishing);
+	const ids = [target.id];
 	db.transaction((tx) => {
 		for (const w of rewrites) {
 			tx.delete(tileVersions)
@@ -280,10 +236,11 @@ export async function eraseUpload(
 		tx.delete(uploadPatches)
 			.where(inArray(uploadPatches.revisionId, ids))
 			.run();
+		tx.delete(uploadFiles).where(inArray(uploadFiles.revisionId, ids)).run();
 		tx.delete(jobs).where(inArray(jobRevisionId, ids)).run();
 		tx.delete(revisions).where(inArray(revisions.id, ids)).run();
 
-		// If the deleted revisions were the newest, the head moves back to the newest one left.
+		// If the deleted revision was the newest, the head moves back to the newest one left.
 		const newest = tx
 			.select({ rev: max(revisions.rev) })
 			.from(revisions)

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { renameSync, rmSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { basename, join } from "node:path";
@@ -8,11 +9,12 @@ import {
 	uploadCoordsSchema,
 	uploadPathsSchema,
 } from "@aomc/shared";
+import { and, eq, inArray, ne } from "drizzle-orm";
 import { unzipSync } from "fflate";
 import { Hono } from "hono";
 import sharp from "sharp";
 import { requireUser, userOf } from "../auth/session";
-import { jobs, revisions } from "../db/schema";
+import { jobs, revisions, uploadFiles } from "../db/schema";
 import { dimensionBySlug } from "../dimensionLookup";
 import { incomingDir, type UploadFile } from "../jobs/types";
 import { doc } from "../openapi";
@@ -24,6 +26,8 @@ import { isModClient } from "../uploadClient";
 /** `path` is where the file came from (folders included); it carries the export date. */
 type Entry = { name: string; path: string; data: Uint8Array };
 type FileError = { file: string; error: string };
+/** A file left out because it adds nothing: it was uploaded before, or sent twice. */
+type SkippedFile = { file: string; reason: string };
 
 export const uploadRoutes = new Hono<AppEnv>().post(
 	"/",
@@ -31,11 +35,11 @@ export const uploadRoutes = new Hono<AppEnv>().post(
 		tag: "Uploads",
 		summary: "Upload Xaero exports",
 		description:
-			"Send PNG files or ZIPs as multipart/form-data. Coordinates come from `_x<X>_z<Z>` in file names unless `coords` is given. An upload from the in-game mod is recognised by its `User-Agent` (see `MOD_USER_AGENTS`; by default AOMC Webmapper and AOMC Visited) and counted separately in the statistics. Processing runs in the background: poll `GET /api/revisions/{id}` or stream its events. An upload with several export dates creates one revision per date.",
+			"Send PNG files or ZIPs as multipart/form-data. Coordinates come from `_x<X>_z<Z>` in file names unless `coords` is given. A file that is already part of an upload to the dimension (the same image at the same coordinates), or that appears twice in the request, is skipped and listed in `skipped` as `{ file, reason }`; if every file is skipped the answer is 409. An upload from the in-game mod is recognised by its `User-Agent` (see `MOD_USER_AGENTS`; by default AOMC Webmapper and AOMC Visited) and counted separately in the statistics. Processing runs in the background: poll `GET /api/revisions/{id}` or stream its events. An upload with several export dates creates one revision per date.",
 		ok: {
-			202: "Accepted. `revisionId` is the last revision, `revisionIds` all of them, oldest first",
+			202: "Accepted. `revisionId` is the last revision, `revisionIds` all of them, oldest first; `skipped` lists files left out as duplicates",
 		},
-		fails: [400, 403, 404, 413, 429],
+		fails: [400, 403, 404, 409, 413, 429],
 		login: true,
 		requestBody: {
 			required: true,
@@ -244,10 +248,67 @@ export const uploadRoutes = new Hono<AppEnv>().post(
 		if (errors.length > 0)
 			return c.json({ error: "invalid files", errors }, 400);
 
+		// A file already in an upload to this dimension (same image, same place), or sent twice,
+		// adds nothing to the map, so it is left out. Failed uploads don't count, and deleted ones
+		// have no rows left.
+		const hashed = parsed.map((item) => ({
+			...item,
+			hash: createHash("sha256").update(item.entry.data).digest("hex"),
+		}));
+		const keyOf = (f: { hash: string; x: number; z: number }) =>
+			`${f.hash}:${f.x}:${f.z}`;
+		const known = new Set<string>();
+		const hashes = [...new Set(hashed.map((item) => item.hash))];
+		for (let i = 0; i < hashes.length; i += 500) {
+			const rows = db
+				.select({ hash: uploadFiles.hash, x: uploadFiles.x, z: uploadFiles.z })
+				.from(uploadFiles)
+				.innerJoin(revisions, eq(revisions.id, uploadFiles.revisionId))
+				.where(
+					and(
+						eq(uploadFiles.dimensionId, dim.id),
+						inArray(uploadFiles.hash, hashes.slice(i, i + 500)),
+						ne(revisions.status, "failed"),
+					),
+				)
+				.all();
+			for (const row of rows) known.add(keyOf(row));
+		}
+		const skipped: SkippedFile[] = [];
+		const firstOf = new Map<string, string>();
+		const kept: typeof hashed = [];
+		for (const item of hashed) {
+			const key = keyOf({ hash: item.hash, ...item.file });
+			const first = firstOf.get(key);
+			if (known.has(key)) {
+				skipped.push({ file: item.entry.name, reason: "already uploaded" });
+			} else if (first !== undefined) {
+				skipped.push({
+					file: item.entry.name,
+					reason: `same as ${first} in this upload`,
+				});
+			} else {
+				firstOf.set(key, item.entry.name);
+				kept.push(item);
+			}
+		}
+		if (kept.length === 0) {
+			return c.json(
+				{
+					error:
+						skipped.length === 1
+							? "this file was already uploaded"
+							: "all of these files were already uploaded",
+					skipped,
+				},
+				409,
+			);
+		}
+
 		// One revision per export, oldest first: jobs run in id order, so each export is stacked
 		// onto the map in the order it was made. Files without a date count as uploaded now.
-		const groups = new Map<number | null, typeof parsed>();
-		for (const item of parsed) {
+		const groups = new Map<number | null, typeof kept>();
+		for (const item of kept) {
 			const group = groups.get(item.exportedAt) ?? [];
 			group.push(item);
 			groups.set(item.exportedAt, group);
@@ -293,6 +354,17 @@ export const uploadRoutes = new Hono<AppEnv>().post(
 					const dir = incomingDir(env, revision.id);
 					rmSync(dir, { recursive: true, force: true });
 					renameSync(`${staging}/${g}`, dir);
+					tx.insert(uploadFiles)
+						.values(
+							group.map((item) => ({
+								revisionId: revision.id,
+								dimensionId: dim.id,
+								x: item.file.x,
+								z: item.file.z,
+								hash: item.hash,
+							})),
+						)
+						.run();
 					tx.insert(jobs)
 						.values({
 							type: "process_upload",
@@ -315,7 +387,7 @@ export const uploadRoutes = new Hono<AppEnv>().post(
 		}
 		svc.worker.kick();
 		return c.json(
-			{ revisionId: revisionIds.at(-1) as number, revisionIds },
+			{ revisionId: revisionIds.at(-1) as number, revisionIds, skipped },
 			202,
 		);
 	},

@@ -22,7 +22,7 @@ import {
 	type UploadItem,
 } from "../upload-files";
 import { exportDates, validateFiles } from "../upload-validate";
-import { formatBytes, formatDay } from "./format";
+import { formatBytes, formatDay, formatProgress } from "./format";
 import { Modal } from "./Modal";
 
 function ProgressBar(props: { percent?: number; label: string }) {
@@ -273,7 +273,7 @@ export function UploadDialog() {
 						percent={
 							state.total ? ((state.done ?? 0) / state.total) * 100 : undefined
 						}
-						label={`${state.message}${state.total ? ` (${state.done ?? 0}/${state.total})` : "…"}`}
+						label={formatProgress(state.message, state.done, state.total)}
 					/>
 					<p class="muted">
 						You can close this window; processing continues in the background.
@@ -297,6 +297,25 @@ export function UploadDialog() {
 							{state.failed} export{state.failed === 1 ? "" : "s"} failed; see
 							the history panel.
 						</p>
+					)}
+					{state.skipped.length > 0 && (
+						<>
+							<p class="warn-text">
+								{state.skipped.length} file
+								{state.skipped.length === 1 ? " was" : "s were"} skipped as
+								duplicates.
+							</p>
+							<ul class="file-list">
+								{state.skipped.slice(0, 6).map((s) => (
+									<li key={`${s.file}:${s.reason}`}>
+										<b>{s.file}</b>: {s.reason}
+									</li>
+								))}
+								{state.skipped.length > 6 && (
+									<li class="muted">…and {state.skipped.length - 6} more</li>
+								)}
+							</ul>
+						</>
 					)}
 					<div class="modal-actions">
 						{state.bbox && (

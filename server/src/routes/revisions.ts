@@ -1,11 +1,12 @@
 import { HOUR, type Role } from "@aomc/shared";
-import { and, desc, eq, inArray, lt, or, type SQL, sql } from "drizzle-orm";
+import { and, asc, desc, eq, inArray, lt, type SQL } from "drizzle-orm";
 import { type Context, Hono } from "hono";
 import { streamSSE } from "hono/streaming";
 import { requireUser, userOf } from "../auth/session";
 import type { Db } from "../db/client";
 import { jobs, revisions, uploadPatches, users } from "../db/schema";
 import { dimensionBySlug } from "../dimensionLookup";
+import { waitingMessage } from "../jobs/messages";
 import { jobRevisionId } from "../jobs/target";
 import { doc } from "../openapi";
 import { canDeleteUpload, canModerate, loadMap } from "../permissions";
@@ -20,7 +21,6 @@ const revisionFields = {
 	dimensionId: revisions.dimensionId,
 	authorId: revisions.authorId,
 	authorName: users.username,
-	targetRevisionId: revisions.targetRevisionId,
 	status: revisions.status,
 	error: revisions.error,
 	bboxMinX: revisions.bboxMinX,
@@ -29,7 +29,6 @@ const revisionFields = {
 	bboxMaxZ: revisions.bboxMaxZ,
 	fileCount: revisions.fileCount,
 	viaMod: revisions.viaMod,
-	reverted: revisions.reverted,
 	createdAt: revisions.createdAt,
 	exportedAt: revisions.exportedAt,
 	completedAt: revisions.completedAt,
@@ -70,6 +69,33 @@ function erasing(db: Db, ids?: number[]): Set<number> {
 			)
 			.all()
 			.map((row) => row.id),
+	);
+}
+
+/**
+ * Why the revision's queued job has not started, or null when it has no queued job (it is
+ * running, or finished): the history recompute in the way, or how many jobs are ahead of it.
+ */
+function waiting(db: Db, revisionId: number): string | null {
+	const job = db
+		.select({ id: jobs.id })
+		.from(jobs)
+		.where(and(eq(jobRevisionId, revisionId), eq(jobs.status, "pending")))
+		.orderBy(desc(jobs.id))
+		.get();
+	if (!job) return null;
+	return waitingMessage(
+		db
+			.select({ type: jobs.type, status: jobs.status })
+			.from(jobs)
+			.where(
+				and(
+					lt(jobs.id, job.id),
+					inArray(jobs.status, ["pending", "processing"]),
+				),
+			)
+			.orderBy(asc(jobs.id))
+			.all(),
 	);
 }
 
@@ -116,8 +142,7 @@ export const revisionRoutes = new Hono<AppEnv>()
 			query: {
 				limit: "At most this many (1 to 1000, default 200)",
 				before: "Only revisions with a smaller id (for paging)",
-				dimension:
-					"Only revisions in this dimension (slug); reverts and restores of its uploads are included",
+				dimension: "Only revisions in this dimension (slug)",
 				active:
 					"Also include revisions with these ids (comma separated) whatever the other filters, e.g. ones still being processed",
 			},
@@ -137,12 +162,7 @@ export const revisionRoutes = new Hono<AppEnv>()
 			if (slug) {
 				const dim = dimensionBySlug(db, slug);
 				if (!dim) return c.json({ error: "not found" }, 404);
-				filters.push(
-					or(
-						eq(revisions.dimensionId, dim.id),
-						sql`${revisions.targetRevisionId} in (select ${revisions.id} from ${revisions} where ${revisions.dimensionId} = ${dim.id})`,
-					) as SQL,
-				);
+				filters.push(eq(revisions.dimensionId, dim.id));
 			}
 			const rows = await db
 				.select(revisionFields)
@@ -224,7 +244,7 @@ export const revisionRoutes = new Hono<AppEnv>()
 			tag: "Revisions",
 			summary: "Stream a revision's progress",
 			description:
-				"Server-sent events named after the status (`pending`, `processing`, `done`, `failed`); the stream ends when the revision is done or failed. The first event is the current status; for an upload whose delete is waiting in the queue it is `processing` with message `queued`.",
+				"Server-sent events named after the status (`pending`, `processing`, `done`, `failed`); the stream ends when the revision is done or failed. The first event is the current status (for a queued job with a `message` that says what it waits for, repeated when that changes); for an upload whose delete is waiting in the queue it is `processing` with a `message` that says what it waits for.",
 			ok: { 200: "text/event-stream" },
 			fails: [404],
 		}),
@@ -261,19 +281,35 @@ export const revisionRoutes = new Hono<AppEnv>()
 					return;
 				}
 				// A delete waiting in the queue leaves the upload itself as it is until it starts.
+				const queued = (): ProgressEvent | null => {
+					const message = waiting(db, id);
+					if (message === null) return null;
+					return erasing(db, [id]).has(id)
+						? { status: "processing", message }
+						: { status: "pending", message };
+				};
+				let lastWaiting = "";
 				send(
-					erasing(db, [id]).has(id)
-						? { status: "processing", message: "queued" }
-						: {
-								status: current.status,
-								rev: current.rev,
-								error: current.error,
-							},
+					queued() ?? {
+						status: current.status,
+						rev: current.rev,
+						error: current.error,
+					},
 				);
+				lastWaiting = waiting(db, id) ?? "";
+				// While it waits, say so again whenever what it waits for changes.
+				const watch = setInterval(() => {
+					const event = queued();
+					if (event?.message && event.message !== lastWaiting) {
+						lastWaiting = event.message;
+						send(event);
+					}
+				}, 3000);
 				const ping = setInterval(() => {
 					chain = chain.then(() => stream.write(": ping\n\n"));
 				}, 20_000);
 				await finished;
+				clearInterval(watch);
 				clearInterval(ping);
 				unsubscribe();
 			});

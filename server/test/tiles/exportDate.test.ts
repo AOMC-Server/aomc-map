@@ -38,13 +38,13 @@ describe("export dates", () => {
 
 	test("names are read in the uploader's time zone, across daylight saving", async () => {
 		const t = await bootTiles();
+		let n = 0;
 		const at = async (name: string, timeZone?: string) => {
-			const res = await postUpload(
-				t,
-				t.editor,
-				[{ name, data: await solid(T, T, RED) }],
-				{ timeZone },
-			);
+			// A different image each time, or the repeats would be skipped as duplicates.
+			const data = await solid(T, T, [255, 0, ++n]);
+			const res = await postUpload(t, t.editor, [{ name, data }], {
+				timeZone,
+			});
 			expect(res.status).toBe(202);
 			const { revisionId } = (await res.json()) as { revisionId: number };
 			return (await revisionOf(t, revisionId)).exportedAt;

@@ -1,3 +1,4 @@
+import { availableParallelism } from "node:os";
 import { z } from "zod";
 
 const DEV_SESSION_SECRET = "dev-only-secret-change-me";
@@ -19,6 +20,12 @@ const envSchema = z.object({
 		.refine((n) => n % 2 === 0, "must be even")
 		.default(512),
 	MAX_ZOOM: z.coerce.number().int().min(0).max(12).default(8),
+	// Tiles a job encodes at once; each one in flight holds a few raw tiles in memory
+	JOB_CONCURRENCY: z.coerce
+		.number()
+		.int()
+		.min(1)
+		.default(Math.min(availableParallelism(), 16)),
 	MAX_UPLOAD_BYTES: z.coerce
 		.number()
 		.int()

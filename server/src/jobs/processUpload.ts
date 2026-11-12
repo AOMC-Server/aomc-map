@@ -1,5 +1,6 @@
 import { floorDiv } from "@aomc/shared";
 import { eq } from "drizzle-orm";
+import { mapLimit } from "../concurrency";
 import { dimensions, revisions } from "../db/schema";
 import { loadMap } from "../permissions";
 import {
@@ -18,6 +19,7 @@ import {
 } from "../tiles/history";
 import { buildPyramid, type TileWrite, tileKey } from "../tiles/pyramid";
 import { blackToAlpha } from "../tiles/xaero";
+import { messages } from "./messages";
 import {
 	incomingDir,
 	type JobContext,
@@ -75,9 +77,50 @@ export async function processUpload(
 		}
 	});
 
-	// One patch per touched tile, files pasted in upload order. Tiles are done in batches to
-	// bound memory; within a batch each file is decoded once and pasted into every tile it covers.
+	// Composites a patch into its tile. Normally that is over the tile as of the current head;
+	// but if an export made later than this one already covers the tile, this (older) export
+	// goes underneath it, so the tile is replayed from every patch in export order. `patch` is
+	// the patch's image as stored (with the hash `hash`), still in memory.
+	const exportedAt = revision.exportedAt ?? revision.createdAt;
+	const composite = async (
+		x: number,
+		y: number,
+		hash: string,
+		patch: Buffer,
+	): Promise<{ current: string | null; result: string | null }> => {
+		const current = await tileHashAt(db, dim.id, 0, x, y, head);
+		const live = await tilePatches(db, dim.id, x, y);
+		let canvas: Buffer;
+		if (
+			live.some(
+				(q) => q.at > exportedAt || (q.at === exportedAt && q.id > revisionId),
+			)
+		) {
+			const stack = [...live, { id: revisionId, at: exportedAt, hash }];
+			stack.sort(stackOrder);
+			canvas = emptyTile(T);
+			for (const q of stack) {
+				const image =
+					q.id === revisionId ? patch : await loadTile(blobs, q.hash, T);
+				overRegion(canvas, T, image, T, T, 0, 0);
+			}
+		} else if (current === null) {
+			// Over an empty tile the result is the patch itself.
+			return { current, result: hash };
+		} else {
+			canvas = await loadTile(blobs, current, T);
+			overRegion(canvas, T, patch, T, T, 0, 0);
+		}
+		return { current, result: await storeTile(blobs, canvas, T) };
+	};
+
+	// One patch per touched tile, files pasted in upload order, and composited into its tile
+	// while it is still in memory. Tiles are done in batches to bound memory; within a batch each
+	// file is decoded once and pasted into every tile it covers, and the tiles are then encoded
+	// several at once.
 	const patches: { x: number; y: number; hash: string }[] = [];
+	const changed = new Map<string, string | null>();
+	const writes: TileWrite[] = [];
 	const tiles = [...byTile.values()];
 	const batchSize = Math.max(1, Math.floor(batchBytes / (T * T * 4)));
 	let n = 0;
@@ -87,7 +130,9 @@ export async function processUpload(
 		const covered = new Map<number, number[]>();
 		for (const [b, tile] of batch.entries()) {
 			for (const index of tile.files) {
-				covered.set(index, [...(covered.get(index) ?? []), b]);
+				const list = covered.get(index) ?? [];
+				list.push(b);
+				covered.set(index, list);
 			}
 		}
 		for (const index of [...covered.keys()].sort((a, b) => a - b)) {
@@ -110,51 +155,30 @@ export async function processUpload(
 				);
 			}
 		}
-		for (const [b, { tx, ty }] of batch.entries()) {
-			const hash = await storeTile(blobs, canvases[b] as Buffer, T);
-			if (hash) patches.push({ x: tx, y: ty, hash });
-			say("building patches", ++n, tiles.length);
+		const done = await mapLimit(
+			batch,
+			env.JOB_CONCURRENCY,
+			async ({ tx, ty }, b) => {
+				// Storing zeroes the colour under transparent pixels, so `patch` is then exactly
+				// what the stored patch decodes to.
+				const patch = canvases[b] as Buffer;
+				const hash = await storeTile(blobs, patch, T);
+				const tile = hash ? await composite(tx, ty, hash, patch) : null;
+				say(messages.upload.tiles, ++n, tiles.length);
+				return tile && hash ? { x: tx, y: ty, hash, ...tile } : null;
+			},
+		);
+		for (const tile of done) {
+			if (!tile) continue;
+			patches.push({ x: tile.x, y: tile.y, hash: tile.hash });
+			if (tile.result !== tile.current) {
+				changed.set(tileKey(tile.x, tile.y), tile.result);
+				writes.push({ zoom: 0, x: tile.x, y: tile.y, hash: tile.result });
+			}
 		}
 	}
 	if (patches.length === 0) throw new UserError("upload contains no map data");
 
-	// Composite each patch into its tile. Normally that is over the tile as of the current head;
-	// but if an export made later than this one already covers the tile, this (older) export
-	// goes underneath it, so the tile is replayed from every patch in export order.
-	const exportedAt = revision.exportedAt ?? revision.createdAt;
-	const changed = new Map<string, string | null>();
-	const writes: TileWrite[] = [];
-	n = 0;
-	for (const p of patches) {
-		const current = await tileHashAt(db, dim.id, 0, p.x, p.y, head);
-		const live = (await tilePatches(db, dim.id, p.x, p.y)).filter(
-			(q) => !q.reverted,
-		);
-		let canvas: Buffer;
-		if (
-			live.some(
-				(q) => q.at > exportedAt || (q.at === exportedAt && q.id > revisionId),
-			)
-		) {
-			const stack = [...live, { id: revisionId, at: exportedAt, hash: p.hash }];
-			stack.sort(stackOrder);
-			canvas = emptyTile(T);
-			for (const q of stack) {
-				overRegion(canvas, T, await loadTile(blobs, q.hash, T), T, T, 0, 0);
-			}
-		} else {
-			canvas = current ? await loadTile(blobs, current, T) : emptyTile(T);
-			overRegion(canvas, T, await loadTile(blobs, p.hash, T), T, T, 0, 0);
-		}
-		const hash = await storeTile(blobs, canvas, T);
-		if (hash !== current) {
-			changed.set(tileKey(p.x, p.y), hash);
-			writes.push({ zoom: 0, x: p.x, y: p.y, hash });
-		}
-		say("compositing tiles", ++n, patches.length);
-	}
-
-	say("building zoom levels");
 	writes.push(
 		...(await buildPyramid({
 			blobs,
@@ -162,6 +186,9 @@ export async function processUpload(
 			maxZoom: env.MAX_ZOOM,
 			changed,
 			current: (zoom, x, y) => tileHashAt(db, dim.id, zoom, x, y, head),
+			concurrency: env.JOB_CONCURRENCY,
+			onProgress: (zoom, done, total) =>
+				say(messages.upload.zoom(zoom), done, total),
 		})),
 	);
 
@@ -171,7 +198,7 @@ export async function processUpload(
 		maxX: Math.max(...files.map((f) => f.x + f.width - 1)),
 		maxZ: Math.max(...files.map((f) => f.z + f.height - 1)),
 	};
-	say("publishing");
+	say(messages.upload.publishing);
 	commitRevision(db, {
 		revisionId,
 		jobId,

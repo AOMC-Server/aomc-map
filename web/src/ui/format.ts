@@ -24,6 +24,17 @@ export function formatBytes(bytes: number): string {
 	return `${value.toFixed(digits)} ${BYTE_UNITS[unit]}`;
 }
 
+/** A job's progress as text: what it is doing, and how far it is where that is known. */
+export function formatProgress(
+	message: string,
+	done?: number | null,
+	total?: number | null,
+): string {
+	return total
+		? `${message}: ${(done ?? 0).toLocaleString()} of ${total.toLocaleString()}`
+		: `${message}…`;
+}
+
 export function formatDuration(seconds: number): string {
 	const d = Math.floor(seconds / 86400);
 	const h = Math.floor((seconds % 86400) / 3600);

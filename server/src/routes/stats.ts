@@ -67,9 +67,7 @@ type Scope = {
 };
 
 /** Finished uploads (revision `r`) that still count. */
-const DONE_UPLOAD = sql.raw(
-	"r.kind = 'upload' AND r.status = 'done' AND r.reverted = 0",
-);
+const DONE_UPLOAD = sql.raw("r.kind = 'upload' AND r.status = 'done'");
 
 /** The uploads of `DONE_UPLOAD` that completed since `since`. */
 const uploadedSince = (since: number) =>

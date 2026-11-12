@@ -26,6 +26,8 @@ export type UploadState =
 			/** Exports that were added to the map, and how many of them could not be. */
 			exports: number;
 			failed: number;
+			/** Files the server left out because they were already uploaded or sent twice. */
+			skipped: SkippedFile[];
 	  }
 	| {
 			phase: "failed";
@@ -49,7 +51,13 @@ export const uploadBusy = () =>
 	uploadState.value.phase === "uploading" ||
 	uploadState.value.phase === "processing";
 
-type ErrorBody = { error?: string; errors?: { file: string; error: string }[] };
+export type SkippedFile = { file: string; reason: string };
+
+type ErrorBody = {
+	error?: string;
+	errors?: { file: string; error: string }[];
+	skipped?: SkippedFile[];
+};
 
 /** Sends the files to the server (with upload progress), then follows the processing job. */
 export function startUpload(dimSlug: string, items: UploadItem[]) {
@@ -91,7 +99,7 @@ export function startUpload(dimSlug: string, items: UploadItem[]) {
 			body = JSON.parse(xhr.responseText);
 		} catch {}
 		if (xhr.status === 202 && body?.revisionIds?.length) {
-			void follow(body.revisionIds);
+			void follow(body.revisionIds, body.skipped ?? []);
 			return;
 		}
 		const reason =
@@ -101,11 +109,18 @@ export function startUpload(dimSlug: string, items: UploadItem[]) {
 					? "Too many uploads. Wait a moment and try again."
 					: xhr.status === 413
 						? "The upload is too large for the server. Send fewer or smaller files."
-						: (body?.error ?? `Upload failed (${xhr.status}).`);
+						: xhr.status === 409 && body?.skipped
+							? body.skipped.length === 1
+								? "This file was already uploaded, so there is nothing new to add."
+								: "All of these files were already uploaded, so there is nothing new to add."
+							: (body?.error ?? `Upload failed (${xhr.status}).`);
 		uploadState.value = {
 			phase: "failed",
 			error: reason,
-			fileErrors: body?.errors ?? [],
+			fileErrors:
+				body?.errors ??
+				body?.skipped?.map((s) => ({ file: s.file, error: s.reason })) ??
+				[],
 		};
 	};
 	xhr.send(form);
@@ -123,12 +138,12 @@ const union = (boxes: Bounds[]): Bounds | null =>
 			);
 
 /** An upload makes one revision per export; they are processed in order, so follow them in order. */
-async function follow(revisionIds: number[]) {
+async function follow(revisionIds: number[], skipped: SkippedFile[]) {
 	const last = revisionIds.at(-1) as number;
 	uploadState.value = {
 		phase: "processing",
 		revisionId: revisionIds[0] as number,
-		message: "Queued",
+		message: "Waiting to start",
 	};
 	void loadRevisions();
 
@@ -176,11 +191,16 @@ async function follow(revisionIds: number[]) {
 				?.slug ?? null,
 		exports: succeeded.length,
 		failed: revisionIds.length - succeeded.length,
+		skipped,
 	};
+	const skippedNote =
+		skipped.length > 0
+			? ` ${skipped.length} duplicate file${skipped.length === 1 ? " was" : "s were"} skipped.`
+			: "";
 	if (firstError) {
-		showNotice(`Some exports failed: ${firstError}`, "error");
+		showNotice(`Some exports failed: ${firstError}${skippedNote}`, "error");
 	} else {
-		showNotice("Upload finished. The map has been updated.");
+		showNotice(`Upload finished. The map has been updated.${skippedNote}`);
 	}
 	await refreshMap();
 	void loadRevisions();

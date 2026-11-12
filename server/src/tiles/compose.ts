@@ -69,23 +69,35 @@ export function downscaleInto(
 ): void {
 	const half = tileSize / 2;
 	const stride = tileSize * 4;
+	// Unrolled over the 2x2 block; the arithmetic must stay exactly as it is, or stored tiles
+	// would no longer hash the same as freshly built ones.
+	const c = child as Uint8Array;
 	for (let py = 0; py < half; py++) {
-		for (let px = 0; px < half; px++) {
-			const s = 2 * py * stride + 2 * px * 4;
-			const offsets = [s, s + 4, s + stride, s + stride + 4];
-			let aSum = 0;
-			let r = 0;
-			let g = 0;
-			let b = 0;
-			for (const o of offsets) {
-				const a = child[o + 3] as number;
-				aSum += a;
-				r += (child[o] as number) * a;
-				g += (child[o + 1] as number) * a;
-				b += (child[o + 2] as number) * a;
-			}
+		let s = 2 * py * stride;
+		let d = ((j * half + py) * tileSize + i * half) * 4;
+		for (let px = 0; px < half; px++, s += 8, d += 4) {
+			const s2 = s + stride;
+			const a0 = c[s + 3] as number;
+			const a1 = c[s + 7] as number;
+			const a2 = c[s2 + 3] as number;
+			const a3 = c[s2 + 7] as number;
+			const aSum = a0 + a1 + a2 + a3;
 			if (aSum === 0) continue;
-			const d = ((j * half + py) * tileSize + i * half + px) * 4;
+			const r =
+				(c[s] as number) * a0 +
+				(c[s + 4] as number) * a1 +
+				(c[s2] as number) * a2 +
+				(c[s2 + 4] as number) * a3;
+			const g =
+				(c[s + 1] as number) * a0 +
+				(c[s + 5] as number) * a1 +
+				(c[s2 + 1] as number) * a2 +
+				(c[s2 + 5] as number) * a3;
+			const b =
+				(c[s + 2] as number) * a0 +
+				(c[s + 6] as number) * a1 +
+				(c[s2 + 2] as number) * a2 +
+				(c[s2 + 6] as number) * a3;
 			parent[d] = Math.round(r / aSum);
 			parent[d + 1] = Math.round(g / aSum);
 			parent[d + 2] = Math.round(b / aSum);

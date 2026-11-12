@@ -27,6 +27,7 @@ import { slugify } from "../slug";
 import { currentMap, type Dimension, user } from "../state";
 import { DIMENSION_THEME_NAMES } from "../theme";
 import { AdminStats } from "./AdminStats";
+import { HistoryRecompute } from "./HistoryRecompute";
 import { InviteLinks } from "./InviteLinks";
 import { BlockIcon } from "./icons";
 import { MembersSection } from "./MembersSection";
@@ -84,6 +85,7 @@ function SettingsTab() {
 				</button>
 			</form>
 			<MaintenanceToggle />
+			<HistoryRecompute />
 		</>
 	);
 }

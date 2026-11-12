@@ -3,12 +3,14 @@ import { eq } from "drizzle-orm";
 import { featureRevisions, layers, revisions } from "../src/db/schema";
 import { resetStatsCache } from "../src/routes/stats";
 import { isModClient } from "../src/uploadClient";
-import type { Auth, TileApp } from "./helpers";
+import type { Auth, Rgb, TileApp } from "./helpers";
 import {
+	BLUE,
 	bootTiles,
 	call,
 	cleanupTempDirs,
 	erase,
+	GREEN,
 	postUpload,
 	RED,
 	solid,
@@ -106,7 +108,7 @@ describe("stats", () => {
 	test("the area history follows the export dates and starts from what was mapped before the range", async () => {
 		const t = await bootTiles();
 		const first = await upload(t, await solid(T, T, RED), 0, 0);
-		await upload(t, await solid(T, T, RED), 0, 0); // the same tile again
+		await upload(t, await solid(T, T, GREEN), 0, 0); // the same tile again
 		await upload(t, await solid(T, T, RED), T * 4, 0, t.mod);
 		await t.db
 			.update(revisions)
@@ -144,11 +146,15 @@ describe("stats", () => {
 	test("uploads from the AOMC Webmapper mod are counted separately, and still as uploads", async () => {
 		const t = await bootTiles();
 		await upload(t, await solid(T, T, RED), 0, 0);
-		const send = async (agent: string | undefined, user = t.editor) => {
+		const send = async (
+			agent: string | undefined,
+			color: Rgb,
+			user = t.editor,
+		) => {
 			const res = await postUpload(
 				t,
 				user,
-				[{ name: "f.png", data: await solid(T, T, RED) }],
+				[{ name: "f.png", data: await solid(T, T, color) }],
 				{
 					coords: [{ x: T * 8, z: 0 }],
 					headers: agent ? { "User-Agent": agent } : {},
@@ -158,9 +164,9 @@ describe("stats", () => {
 			await t.services.worker.run();
 			return ((await res.json()) as { revisionId: number }).revisionId;
 		};
-		const viaMod = await send("AOMC Webmapper/1.2.0 (Fabric 1.21)");
-		await send("Mozilla/5.0 Firefox");
-		await send("aomc-visited/0.9", t.mod); // the mod's older name
+		const viaMod = await send("AOMC Webmapper/1.2.0 (Fabric 1.21)", RED);
+		await send("Mozilla/5.0 Firefox", GREEN);
+		await send("aomc-visited/0.9", BLUE, t.mod); // the mod's older name
 
 		const res = await stats(t, t.editor);
 		expect(res.body.me).toMatchObject({
@@ -217,12 +223,16 @@ describe("stats", () => {
 	test("MOD_USER_AGENTS changes what counts", async () => {
 		const t = await bootTiles({ MOD_USER_AGENTS: "Custom Mod, Old Mod" });
 		expect(t.env.MOD_USER_AGENTS).toEqual(["Custom Mod", "Old Mod"]);
-		for (const agent of ["Custom Mod/1", "old-mod/3", "AOMC Webmapper/1"]) {
+		for (const [i, agent] of [
+			"Custom Mod/1",
+			"old-mod/3",
+			"AOMC Webmapper/1",
+		].entries()) {
 			const res = await postUpload(
 				t,
 				t.editor,
 				[{ name: "f.png", data: await solid(T, T, RED) }],
-				{ coords: [{ x: 0, z: 0 }], headers: { "User-Agent": agent } },
+				{ coords: [{ x: i * T, z: 0 }], headers: { "User-Agent": agent } },
 			);
 			expect(res.status).toBe(202);
 			await t.services.worker.run();

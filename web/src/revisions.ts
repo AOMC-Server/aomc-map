@@ -7,9 +7,11 @@ import { inFlight, mergeRevisions, pageHasGap } from "./revisionLog";
 import {
 	dimSlug,
 	isolatedUpload,
+	mapEpoch,
 	type RevisionInfo,
 	revisionsData,
 } from "./state";
+import { formatProgress } from "./ui/format";
 
 export type Progress = { message?: string; done?: number; total?: number };
 export type Outcome = { status: "done" | "failed"; error: string | null };
@@ -47,10 +49,12 @@ export async function fetchRevision(id: number): Promise<RevisionInfo | null> {
 
 /** The dimension `revisionsData` holds the whole history of. */
 let loadedDim: string | null = null;
+/** The map's epoch when it was loaded: a new one means history was rewritten (revision numbers may have changed). */
+let loadedEpoch: number | null = null;
 
 /**
- * Loads the upload log of the dimension being viewed (newest first): all of it the first time
- * or with `full`, afterwards only what is new or still changing.
+ * Loads the upload log of the dimension being viewed (newest first): all of it the first time,
+ * with `full` or after history was rewritten, otherwise only what is new or still changing.
  */
 export async function loadRevisions(full = false): Promise<void> {
 	const dim = dimSlug.value;
@@ -59,11 +63,13 @@ export async function loadRevisions(full = false): Promise<void> {
 		revisionsData.value = [];
 		return;
 	}
-	if (full || loadedDim !== dim) await loadAll(dim);
+	if (full || loadedDim !== dim || loadedEpoch !== mapEpoch.value)
+		await loadAll(dim);
 	else await refresh(dim);
 }
 
 async function loadAll(dim: string) {
+	const epoch = mapEpoch.value;
 	const all: RevisionInfo[] = [];
 	let before: number | null = null;
 	for (;;) {
@@ -76,6 +82,7 @@ async function loadAll(dim: string) {
 		before = out.nextBefore;
 	}
 	loadedDim = dim;
+	loadedEpoch = epoch;
 	setRevisions(all);
 }
 
@@ -189,13 +196,21 @@ export function watchRevision(
 	});
 }
 
-/** Uploads this browser has asked to delete and are still being erased, with what they are doing. */
-export const deleting = signal<Map<number, string>>(new Map());
+/**
+ * Uploads this browser has asked to delete and are still being erased: a short `label` for a
+ * badge, and `detail` saying what the server is doing.
+ */
+export const deleting = signal<Map<number, { label: string; detail: string }>>(
+	new Map(),
+);
 
-const setDeleting = (id: number, label: string | null) => {
+const setDeleting = (
+	id: number,
+	state: { label: string; detail: string } | null,
+) => {
 	const next = new Map(deleting.value);
-	if (label === null) next.delete(id);
-	else next.set(id, label);
+	if (state === null) next.delete(id);
+	else next.set(id, state);
 	deleting.value = next;
 };
 
@@ -207,7 +222,10 @@ const setDeleting = (id: number, label: string | null) => {
 export async function deleteUpload(id: number): Promise<boolean> {
 	if (deleting.value.has(id)) return false;
 	// Marked busy before the request, so the row cannot be deleted twice meanwhile.
-	setDeleting(id, "deleting…");
+	setDeleting(id, {
+		label: "deleting…",
+		detail: "Waiting for the server to start deleting it",
+	});
 	const out = await run(() =>
 		api.api.revisions[":id"].$delete({ param: { id: String(id) } }),
 	);
@@ -226,10 +244,12 @@ export async function deleteUpload(id: number): Promise<boolean> {
 	const events = new EventSource(`/api/revisions/${id}/events`);
 	events.addEventListener("processing", (e) => {
 		const p = JSON.parse((e as MessageEvent).data) as Progress;
-		setDeleting(
-			id,
-			p.total ? `deleting ${p.done ?? 0}/${p.total}` : `deleting: ${p.message}`,
-		);
+		setDeleting(id, {
+			label: p.total
+				? `deleting ${Math.round(((p.done ?? 0) / p.total) * 100)}%`
+				: "deleting…",
+			detail: formatProgress(p.message ?? "Deleting", p.done, p.total),
+		});
 	});
 	events.onerror = () => events.close();
 

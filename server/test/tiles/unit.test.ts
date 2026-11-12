@@ -79,3 +79,65 @@ describe("downscaleInto", () => {
 		expect(isEmpty(parent.subarray(0, 2 * T * 4))).toBe(true);
 	});
 });
+
+describe("downscaleInto", () => {
+	/** The original, straightforward version; the fast one must match it byte for byte. */
+	function reference(
+		parent: Uint8Array,
+		child: Uint8Array,
+		tileSize: number,
+		i: number,
+		j: number,
+	) {
+		const half = tileSize / 2;
+		const stride = tileSize * 4;
+		for (let py = 0; py < half; py++) {
+			for (let px = 0; px < half; px++) {
+				const s = 2 * py * stride + 2 * px * 4;
+				let aSum = 0;
+				let r = 0;
+				let g = 0;
+				let b = 0;
+				for (const o of [s, s + 4, s + stride, s + stride + 4]) {
+					const a = child[o + 3] as number;
+					aSum += a;
+					r += (child[o] as number) * a;
+					g += (child[o + 1] as number) * a;
+					b += (child[o + 2] as number) * a;
+				}
+				if (aSum === 0) continue;
+				const d = ((j * half + py) * tileSize + i * half + px) * 4;
+				parent[d] = Math.round(r / aSum);
+				parent[d + 1] = Math.round(g / aSum);
+				parent[d + 2] = Math.round(b / aSum);
+				parent[d + 3] = Math.round(aSum / 4);
+			}
+		}
+	}
+
+	test("matches the reference on random tiles with partial transparency", () => {
+		const size = 32;
+		let seed = 7;
+		const rnd = () => {
+			seed = (seed * 1103515245 + 12345) & 0x7fffffff;
+			return seed % 256;
+		};
+		for (let round = 0; round < 20; round++) {
+			const child = Uint8Array.from({ length: size * size * 4 }, (_, k) =>
+				k % 4 === 3 && rnd() < 80 ? 0 : rnd(),
+			);
+			for (const [i, j] of [
+				[0, 0],
+				[1, 0],
+				[0, 1],
+				[1, 1],
+			] as const) {
+				const fast = emptyTile(size);
+				const slow = emptyTile(size);
+				downscaleInto(fast, child, size, i, j);
+				reference(slow, child, size, i, j);
+				expect(fast.equals(slow)).toBe(true);
+			}
+		}
+	});
+});

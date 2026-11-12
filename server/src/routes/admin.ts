@@ -10,6 +10,11 @@ import { sql } from "drizzle-orm";
 import { Hono } from "hono";
 import { requireUser } from "../auth/session";
 import type { Db } from "../db/client";
+import {
+	lastRecompute,
+	lateUploads,
+	queueRecompute,
+} from "../jobs/recomputeHistory";
 import { doc } from "../openapi";
 import { canManage } from "../permissions";
 import { measureStorage } from "../storage";
@@ -243,41 +248,102 @@ function overview(db: Db, now: number) {
 	};
 }
 
-export const adminRoutes = new Hono<AppEnv>().use(requireUser).get(
-	"/stats",
-	doc({
-		tag: "Admin",
-		summary: "Storage, traffic and server statistics",
-		description:
-			"Owners. Storage is summed from recorded image sizes. Traffic counts what this server sent, grouped by the domain that requested tiles and images. `range` is `1h` (per-minute detail), `6h` (5-minute detail), `24h`, `7d` (default), `30d`, `90d` or `all`.",
-		fails: [400, 403],
-		login: true,
-	}),
-	validate("query", adminStatsQuerySchema),
-	(c) => {
-		if (!canManage(c.var.role)) return c.json({ error: "forbidden" }, 403);
-		const { db, svc } = c.var;
-		const { range } = c.req.valid("query");
-		const now = Date.now();
-		const span = RANGE_MS[range];
-		const since = span === null ? 0 : now - span;
-		svc.traffic.flush(now);
+export const adminRoutes = new Hono<AppEnv>()
+	.use(requireUser)
+	.get(
+		"/stats",
+		doc({
+			tag: "Admin",
+			summary: "Storage, traffic and server statistics",
+			description:
+				"Owners. Storage is summed from recorded image sizes. Traffic counts what this server sent, grouped by the domain that requested tiles and images. `range` is `1h` (per-minute detail), `6h` (5-minute detail), `24h`, `7d` (default), `30d`, `90d` or `all`.",
+			fails: [400, 403],
+			login: true,
+		}),
+		validate("query", adminStatsQuerySchema),
+		(c) => {
+			if (!canManage(c.var.role)) return c.json({ error: "forbidden" }, 403);
+			const { db, svc } = c.var;
+			const { range } = c.req.valid("query");
+			const now = Date.now();
+			const span = RANGE_MS[range];
+			const since = span === null ? 0 : now - span;
+			svc.traffic.flush(now);
 
-		return c.json({
-			range,
-			since: span === null ? null : since,
-			now,
-			storage: {
-				current: measureStorage(db),
-				history: storageHistory(db, since),
-			},
-			traffic: {
-				...trafficSeries(db, since, now),
-				range: trafficTotals(db, since),
-				allTime: trafficTotals(db, 0),
-				domains: domainBreakdown(db, since),
-			},
-			overview: overview(db, now),
-		});
-	},
-);
+			return c.json({
+				range,
+				since: span === null ? null : since,
+				now,
+				storage: {
+					current: measureStorage(db),
+					history: storageHistory(db, since),
+				},
+				traffic: {
+					...trafficSeries(db, since, now),
+					range: trafficTotals(db, since),
+					allTime: trafficTotals(db, 0),
+					domains: domainBreakdown(db, since),
+				},
+				overview: overview(db, now),
+			});
+		},
+	)
+	.get(
+		"/history",
+		doc({
+			tag: "Admin",
+			summary: "How the map's history is ordered",
+			description:
+				"Owners. `lateUploads` counts finished uploads published after an upload of the same dimension that was exported later; looking at the map as of one of them also shows those newer exports. `recompute` is the newest history recompute (null if there never was one): its `status`, `error` when it failed, and while it runs, `progress` (`message`, and `done` of `total` steps where known).",
+			fails: [403],
+			login: true,
+		}),
+		(c) => {
+			if (!canManage(c.var.role)) return c.json({ error: "forbidden" }, 403);
+			const { db, svc } = c.var;
+			const job = lastRecompute(db);
+			const progress = svc.worker.recomputeProgress();
+			return c.json({
+				lateUploads: lateUploads(db),
+				recompute: job
+					? {
+							status: job.status,
+							error: job.error,
+							queuedAt: job.createdAt,
+							completedAt: job.completedAt,
+							progress:
+								job.status === "processing" && progress
+									? {
+											message: progress.message,
+											done: progress.done ?? null,
+											total: progress.total ?? null,
+										}
+									: null,
+						}
+					: null,
+			});
+		},
+	)
+	.post(
+		"/history/recompute",
+		doc({
+			tag: "Admin",
+			summary: "Recompute the history in export order",
+			description:
+				"Owners. Queues a job that renumbers every finished upload by export date (across all dimensions) and rebuilds every past revision of the map from that order, so the map as of an upload holds exactly the uploads exported up to then. The newest map stays the same. Revision numbers change, so links to a `rev` afterwards show a different moment. Follow it with `GET /api/admin/history`.",
+			ok: { 202: "Queued" },
+			fails: [403, 409],
+			login: true,
+		}),
+		(c) => {
+			if (!canManage(c.var.role)) return c.json({ error: "forbidden" }, 403);
+			const { db, svc } = c.var;
+			if (!queueRecompute(db))
+				return c.json(
+					{ error: "a recompute is already queued or running" },
+					409,
+				);
+			svc.worker.kick();
+			return c.json({ ok: true }, 202);
+		},
+	);
