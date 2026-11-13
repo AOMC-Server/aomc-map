@@ -1,5 +1,10 @@
 import type { Dye } from "@aomc/shared/colors";
-import { type FeatureInput, MAX_NAME } from "@aomc/shared/features";
+import {
+	cleanStyle,
+	type FeatureInput,
+	type FeatureStyle,
+	MAX_NAME,
+} from "@aomc/shared/features";
 import { signal } from "@preact/signals";
 import { useEffect, useState } from "preact/hooks";
 import { showNotice } from "../api";
@@ -39,6 +44,7 @@ import { Grip } from "./Grip";
 import { Banner } from "./icons";
 import { layerSharingFor } from "./LayerSharing";
 import { Panel } from "./Panel";
+import { StyleControls } from "./StyleControls";
 
 /** Layers that are expanded in the list; kept when the panel is closed and reopened. */
 const openLayers = signal<Set<number>>(new Set());
@@ -84,6 +90,7 @@ function LayerForm(props: {
 	const [color, setColor] = useState<Dye>(l?.color ?? "red");
 	const [hidden, setHidden] = useState(l?.hiddenByDefault ?? false);
 	const [priv, setPriv] = useState(l?.visibility === "private");
+	const [style, setStyle] = useState<FeatureStyle>(l?.style ?? {});
 	const [busy, setBusy] = useState(false);
 	// Whoever creates a layer may make it private; afterwards that is up to its creator or a moderator.
 	const canSetVisibility = !l || l.canManage;
@@ -101,12 +108,14 @@ function LayerForm(props: {
 						color,
 						hiddenByDefault: hidden,
 						visibility,
+						style: cleanStyle(style),
 					})
 				: (await createLayer({
 						name: name.trim(),
 						color,
 						hiddenByDefault: hidden,
 						visibility,
+						style: cleanStyle(style),
 					})) !== null;
 		} finally {
 			setBusy(false);
@@ -129,6 +138,13 @@ function LayerForm(props: {
 				value={color}
 				onChange={(d) => d && setColor(d)}
 			/>
+			<details class="layer-style">
+				<summary>Default style of lines and areas</summary>
+				<p class="hint">
+					Used by every line and area in this layer that does not set its own.
+				</p>
+				<StyleControls kind="layer" style={style} onChange={setStyle} />
+			</details>
 			<label class="check">
 				<input
 					type="checkbox"

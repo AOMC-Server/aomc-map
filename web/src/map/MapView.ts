@@ -1,3 +1,5 @@
+import type { Dye } from "@aomc/shared/colors";
+import type { FeatureStyle } from "@aomc/shared/features";
 import type { PreloadRing } from "@aomc/shared/schemas";
 import {
 	blockToScreen,
@@ -254,6 +256,15 @@ export class MapView {
 	/** Replaces the features drawn on the map (only the layers that should be visible). */
 	setFeatures(layers: RenderLayer[]) {
 		this.features.setFeatures(layers);
+	}
+
+	/** Previews the feature being edited in its new shape and style (null: stop); see FeatureLayer.setDraft. */
+	setDraftFeature(
+		layer: { id: number; color: Dye; style?: FeatureStyle | null },
+		feature: Parameters<FeatureLayer["setDraft"]>[1],
+		replaces: number | null,
+	) {
+		this.features.setDraft(layer, feature, replaces);
 	}
 
 	/** Highlights one feature (e.g. the one being edited or shown in a popup). */

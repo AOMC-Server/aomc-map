@@ -1,4 +1,5 @@
 import {
+	cleanStyle,
 	createLayerSchema,
 	featureImportSchema,
 	featureInputSchema,
@@ -75,6 +76,7 @@ function serializeLayer(layer: LayerRow, canEdit: boolean, canManage: boolean) {
 		name: layer.name,
 		color: layer.color,
 		hiddenByDefault: layer.hiddenByDefault,
+		style: layer.style,
 		visibility: layer.visibility,
 		sortOrder: layer.sortOrder,
 		createdBy: layer.createdBy,
@@ -213,6 +215,7 @@ export const layerRoutes = new Hono<AppEnv>()
 						name: body.name,
 						color: body.color,
 						hiddenByDefault: body.hiddenByDefault,
+						style: cleanStyle(body.style),
 						visibility: body.visibility,
 						sortOrder: nextSortOrder(existing),
 						createdBy: user.id,
@@ -289,7 +292,7 @@ export const layerRoutes = new Hono<AppEnv>()
 			tag: "Layers",
 			summary: "Update a layer",
 			description:
-				"Name, colour, `hiddenByDefault` and visibility. Order is changed with `POST /api/layers/reorder`.",
+				"Name, colour, `hiddenByDefault`, visibility and `style` (the default look of its lines and areas; null clears it). Order is changed with `POST /api/layers/reorder`.",
 			fails: [400, 403, 404, 429],
 			login: true,
 		}),
@@ -315,7 +318,11 @@ export const layerRoutes = new Hono<AppEnv>()
 			const updated = db.transaction((tx) => {
 				const row = tx
 					.update(layers)
-					.set(body)
+					.set({
+						...body,
+						style:
+							body.style === undefined ? undefined : cleanStyle(body.style),
+					})
 					.where(and(eq(layers.id, found.layer.id), isNull(layers.deletedAt)))
 					.returning()
 					.get();
@@ -455,7 +462,8 @@ export const layerRoutes = new Hono<AppEnv>()
 		doc({
 			tag: "Layers",
 			summary: "Export a layer as JSON",
-			description: "An array of `{type, name, popup, color, geometry}`.",
+			description:
+				"An array of `{type, name, popup, color, style, geometry}`; `style` is only there for lines and areas.",
 			fails: [404],
 		}),
 		async (c) => {

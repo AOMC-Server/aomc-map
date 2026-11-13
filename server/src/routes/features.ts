@@ -92,6 +92,7 @@ export const featureRoutes = new Hono<AppEnv>()
 					name: patch.name ?? current.name,
 					popup: patch.popup ?? current.popup,
 					color: patch.color === undefined ? current.color : patch.color,
+					style: patch.style === undefined ? current.style : patch.style,
 					geometry: patch.geometry ?? current.geometry,
 				});
 				if (!merged.success)

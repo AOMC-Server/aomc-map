@@ -1,0 +1,1 @@
+ALTER TABLE `feature_revisions` ADD `style` text;

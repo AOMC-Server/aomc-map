@@ -2,6 +2,7 @@ import {
 	DEFAULT_PRELOAD,
 	DIMENSION_THEMES,
 	FEATURE_TYPES,
+	type FeatureStyle,
 	inviteRoleSchema,
 	layerRoleSchema,
 	layerVisibilitySchema,
@@ -231,6 +232,8 @@ export const layers = sqliteTable(
 		name: text("name").notNull(),
 		color: text("color").notNull(),
 		hiddenByDefault: bool("hidden_by_default").notNull().default(false),
+		/** How the lines and areas of the layer are drawn unless they say otherwise; null: the defaults. */
+		style: text("style", { mode: "json" }).$type<FeatureStyle>(),
 		visibility: text("visibility", { enum: options(layerVisibilitySchema) })
 			.notNull()
 			.default("public"),
@@ -288,6 +291,8 @@ export const featureRevisions = sqliteTable(
 		name: text("name").notNull(),
 		popup: text("popup").notNull().default(""),
 		color: text("color"),
+		/** How a line or an area is drawn; null: the defaults. */
+		style: text("style", { mode: "json" }).$type<FeatureStyle>(),
 		geometry: text("geometry", { mode: "json" }).notNull(),
 	},
 	(t) => [

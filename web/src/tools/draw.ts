@@ -1,3 +1,4 @@
+import { draftLook } from "../state";
 import { createShapeEditor } from "./shape";
 
 export {
@@ -13,6 +14,8 @@ export {
  * the feature being made.
  */
 export const featureShape = createShapeEditor({
+	smooth: () => draftLook.value?.smooth ?? false,
+	mapDrawsShape: () => draftLook.value !== null,
 	style: {
 		line: "#ffe866",
 		first: "#52a535",

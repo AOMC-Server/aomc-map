@@ -1,8 +1,11 @@
 import { mapView } from "../controller";
-import { featureTitle, TYPE_LABEL } from "../featureInfo";
+import { featureStats, featureTitle, TYPE_LABEL } from "../featureInfo";
 import { deleteFeature } from "../layers";
+import { resolveStyle } from "../map/featureStyle";
 import { canEditMap, editor, embed, layersData, popup, view } from "../state";
+import { dyeScope } from "../theme";
 import { measureFrom } from "../tools/measure";
+import { formatBlocks } from "../tools/measureMath";
 import { featureHistoryFor } from "./FeatureHistory";
 import { Banner } from "./icons";
 import { PopupText } from "./PopupText";
@@ -29,110 +32,132 @@ export function Popup() {
 	const dye = feature.color ?? layer.color;
 	const editable = layer.canEdit && canEditMap.value;
 	const spot = p.at;
+	const stats = featureStats(
+		feature,
+		resolveStyle(feature.style, feature.type === "polygon", layer.style).smooth,
+	);
 
 	return (
-		<div
-			class={`popup ${placeBelow ? "below" : ""}`}
-			style={{ left: `${left}px`, top: `${top}px` }}
-			role="dialog"
-			aria-label={featureTitle(feature)}
-		>
-			<button
-				type="button"
-				class="btn small close popup-close"
-				aria-label="Close"
-				onClick={() => (popup.value = null)}
+		<div class="dye-scope" {...dyeScope(dye)}>
+			<div
+				class={`popup ${placeBelow ? "below" : ""}`}
+				style={{ left: `${left}px`, top: `${top}px` }}
+				role="dialog"
+				aria-label={featureTitle(feature)}
 			>
-				×
-			</button>
-			<h3 class={`dye-${dye}`}>
-				<Banner dye={dye} />
-				{featureTitle(feature)}
-			</h3>
-			<div class="popup-meta">
-				<span class="popup-kind">
-					{TYPE_LABEL[feature.type]} · {layer.name}
-				</span>
 				<button
 					type="button"
-					class="plain popup-coords"
-					title="Copy the coordinates (x, z)"
-					onClick={() =>
-						void copyText(`${spot.x}, ${spot.z}`, `Copied ${spot.x}, ${spot.z}`)
-					}
+					class="btn small close popup-close"
+					aria-label="Close"
+					onClick={() => (popup.value = null)}
 				>
-					{spot.x}, {spot.z}
+					×
 				</button>
-			</div>
-			{feature.popup && <PopupText text={feature.popup} />}
-			<div class="popup-footer">
-				<div class="popup-actions">
+				<h3 class={`dye-${dye}`}>
+					<Banner dye={dye} />
+					{featureTitle(feature)}
+				</h3>
+				<div class="popup-meta">
+					<span class="popup-kind">
+						{TYPE_LABEL[feature.type]} · {layer.name}
+					</span>
 					<button
 						type="button"
-						class="btn small"
-						title="Copy a waypoint for Xaero's Minimap; paste it in Minecraft chat to share it"
+						class="plain popup-coords"
+						title="Copy the coordinates (x, z)"
 						onClick={() =>
-							copyWaypoint({ name: feature.name, ...spot, color: dye })
+							void copyText(
+								`${spot.x}, ${spot.z}`,
+								`Copied ${spot.x}, ${spot.z}`,
+							)
 						}
 					>
-						Copy waypoint
+						{spot.x}, {spot.z}
 					</button>
-					{!embed.value && (
-						<button
-							type="button"
-							class="btn small"
-							title="Measure from here"
-							onClick={() => {
-								popup.value = null;
-								measureFrom(spot);
-							}}
-						>
-							Measure
-						</button>
-					)}
 				</div>
-				<div class="popup-actions">
-					{editable && (
+				{(stats.length !== undefined || stats.area !== undefined) && (
+					<p class="popup-stats">
+						{stats.length !== undefined && (
+							<span>Length: {formatBlocks(stats.length)} blocks</span>
+						)}
+						{stats.perimeter !== undefined && (
+							<span>Perimeter: {formatBlocks(stats.perimeter)} blocks</span>
+						)}
+						{stats.area !== undefined && (
+							<span>Area: {formatBlocks(stats.area)} blocks²</span>
+						)}
+					</p>
+				)}
+				{feature.popup && <PopupText text={feature.popup} />}
+				<div class="popup-footer">
+					<div class="popup-actions">
+						<button
+							type="button"
+							class="btn small"
+							title="Copy a waypoint for Xaero's Minimap; paste it in Minecraft chat to share it"
+							onClick={() =>
+								copyWaypoint({ name: feature.name, ...spot, color: dye })
+							}
+						>
+							Copy waypoint
+						</button>
+						{!embed.value && (
+							<button
+								type="button"
+								class="btn small"
+								title="Measure from here"
+								onClick={() => {
+									popup.value = null;
+									measureFrom(spot);
+								}}
+							>
+								Measure
+							</button>
+						)}
+					</div>
+					<div class="popup-actions">
+						{editable && (
+							<button
+								type="button"
+								class="btn small"
+								onClick={() => {
+									popup.value = null;
+									editor.value = {
+										mode: "edit",
+										layerId: layer.id,
+										featureId: feature.id,
+									};
+								}}
+							>
+								Edit
+							</button>
+						)}
 						<button
 							type="button"
 							class="btn small"
 							onClick={() => {
-								popup.value = null;
-								editor.value = {
-									mode: "edit",
-									layerId: layer.id,
+								featureHistoryFor.value = {
 									featureId: feature.id,
+									title: featureTitle(feature),
 								};
 							}}
 						>
-							Edit
+							History
 						</button>
-					)}
-					<button
-						type="button"
-						class="btn small"
-						onClick={() => {
-							featureHistoryFor.value = {
-								featureId: feature.id,
-								title: featureTitle(feature),
-							};
-						}}
-					>
-						History
-					</button>
-					{editable && (
-						<button
-							type="button"
-							class="btn small danger"
-							onClick={async () => {
-								if (!confirm(`Delete "${featureTitle(feature)}"?`)) return;
-								popup.value = null;
-								await deleteFeature(feature.id);
-							}}
-						>
-							Delete
-						</button>
-					)}
+						{editable && (
+							<button
+								type="button"
+								class="btn small danger"
+								onClick={async () => {
+									if (!confirm(`Delete "${featureTitle(feature)}"?`)) return;
+									popup.value = null;
+									await deleteFeature(feature.id);
+								}}
+							>
+								Delete
+							</button>
+						)}
+					</div>
 				</div>
 			</div>
 		</div>

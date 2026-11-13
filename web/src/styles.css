@@ -267,6 +267,117 @@
 	color-scheme: light;
 }
 
+/*
+ * Dye palettes, for the tooltip and popup of a feature: the surfaces take a muted hint of the
+ * feature's colour (--dye) and the title bars a darker shade of it, so each reads as a theme of
+ * its own, like the dimensions' palettes. --dye-k scales how much colour (1 for popups; the
+ * small, brief tooltip is stronger). Anything not set here (buttons, links, the shadow) is the
+ * page's.
+ */
+[data-palette^="dye-"][data-mode="dark"] {
+	--ink: color-mix(in srgb, var(--dye) calc(14% * var(--dye-k, 1)), #0f0f10);
+	--well: var(--ink);
+	--s1: color-mix(in srgb, var(--dye) calc(20% * var(--dye-k, 1)), #262627);
+	--s2: color-mix(in srgb, var(--dye) calc(26% * var(--dye-k, 1)), #333334);
+	--s3: color-mix(in srgb, var(--dye) calc(30% * var(--dye-k, 1)), #404041);
+	--s4: color-mix(in srgb, var(--dye) calc(34% * var(--dye-k, 1)), #525253);
+	--card-lo: color-mix(
+		in srgb,
+		var(--dye) calc(18% * var(--dye-k, 1)),
+		#1c1c1d
+	);
+	--sheen: rgba(255, 255, 255, 0.07);
+	--text: #ffffff;
+	--muted: color-mix(in srgb, var(--dye) calc(22% * var(--dye-k, 1)), #c2c2c5);
+	--faint: color-mix(in srgb, var(--dye) calc(22% * var(--dye-k, 1)), #97979a);
+	--focus: #ffffff;
+	--chrome: color-mix(in srgb, var(--dye) 62%, #000);
+}
+
+[data-palette^="dye-"][data-mode="light"] {
+	--ink: color-mix(in srgb, var(--dye) calc(30% * var(--dye-k, 1)), #1e1e1f);
+	--well: color-mix(in srgb, var(--dye) calc(7% * var(--dye-k, 1)), #f6f6f6);
+	--s1: color-mix(in srgb, var(--dye) calc(26% * var(--dye-k, 1)), #cacaca);
+	--s2: color-mix(in srgb, var(--dye) calc(18% * var(--dye-k, 1)), #dadada);
+	--s3: color-mix(in srgb, var(--dye) calc(12% * var(--dye-k, 1)), #e7e7e7);
+	--s4: color-mix(in srgb, var(--dye) calc(36% * var(--dye-k, 1)), #8e8e8e);
+	--card-lo: color-mix(
+		in srgb,
+		var(--dye) calc(30% * var(--dye-k, 1)),
+		#aaaaaa
+	);
+	--sheen: rgba(255, 255, 255, 0.7);
+	--text: #1e1e1f;
+	--muted: color-mix(in srgb, var(--dye) calc(18% * var(--dye-k, 1)), #4d4d50);
+	--faint: color-mix(in srgb, var(--dye) calc(18% * var(--dye-k, 1)), #707074);
+	--focus: #1e1e1f;
+	--chrome: color-mix(in srgb, var(--dye) 62%, #000);
+}
+
+[data-palette="dye-black"] {
+	--dye: #1d1d21;
+}
+
+[data-palette="dye-blue"] {
+	--dye: #4952cc;
+}
+
+[data-palette="dye-brown"] {
+	--dye: #a55e2a;
+}
+
+[data-palette="dye-cyan"] {
+	--dye: #1ccfc0;
+}
+
+[data-palette="dye-gray"] {
+	--dye: #747d80;
+}
+
+[data-palette="dye-green"] {
+	--dye: #749a1a;
+}
+
+[data-palette="dye-light_blue"] {
+	--dye: #3fc3ef;
+}
+
+[data-palette="dye-light_gray"] {
+	--dye: #aeaeab;
+}
+
+[data-palette="dye-lime"] {
+	--dye: #80c71f;
+}
+
+[data-palette="dye-magenta"] {
+	--dye: #d150c6;
+}
+
+[data-palette="dye-orange"] {
+	--dye: #f9801d;
+}
+
+[data-palette="dye-pink"] {
+	--dye: #ff9bb9;
+}
+
+[data-palette="dye-purple"] {
+	--dye: #8932b8;
+}
+
+[data-palette="dye-red"] {
+	--dye: #e1372e;
+}
+
+[data-palette="dye-white"] {
+	--dye: #eeeeee;
+}
+
+[data-palette="dye-yellow"] {
+	--dye: #fed83d;
+}
+
 /* Bedrock / minecraft.net: flat layers, thick dark outlines, a solid depth edge under buttons. */
 :root,
 [data-style="bedrock"] {
@@ -1737,6 +1848,48 @@ body.resizing {
 }
 
 /* Feature editor */
+.layer-style {
+	margin: 4px 0;
+}
+
+.layer-style summary {
+	cursor: pointer;
+	font-weight: 600;
+}
+
+.layer-style .hint {
+	margin: 6px 0 0;
+}
+
+.style-controls .slider {
+	display: block;
+	margin-top: 8px;
+	font-size: 13px;
+}
+
+.style-controls .slider input[type="range"] {
+	margin: 6px 0 2px;
+}
+
+.style-controls .check {
+	margin-top: 8px;
+}
+
+.style-controls .sublabel {
+	display: block;
+	margin-top: 10px;
+	font-size: 13px;
+	color: var(--muted);
+}
+
+.style-controls .segmented.wrap {
+	flex-wrap: wrap;
+}
+
+.style-controls .group {
+	margin-top: 10px;
+}
+
 .editor-layer {
 	display: flex;
 	align-items: center;
@@ -2101,6 +2254,15 @@ body.resizing {
 /* ---------------------------------------------------------------------------------------------
  * Feature popup
  * ------------------------------------------------------------------------------------------- */
+/* Carries the attributes of a dye palette without taking part in the layout. */
+.dye-scope {
+	display: contents;
+}
+
+.dye-scope.strong {
+	--dye-k: 1.85;
+}
+
 .popup {
 	border-radius: var(--radius);
 	overflow: hidden;
@@ -2168,6 +2330,17 @@ body.resizing {
 }
 
 /* Long texts scroll inside the popup instead of stretching it over the map. */
+.popup-stats {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 2px 12px;
+	margin: 0;
+	padding: 4px 12px 0;
+	font-size: 13px;
+	font-variant-numeric: tabular-nums;
+	color: var(--muted);
+}
+
 .popup-text {
 	max-height: min(30vh, 220px);
 	overflow-y: auto;
@@ -3600,7 +3773,7 @@ body.resizing {
 	.slot-tip {
 		--muted: #444;
 		color: #000;
-		background: #ffffe1;
+		background: color-mix(in srgb, var(--dye, #ffffe1) 27%, #ffffe1);
 		border: 1px solid #000;
 		box-shadow: none;
 	}
@@ -3687,7 +3860,7 @@ body.resizing {
 	.slot-tip {
 		--muted: #444;
 		color: #000;
-		background: #ffffe1;
+		background: color-mix(in srgb, var(--dye, #ffffe1) 27%, #ffffe1);
 		border: 1px solid #000;
 		box-shadow: 2px 2px 3px rgba(0, 0, 0, 0.35);
 	}

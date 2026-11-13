@@ -244,6 +244,71 @@ describe("feature validation", () => {
 			},
 			false,
 		],
+		[
+			"line style",
+			{
+				type: "line",
+				name: "x",
+				geometry: line,
+				style: { dash: "dotted", width: 10, opacity: 0.5 },
+			},
+			true,
+		],
+		[
+			"area style",
+			{
+				type: "polygon",
+				name: "x",
+				geometry: triangle,
+				style: { fill: "crosshatch", fillOpacity: 0, dash: "dashed" },
+			},
+			true,
+		],
+		[
+			"smooth line",
+			{ type: "line", name: "x", geometry: line, style: { smooth: true } },
+			true,
+		],
+		[
+			"smooth that is not a boolean",
+			{ type: "line", name: "x", geometry: line, style: { smooth: "yes" } },
+			false,
+		],
+		[
+			"line style with an unknown dash",
+			{ type: "line", name: "x", geometry: line, style: { dash: "wavy" } },
+			false,
+		],
+		[
+			"line thicker than the limit",
+			{ type: "line", name: "x", geometry: line, style: { width: 11 } },
+			false,
+		],
+		[
+			"line with a fractional width",
+			{ type: "line", name: "x", geometry: line, style: { width: 2.5 } },
+			false,
+		],
+		[
+			"invisible line",
+			{ type: "line", name: "x", geometry: line, style: { opacity: 0 } },
+			false,
+		],
+		[
+			"fill opacity above 1",
+			{
+				type: "polygon",
+				name: "x",
+				geometry: triangle,
+				style: { fillOpacity: 1.5 },
+			},
+			false,
+		],
+		[
+			"style with an unknown field",
+			{ type: "line", name: "x", geometry: line, style: { glow: true } },
+			false,
+		],
 		["polygon", { type: "polygon", name: "x", geometry: triangle }, true],
 		[
 			"polygon with two points",
@@ -714,6 +779,7 @@ describe("export and import", () => {
 				name: "Road",
 				popup: "",
 				color: null,
+				style: null,
 				geometry: [
 					[0, 0],
 					[100, 100],
@@ -1428,5 +1494,168 @@ describe("feature geometry", () => {
 				"polygon",
 			),
 		).toBe(true);
+	});
+});
+
+describe("feature style", () => {
+	const road = (style: object | null = null) => ({
+		type: "line",
+		name: "Road",
+		geometry: [
+			[0, 0],
+			[100, 100],
+		],
+		style,
+	});
+
+	test("is saved, listed, edited, restored and exported; pins have none", async () => {
+		const t = await bootTiles();
+		const layer = await makeLayer(t);
+		const base = `/api/layers/${layer.id}`;
+		const style = { dash: "dashed", width: 6, opacity: 0.5 };
+		const created = await call(
+			t,
+			t.editor,
+			"POST",
+			`${base}/features`,
+			road(style),
+		);
+		expect(created.status).toBe(201);
+		expect(created.body.feature.style).toEqual(style);
+		const id = created.body.feature.id as number;
+		const first = created.body.feature.revisionId as number;
+
+		const listed = await call(t, null, "GET", "/api/layers");
+		expect(listed.body.layers[0].features[0].style).toEqual(style);
+
+		// A patch without a style keeps it; null and an empty style clear it.
+		const renamed = await call(t, t.editor, "PATCH", `/api/features/${id}`, {
+			name: "Highway",
+		});
+		expect(renamed.body.feature.style).toEqual(style);
+		const dotted = await call(t, t.editor, "PATCH", `/api/features/${id}`, {
+			style: { dash: "dotted" },
+		});
+		expect(dotted.body.feature.style).toEqual({ dash: "dotted" });
+		const cleared = await call(t, t.editor, "PATCH", `/api/features/${id}`, {
+			style: {},
+		});
+		expect(cleared.body.feature.style).toBeNull();
+		const bad = await call(t, t.editor, "PATCH", `/api/features/${id}`, {
+			style: { width: 99 },
+		});
+		expect(bad.status).toBe(400);
+
+		const restored = await call(
+			t,
+			t.mod,
+			"POST",
+			`/api/features/${id}/restore/${first}`,
+		);
+		expect(restored.body.feature.style).toEqual(style);
+		const history = await call(t, null, "GET", `/api/features/${id}/history`);
+		expect(
+			history.body.history.map((h: { style: unknown }) => h.style),
+		).toEqual([style, null, { dash: "dotted" }, style, style]);
+
+		const exported = await call(t, null, "GET", `${base}/export`);
+		expect(exported.body[0].style).toEqual(style);
+		await call(t, t.editor, "POST", `${base}/import?replace=1`, exported.body);
+		const again = await call(t, null, "GET", `${base}/export`);
+		expect(again.body).toEqual(exported.body);
+
+		const pinned = await call(t, t.editor, "POST", `${base}/features`, {
+			...pin(),
+			style: { width: 5 },
+		});
+		expect(pinned.status).toBe(201);
+		expect(pinned.body.feature.style).toBeNull();
+	});
+
+	test("an empty style is stored as none", async () => {
+		const t = await bootTiles();
+		const layer = await makeLayer(t);
+		const created = await call(
+			t,
+			t.editor,
+			"POST",
+			`/api/layers/${layer.id}/features`,
+			road({}),
+		);
+		expect(created.body.feature.style).toBeNull();
+	});
+
+	test("turning a styled line into a pin drops the style", async () => {
+		const t = await bootTiles();
+		const layer = await makeLayer(t);
+		const created = await call(
+			t,
+			t.editor,
+			"POST",
+			`/api/layers/${layer.id}/features`,
+			road({ width: 8 }),
+		);
+		const out = await call(
+			t,
+			t.editor,
+			"PATCH",
+			`/api/features/${created.body.feature.id}`,
+			{ type: "pin", geometry: [1, 2] },
+		);
+		expect(out.status).toBe(200);
+		expect(out.body.feature.style).toBeNull();
+	});
+});
+
+describe("layer default style", () => {
+	test("is set on creation, changed, cleared and validated", async () => {
+		const t = await bootTiles();
+		const style = { dash: "dotted", width: 4, fill: "stripes", smooth: true };
+		const layer = await makeLayer(t, t.editor, { style });
+		const first = (await call(t, null, "GET", "/api/layers")).body.layers[0];
+		expect(first.style).toEqual(style);
+
+		const patched = await call(
+			t,
+			t.editor,
+			"PATCH",
+			`/api/layers/${layer.id}`,
+			{
+				style: { opacity: 0.5 },
+			},
+		);
+		expect(patched.body.layer.style).toEqual({ opacity: 0.5 });
+		// A patch of something else leaves it alone.
+		const renamed = await call(
+			t,
+			t.editor,
+			"PATCH",
+			`/api/layers/${layer.id}`,
+			{
+				name: "Roads",
+			},
+		);
+		expect(renamed.body.layer.style).toEqual({ opacity: 0.5 });
+		const cleared = await call(
+			t,
+			t.editor,
+			"PATCH",
+			`/api/layers/${layer.id}`,
+			{
+				style: {},
+			},
+		);
+		expect(cleared.body.layer.style).toBeNull();
+		const bad = await call(t, t.editor, "PATCH", `/api/layers/${layer.id}`, {
+			style: { width: 0 },
+		});
+		expect(bad.status).toBe(400);
+	});
+
+	test("a layer starts without one", async () => {
+		const t = await bootTiles();
+		await makeLayer(t);
+		const list = (await call(t, null, "GET", "/api/layers")).body.layers;
+		expect(list[0].style).toBeNull();
 	});
 });

@@ -1,4 +1,9 @@
-import type { FeatureInput, FeatureType } from "@aomc/shared";
+import {
+	cleanStyle,
+	type FeatureInput,
+	type FeatureStyle,
+	type FeatureType,
+} from "@aomc/shared";
 import { and, desc, eq, inArray, lte, sql } from "drizzle-orm";
 import type { Db } from "./db/client";
 import { featureRevisions, features } from "./db/schema";
@@ -11,6 +16,8 @@ export type FeatureView = {
 	name: string;
 	popup: string;
 	color: string | null;
+	/** How a line or an area is drawn; null: the defaults. */
+	style: FeatureStyle | null;
 	geometry: unknown;
 	authorId: string;
 	updatedAt: number;
@@ -30,6 +37,7 @@ export function toView(
 		name: r.name,
 		popup: r.popup,
 		color: r.color,
+		style: r.style,
 		geometry: r.geometry,
 		authorId: r.authorId,
 		updatedAt: r.createdAt,
@@ -118,13 +126,18 @@ export type RevisionContent = FeatureInput & { deleted?: boolean };
 
 /** The editable fields of a revision, as FeatureInput. */
 export const contentOf = (
-	r: Pick<FeatureView, "type" | "name" | "popup" | "color" | "geometry">,
+	r: Pick<
+		FeatureView,
+		"type" | "name" | "popup" | "color" | "style" | "geometry"
+	>,
 ) =>
 	({
 		type: r.type,
 		name: r.name,
 		popup: r.popup,
 		color: r.color,
+		// Only lines and areas have a style.
+		...(r.type === "pin" ? {} : { style: r.style }),
 		geometry: r.geometry,
 	}) as FeatureInput;
 
@@ -144,6 +157,11 @@ export function insertRevision(
 			name: content.name,
 			popup: content.popup,
 			color: content.color,
+			// Only lines and areas have a style, and an empty one is none.
+			style:
+				content.type === "pin"
+					? null
+					: cleanStyle("style" in content ? content.style : null),
 			geometry: content.geometry,
 		})
 		.returning()

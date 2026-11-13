@@ -68,11 +68,29 @@ export type Appearance = {
 	style: StyleId;
 };
 
+/** The appearance that is applied now, for things that carry a look of their own on top of it. */
+export const appearance = signal<Appearance | null>(null);
+
 export function applyAppearance(a: Appearance) {
 	const root = document.documentElement.dataset;
 	root.mode = a.mode;
 	root.palette = a.palette;
 	root.style = a.style;
+	appearance.value = a;
+}
+
+/**
+ * Attributes that give an element the palette of a dye, in the mode and style in use. The mode
+ * and style are repeated because the tokens derived from them are worked out where they are
+ * declared; see "Appearance" in styles.css.
+ */
+export function dyeScope(dye: string | undefined): Record<string, string> {
+	if (!dye) return {};
+	const a = appearance.peek();
+	return {
+		"data-palette": `dye-${dye}`,
+		...(a ? { "data-mode": a.mode, "data-style": a.style } : {}),
+	};
 }
 
 /**

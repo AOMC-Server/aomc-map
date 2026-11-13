@@ -1,6 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import type { View } from "@aomc/shared/view";
 import { FeatureLayer, type RenderLayer } from "./featureLayer";
+import { distToPolyline, type Pt } from "./geometry";
+import { smoothShape } from "./smooth";
 
 const size = { width: 1000, height: 700 };
 const view: View = { centerX: 0, centerZ: 250, zoom: 0 };
@@ -211,5 +213,175 @@ describe("FeatureLayer.draw", () => {
 		expect(labels).toBe(1);
 		const hit = l.hitTest(v, size, 500.5, 350.5);
 		expect(hit?.kind).toBe("cluster");
+	});
+});
+
+describe("FeatureLayer styles", () => {
+	const v: View = { centerX: 0, centerZ: 0, zoom: 0 };
+	const line = (id: number, style: object | null) => ({
+		id,
+		layerId: 1,
+		type: "line" as const,
+		name: `line${id}`,
+		popup: "",
+		color: null,
+		style,
+		geometry: [
+			[-100, 0],
+			[100, 0],
+		],
+	});
+	const area = (style: object | null) => ({
+		id: 9,
+		layerId: 1,
+		type: "polygon" as const,
+		name: "Area",
+		popup: "",
+		color: null,
+		style,
+		geometry: [
+			[-100, -100],
+			[100, -100],
+			[100, 100],
+			[-100, 100],
+		],
+	});
+	const layerOf = (
+		...features: ReturnType<typeof line>[] | ReturnType<typeof area>[]
+	) => ({ id: 1, color: "red", features }) as RenderLayer;
+
+	test("a thick line is hit from further away", () => {
+		const thin = new FeatureLayer(() => {});
+		thin.setFeatures([layerOf(line(1, null))]);
+		const thick = new FeatureLayer(() => {});
+		thick.setFeatures([layerOf(line(1, { width: 10 }))]);
+		// Eight pixels off the line: outside the default tolerance (7), inside a 10 px line's (9).
+		expect(thin.hitTest(v, size, 500.5, 350.5 + 8)).toBeNull();
+		expect(name(thick.hitTest(v, size, 500.5, 350.5 + 8))).toBe("line1");
+	});
+
+	test("an area without a fill is only hit on its edge", () => {
+		const filled = new FeatureLayer(() => {});
+		filled.setFeatures([layerOf(area(null))]);
+		const hollow = new FeatureLayer(() => {});
+		hollow.setFeatures([layerOf(area({ fill: "none" }))]);
+		expect(name(filled.hitTest(v, size, 500, 350))).toBe("Area");
+		expect(hollow.hitTest(v, size, 500, 350)).toBeNull();
+		expect(name(hollow.hitTest(v, size, 600.5, 350.5))).toBe("Area");
+		// A pattern is a fill.
+		const striped = new FeatureLayer(() => {});
+		striped.setFeatures([layerOf(area({ fill: "stripes" }))]);
+		expect(name(striped.hitTest(v, size, 500, 350))).toBe("Area");
+	});
+
+	test("the layer's default style applies to its features", () => {
+		const l = new FeatureLayer(() => {});
+		l.setFeatures([
+			{
+				id: 1,
+				color: "red",
+				style: { width: 10, fill: "none" },
+				features: [line(1, null), area(null)],
+			} as RenderLayer,
+		]);
+		// The layer makes lines thick, so a point 8 px off still hits; its areas are hollow.
+		expect(name(l.hitTest(v, size, 500.5, 350.5 + 8))).toBe("line1");
+		expect(l.hitTest(v, size, 500, 400)).toBeNull();
+		// A feature of its own wins over the layer.
+		const own = new FeatureLayer(() => {});
+		own.setFeatures([
+			{
+				id: 1,
+				color: "red",
+				style: { width: 10 },
+				features: [line(1, { width: 1 })],
+			} as RenderLayer,
+		]);
+		expect(own.hitTest(v, size, 500.5, 350.5 + 8)).toBeNull();
+	});
+
+	test("a smoothed line is hit along its curve, not along its straight segments", () => {
+		const geometry = [
+			[-400, 0],
+			[0, 0],
+			[0, 400],
+			[400, 400],
+		];
+		const bend = {
+			id: 5,
+			layerId: 1,
+			type: "line" as const,
+			name: "Bend",
+			popup: "",
+			color: null,
+			style: null as object | null,
+			geometry,
+		};
+		const straight = new FeatureLayer(() => {});
+		straight.setFeatures([layerOf(bend)]);
+		const curvy = new FeatureLayer(() => {});
+		curvy.setFeatures([layerOf({ ...bend, style: { smooth: true } })]);
+		// Both go through every point.
+		for (const l of [straight, curvy]) {
+			expect(name(l.hitTest(v, size, 500.5, 350.5))).toBe("Bend");
+			expect(name(l.hitTest(v, size, 500.5, 750.5))).toBe("Bend");
+		}
+		// The point of the curve that is furthest from the straight segments.
+		const samples = smoothShape("line", [
+			geometry as unknown as Pt[],
+		]).strokes.flatMap((st) => st.samples);
+		const off = (p: Pt) =>
+			distToPolyline(p[0], p[1], geometry as unknown as Pt[], false);
+		const far = samples.reduce((best, p) => (off(p) > off(best) ? p : best));
+		expect(off(far)).toBeGreaterThan(10);
+		const sx = 500.5 + far[0];
+		const sy = 350.5 + far[1];
+		expect(name(curvy.hitTest(v, size, sx, sy))).toBe("Bend");
+		expect(straight.hitTest(v, size, sx, sy)).toBeNull();
+	});
+
+	test("a smoothed area is hit inside its curve", () => {
+		const l = new FeatureLayer(() => {});
+		l.setFeatures([layerOf(area({ smooth: true }))]);
+		expect(name(l.hitTest(v, size, 500, 350))).toBe("Area");
+		expect(l.hitTest(v, size, 900, 700)).toBeNull();
+	});
+
+	test("a draft takes the place of the feature it replaces, or is added, and is never under the pointer", () => {
+		const l = new FeatureLayer(() => {});
+		l.setFeatures([layerOf(line(1, null))]);
+		const layer = { id: 1, color: "red" as const };
+		l.setDraft(
+			layer,
+			{
+				...line(-1, null),
+				name: "draft",
+				geometry: [
+					[-100, 80],
+					[100, 80],
+				],
+			},
+			1,
+		);
+		// The saved feature is gone from the map while its draft is shown. The draft itself is only
+		// drawn: if the pointer could hit it, it would be drawn as hovered, and thicker, on and off.
+		expect(name(l.hitTest(v, size, 500.5, 350.5))).toBeNull();
+		expect(name(l.hitTest(v, size, 500.5, 350.5 + 80))).toBeNull();
+		l.setDraft(layer, null, null);
+		expect(name(l.hitTest(v, size, 500.5, 350.5))).toBe("line1");
+		l.setDraft(
+			layer,
+			{
+				...line(-1, null),
+				name: "draft",
+				geometry: [
+					[-100, 80],
+					[100, 80],
+				],
+			},
+			null,
+		);
+		expect(name(l.hitTest(v, size, 500.5, 350.5))).toBe("line1");
+		expect(name(l.hitTest(v, size, 500.5, 350.5 + 80))).toBeNull();
 	});
 });

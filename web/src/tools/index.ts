@@ -4,7 +4,10 @@ import {
 	activeTool,
 	centerBlock,
 	cursor,
+	draftLook,
+	editor,
 	highlightedUpload,
+	layersData,
 	noHover,
 } from "../state";
 import { areasLoaded, type Edge, type Rect, uploadArea } from "../uploadArea";
@@ -108,6 +111,35 @@ export function initTools(map: MapView) {
 			const c = centerBlock.value;
 			measureShape.setHover([c.x, c.z]);
 		}
+	});
+
+	// The feature being edited is drawn in its new shape and style as it is edited.
+	effect(() => {
+		const d = featureShape.state.value;
+		const target = editor.value;
+		const look = draftLook.value;
+		const layer = target
+			? layersData.value.find((l) => l.id === target.layerId)
+			: undefined;
+		const draft = featureShape.draft.value;
+		if (!d || !draft || !target || !layer || !look) {
+			map.setDraftFeature({ id: 0, color: "white" }, null, null);
+			return;
+		}
+		map.setDraftFeature(
+			layer,
+			{
+				id: -1,
+				layerId: layer.id,
+				type: draft.type,
+				name: "",
+				popup: "",
+				color: look.color,
+				style: look.style,
+				geometry: draft.geometry,
+			},
+			target.mode === "edit" ? target.featureId : null,
+		);
 	});
 
 	// The measurement lasts as long as the tool is open.

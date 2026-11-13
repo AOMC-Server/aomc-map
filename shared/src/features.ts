@@ -73,6 +73,56 @@ const polygonGeometry = z
 	.refine((g) => distinctPoints(g) >= 3, "an area needs three different points")
 	.refine((g) => doubleArea(g) !== 0n, "an area cannot be flat");
 
+export const LINE_DASHES = ["solid", "dashed", "dotted"] as const;
+export const AREA_FILLS = [
+	"none",
+	"solid",
+	"stripes",
+	"crosshatch",
+	"dots",
+] as const;
+export const MIN_LINE_WIDTH = 1;
+export const MAX_LINE_WIDTH = 10;
+export const DEFAULT_LINE_WIDTH = 3;
+export const DEFAULT_AREA_LINE_WIDTH = 2;
+export const DEFAULT_FILL_OPACITY = 0.2;
+
+/**
+ * How a line or an area is drawn; what is left out is the default (a solid line of 3 pixels, or
+ * 2 for the outline of an area, fully opaque, with a solid fill of 20% opacity, not smoothed).
+ * `width` is in screen pixels. `dash`, `width`, `opacity` and `smooth` are about the line (or an
+ * area's outline), `fill` and `fillOpacity` about an area's inside.
+ */
+export const styleSchema = z.strictObject({
+	dash: z.enum(LINE_DASHES).optional(),
+	width: z.number().int().min(MIN_LINE_WIDTH).max(MAX_LINE_WIDTH).optional(),
+	opacity: z.number().min(0.1).max(1).optional(),
+	fill: z.enum(AREA_FILLS).optional(),
+	fillOpacity: z.number().min(0).max(1).optional(),
+	/** Draw the line (or outline) as a curve through its points; forks stay sharp corners. */
+	smooth: z.boolean().optional(),
+});
+export type FeatureStyle = z.infer<typeof styleSchema>;
+
+/** The style without the fields that are not set, or null when none is. */
+export function cleanStyle(
+	style: FeatureStyle | null | undefined,
+): FeatureStyle | null {
+	if (!style) return null;
+	const out = Object.fromEntries(
+		Object.entries(style).filter(([, v]) => v !== undefined),
+	) as FeatureStyle;
+	return Object.keys(out).length > 0 ? out : null;
+}
+
+/** A style with the fields of `over` laid over those of `base`. */
+export function mergeStyle(
+	base: FeatureStyle | null | undefined,
+	over: FeatureStyle | null | undefined,
+): FeatureStyle {
+	return { ...cleanStyle(base), ...cleanStyle(over) };
+}
+
 const common = {
 	name: z.string().trim().max(MAX_NAME),
 	popup: z.string().max(MAX_POPUP).default(""),
@@ -81,10 +131,16 @@ const common = {
 
 export const featureInputSchema = z.discriminatedUnion("type", [
 	z.object({ type: z.literal("pin"), geometry: pointSchema, ...common }),
-	z.object({ type: z.literal("line"), geometry: lineGeometry, ...common }),
+	z.object({
+		type: z.literal("line"),
+		geometry: lineGeometry,
+		style: styleSchema.nullable().default(null),
+		...common,
+	}),
 	z.object({
 		type: z.literal("polygon"),
 		geometry: polygonGeometry,
+		style: styleSchema.nullable().default(null),
 		...common,
 	}),
 ]);
@@ -99,6 +155,7 @@ export const featurePatchSchema = z.object({
 	name: z.string().optional(),
 	popup: z.string().optional(),
 	color: dyeSchema.nullable().optional(),
+	style: styleSchema.nullable().optional(),
 	geometry: z.unknown().optional(),
 });
 
@@ -133,6 +190,8 @@ export const createLayerSchema = z.object({
 	color: dyeSchema.default("white"),
 	hiddenByDefault: z.boolean().default(false),
 	visibility: layerVisibilitySchema.default("public"),
+	/** How the lines and areas of the layer are drawn unless they say otherwise. */
+	style: styleSchema.nullable().default(null),
 });
 export type CreateLayer = z.infer<typeof createLayerSchema>;
 
@@ -142,6 +201,7 @@ export const updateLayerSchema = z
 		color: dyeSchema.optional(),
 		hiddenByDefault: z.boolean().optional(),
 		visibility: layerVisibilitySchema.optional(),
+		style: styleSchema.nullable().optional(),
 	})
 	.refine(nonEmpty, "nothing to update");
 export type UpdateLayer = z.infer<typeof updateLayerSchema>;

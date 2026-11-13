@@ -113,6 +113,20 @@
       "when": 1794486933552,
       "tag": "0015_history_recompute",
       "breakpoints": true
+    },
+    {
+      "idx": 16,
+      "version": "6",
+      "when": 1794524836436,
+      "tag": "0016_feature_style",
+      "breakpoints": true
+    },
+    {
+      "idx": 17,
+      "version": "6",
+      "when": 1794525312068,
+      "tag": "0017_layer_style",
+      "breakpoints": true
     }
   ]
 }

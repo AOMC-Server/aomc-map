@@ -6,11 +6,15 @@ import {
 	expect,
 	test,
 } from "bun:test";
+import type { Pt } from "../map/geometry";
 import type { MapView } from "../map/MapView";
+import { segmentKey, segmentMids, smoothShape } from "../map/smooth";
+import { draftLook } from "../state";
 import {
 	drawCursor,
 	drawing,
 	drawnGeometry,
+	featureShape,
 	finishDraw,
 	grabDrawPoint,
 	initDrawTool,
@@ -19,6 +23,7 @@ import {
 	startDraw,
 	stopDraw,
 } from "./draw";
+import { draftOf } from "./shape";
 
 type Handler = (e: never) => void;
 const handlers = new Map<string, Handler>();
@@ -457,5 +462,271 @@ describe("the cursor", () => {
 
 	test("nothing is chosen while not drawing", () => {
 		expect(drawCursor(map, 0, 0)).toBeNull();
+	});
+});
+
+describe("the smooth preview while drawing", () => {
+	const look = (smooth: boolean) => {
+		draftLook.value = { color: null, style: null, smooth };
+	};
+	const move = (sx: number, sy: number) => emit("move", { sx, sy });
+	afterAll(() => {
+		draftLook.value = null;
+	});
+
+	test("a line is drawn through the pointer, which bends the curve before it", () => {
+		look(true);
+		startDraw("line", [], () => {});
+		click(0.5, 0.5);
+		click(100.5, 0.5);
+		click(100.5, 100.5);
+		move(200.5, 100.5);
+		const curve = featureShape.curve.value;
+		// The pointer is part of what the map draws, the segment to it being the one that is dashed.
+		expect(curve?.draft).toEqual({
+			type: "line",
+			geometry: [
+				[0, 0],
+				[100, 0],
+				[100, 100],
+				[200, 100],
+			],
+		});
+		expect(featureShape.draft.value).toEqual(curve?.draft ?? null);
+		expect(curve?.edge).toEqual([
+			[100, 100],
+			[200, 100],
+		]);
+		const stroke = curve?.shape.strokes[0];
+		expect(stroke?.samples.at(-1)).toEqual([200, 100]);
+		expect(stroke?.beziers.map((b) => b[2])).toEqual([
+			[100, 0],
+			[100, 100],
+			[200, 100],
+		]);
+		// The shape itself has not changed.
+		expect(drawing.value?.points).toHaveLength(3);
+	});
+
+	test("moving the pointer bends the curve before it", () => {
+		look(true);
+		startDraw("line", [], () => {});
+		click(0.5, 0.5);
+		click(100.5, 0.5);
+		click(100.5, 100.5);
+		move(200.5, 100.5);
+		const before = featureShape.curve.value?.shape.strokes[0]?.beziers[1];
+		move(100.5, 300.5);
+		const after = featureShape.curve.value?.shape.strokes[0]?.beziers[1];
+		expect(after).not.toEqual(before);
+	});
+
+	test("the dashed piece is one of the pieces of the curve", () => {
+		look(true);
+		startDraw("line", [], () => {});
+		click(0.5, 0.5);
+		click(100.5, 0.5);
+		click(100.5, 100.5);
+		move(200.5, 100.5);
+		const curve = featureShape.curve.value as NonNullable<
+			typeof featureShape.curve.value
+		>;
+		const [a, b] = curve.edge as [Pt, Pt];
+		expect(segmentMids(curve.shape).has(segmentKey(a, b))).toBe(true);
+	});
+
+	test("nothing curved when smoothing is off", () => {
+		look(false);
+		startDraw("line", [], () => {});
+		click(0.5, 0.5);
+		click(100.5, 0.5);
+		move(200.5, 100.5);
+		expect(featureShape.curve.value).toBeNull();
+		// The map draws what is placed.
+		expect(featureShape.draft.value?.geometry).toEqual([
+			[0, 0],
+			[100, 0],
+		]);
+	});
+
+	test("over a point of the line the preview is the loop it would close", () => {
+		look(true);
+		startDraw("line", [], () => {});
+		click(0.5, 0.5);
+		click(100.5, 0.5);
+		click(100.5, 100.5);
+		move(0.5, 0.5);
+		const curve = featureShape.curve.value;
+		expect(curve?.edge).toEqual([
+			[100, 100],
+			[0, 0],
+		]);
+		expect(curve?.shape.strokes).toHaveLength(1);
+		expect(curve?.shape.strokes[0]?.closed).toBe(true);
+	});
+
+	test("an area being drawn is a closed curve through the pointer too", () => {
+		look(true);
+		startDraw("polygon", [], () => {});
+		click(0.5, 0.5);
+		click(100.5, 0.5);
+		click(100.5, 100.5);
+		move(0.5, 100.5);
+		const curve = featureShape.curve.value;
+		expect(curve?.draft.type).toBe("polygon");
+		expect(curve?.draft.geometry).toEqual([
+			[0, 0],
+			[100, 0],
+			[100, 100],
+			[0, 100],
+		]);
+		expect(curve?.edge).toEqual([
+			[100, 100],
+			[0, 100],
+		]);
+		expect(curve?.shape.strokes[0]?.closed).toBe(true);
+		// Once placed it is the closed curve through its own points.
+		finishDraw();
+		expect(featureShape.curve.value?.draft.geometry).toEqual([
+			[0, 0],
+			[100, 0],
+			[100, 100],
+		]);
+		expect(featureShape.curve.value?.edge).toBeNull();
+	});
+
+	test("an area with a single point and the pointer on it has no curve yet", () => {
+		look(true);
+		startDraw("polygon", [], () => {});
+		click(0.5, 0.5);
+		move(0.5, 0.5);
+		expect(featureShape.curve.value).toBeNull();
+	});
+});
+
+describe("what the map draws for the shape being edited", () => {
+	const draft = () =>
+		draftOf(drawing.value as NonNullable<typeof drawing.value>);
+
+	test("a line shows once it has a segment, an area once it has three points", () => {
+		startDraw("line", [], () => {});
+		click(0.5, 0.5);
+		expect(draft()).toBeNull();
+		click(100.5, 0.5);
+		expect(draft()).toEqual({
+			type: "line",
+			geometry: [
+				[0, 0],
+				[100, 0],
+			],
+		});
+
+		startDraw("polygon", [], () => {});
+		click(0.5, 0.5);
+		expect(draft()).toBeNull();
+		// Two points of an area are shown as the line between them.
+		click(100.5, 0.5);
+		expect(draft()?.type).toBe("line");
+		click(100.5, 100.5);
+		expect(draft()).toEqual({
+			type: "polygon",
+			geometry: [
+				[0, 0],
+				[100, 0],
+				[100, 100],
+			],
+		});
+	});
+
+	test("a pin is not drawn by the map", () => {
+		startDraw("pin", [[[5, 5]]], () => {});
+		expect(draft()).toBeNull();
+	});
+
+	test("a branching line keeps its branches", () => {
+		startDraw(
+			"line",
+			[
+				[
+					[0, 0],
+					[100, 0],
+					[200, 0],
+				],
+				[
+					[100, 0],
+					[100, 100],
+				],
+			],
+			() => {},
+		);
+		expect(draft()?.geometry).toHaveLength(2);
+	});
+});
+
+describe("the + handle of a smooth line", () => {
+	const bend: [number, number][] = [
+		[0, 0],
+		[300, 0],
+		[300, 300],
+		[600, 300],
+	];
+	// The middle of the curve of the first segment, and of its straight line.
+	const onCurve = [168.75, -18.75] as const;
+	const straightMid = [150, 0] as const;
+
+	test("sits on the curve instead of the middle of the segment", () => {
+		draftLook.value = { color: null, style: null, smooth: true };
+		startDraw("line", [bend], () => {});
+		expect(drawCursor(map, onCurve[0] + 0.5, onCurve[1] + 0.5)).toBe("copy");
+		expect(drawCursor(map, straightMid[0] + 0.5, straightMid[1] + 0.5)).toBe(
+			"crosshair",
+		);
+	});
+
+	test("pulls out a new point from where it is on the curve", () => {
+		draftLook.value = { color: null, style: null, smooth: true };
+		startDraw("line", [bend], () => {});
+		const drag = grabDrawPoint(map, onCurve[0] + 0.5, onCurve[1] + 0.5);
+		expect(drag).not.toBeNull();
+		drag?.end();
+		expect(drawing.value?.points.at(-1)).toEqual([169, -19]);
+		expect(drawing.value?.edges).toHaveLength(4);
+	});
+
+	test("stays in the middle of the segment when the line is not smooth", () => {
+		draftLook.value = { color: null, style: null, smooth: false };
+		startDraw("line", [bend], () => {});
+		expect(drawCursor(map, straightMid[0] + 0.5, straightMid[1] + 0.5)).toBe(
+			"copy",
+		);
+		expect(drawCursor(map, onCurve[0] + 0.5, onCurve[1] + 0.5)).toBe(
+			"crosshair",
+		);
+	});
+
+	test("is on the curve of an area too", () => {
+		draftLook.value = { color: null, style: null, smooth: true };
+		startDraw(
+			"polygon",
+			[
+				[
+					[0, 0],
+					[300, 0],
+					[300, 300],
+					[0, 300],
+				],
+			],
+			() => {},
+		);
+		const ring = smoothShape("polygon", [
+			[
+				[0, 0],
+				[300, 0],
+				[300, 300],
+				[0, 300],
+			],
+		]);
+		const [mid] = [...segmentMids(ring).values()] as [Pt];
+		expect(drawCursor(map, mid[0] + 0.5, mid[1] + 0.5)).toBe("copy");
 	});
 });

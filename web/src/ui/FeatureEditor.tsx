@@ -1,6 +1,8 @@
 import type { Dye } from "@aomc/shared/colors";
 import {
+	cleanStyle,
 	type FeatureInput,
+	type FeatureStyle,
 	type FeatureType,
 	MAX_NAME,
 	MAX_POPUP,
@@ -9,7 +11,9 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { showNotice } from "../api";
 import { pathsOf, TYPE_LABEL } from "../featureInfo";
 import { createFeature, deleteFeature, updateFeature } from "../layers";
+import { resolveStyle } from "../map/featureStyle";
 import {
+	draftLook,
 	editor,
 	isLayerFull,
 	isLayerHidden,
@@ -35,6 +39,7 @@ import { DyePicker } from "./DyePicker";
 import { Banner } from "./icons";
 import { Panel } from "./Panel";
 import { PointsList, ShapeStats } from "./PointsList";
+import { StyleControls } from "./StyleControls";
 
 const TYPES: FeatureType[] = ["pin", "line", "polygon"];
 
@@ -84,6 +89,7 @@ export function FeatureEditor() {
 	const [name, setName] = useState(existing?.name ?? "");
 	const [text, setText] = useState(existing?.popup ?? "");
 	const [color, setColor] = useState<Dye | null>(existing?.color ?? null);
+	const [style, setStyle] = useState<FeatureStyle>(existing?.style ?? {});
 	const [saving, setSaving] = useState(false);
 	// The revision the edit is based on; moves forward only when a conflict is reported.
 	const [baseRevision, setBaseRevision] = useState<number | undefined>(
@@ -104,6 +110,21 @@ export function FeatureEditor() {
 		);
 		return () => stopDraw();
 	}, []);
+
+	// What the map previews while editing.
+	useEffect(() => {
+		const own = type === "pin" ? null : cleanStyle(style);
+		draftLook.value = {
+			color,
+			style: own,
+			smooth:
+				type !== "pin" &&
+				resolveStyle(own, type === "polygon", layer?.style).smooth,
+		};
+		return () => {
+			draftLook.value = null;
+		};
+	}, [color, style, type, layer?.style]);
 
 	if (!target || !layer) return null;
 	const d = drawing.value;
@@ -128,6 +149,7 @@ export function FeatureEditor() {
 			popup: text,
 			color,
 			type,
+			style: type === "pin" ? null : cleanStyle(style),
 			geometry: drawnGeometry(d),
 		} as FeatureInput;
 		setSaving(true);
@@ -349,6 +371,18 @@ export function FeatureEditor() {
 					placeholder="**bold**, [links](https://example.com) and line breaks"
 				/>
 			</div>
+
+			{type !== "pin" && (
+				<div class="field">
+					<span class="label">Style</span>
+					<StyleControls
+						kind={type}
+						style={style}
+						inherited={layer.style}
+						onChange={setStyle}
+					/>
+				</div>
+			)}
 
 			<div class="field">
 				<span class="label">Colour</span>

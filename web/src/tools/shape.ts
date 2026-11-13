@@ -6,6 +6,12 @@ import {
 	isUiKeyTarget,
 } from "../map/input";
 import type { MapView } from "../map/MapView";
+import {
+	type SmoothShape,
+	segmentKey,
+	segmentMids,
+	smoothShape,
+} from "../map/smooth";
 import { blockAt, blockCenter, nearestHandle, shiftHeld } from "./handles";
 import {
 	dropLoose,
@@ -82,6 +88,23 @@ export function drawnGeometry(d: DrawState): Point | Point[] | Point[][] {
 	return lineGeometry(pathsFromGraph(d));
 }
 
+/**
+ * What the map draws for a shape being edited: a line or an area in the feature's own style. An
+ * area that has only two points so far is shown as the line between them; null when there is
+ * nothing to show yet.
+ */
+export function draftOf(
+	d: DrawState,
+): { type: "line" | "polygon"; geometry: unknown } | null {
+	if (d.type === "pin") return null;
+	if (d.type === "line")
+		return drawReady(d) ? { type: "line", geometry: drawnGeometry(d) } : null;
+	const distinct = distinctCount(d.points);
+	if (distinct >= 3) return { type: "polygon", geometry: d.points };
+	if (distinct === 2) return { type: "line", geometry: d.points };
+	return null;
+}
+
 /** The vertex a line draws on from when none is selected: its newest end. */
 function lineTip(g: LineGraph): number | null {
 	for (let i = g.points.length - 1; i >= 0; i--)
@@ -129,6 +152,13 @@ export type ShapeOptions = {
 	pointerAims?: () => boolean;
 	/** Esc on a shape that is only being looked at clears it, instead of leaving it. */
 	escapeClears?: boolean;
+	/** The shape is shown as a smooth curve through its points. */
+	smooth?: () => boolean;
+	/**
+	 * The map draws the shape itself (as a feature in its real style, with a highlighted outline),
+	 * so the overlay only adds the points, the handles and the segment to the pointer.
+	 */
+	mapDrawsShape?: () => boolean;
 };
 
 /** The shape as it would be if the pointer were clicked now: the segment to the pointer included. */
@@ -149,18 +179,28 @@ const pair = (p: XZ): Point => [p.x, p.z];
 
 const toBlock = (map: MapView, sx: number, sy: number): Point =>
 	pair(blockAt(map, sx, sy));
-const center = (map: MapView, p: Point) => blockCenter(map, xz(p));
+const center = (map: MapView, p: readonly [number, number]) =>
+	blockCenter(map, { x: p[0], z: p[1] });
 
 /** `p`, or with Shift held the nearest block on a straight line from `from`. */
 const snapped = (from: Point | undefined, p: Point): Point =>
 	shiftHeld.value && from ? pair(snapToLine(xz(from), xz(p))) : p;
 
 /** Where the "+" of a segment is on screen, or null when the segment is too short for one. */
-function midHandle(map: MapView, a: Point, b: Point) {
+function midHandle(
+	map: MapView,
+	a: Point,
+	b: Point,
+	curveMid?: (a: Point, b: Point) => readonly [number, number] | null,
+) {
 	const sa = center(map, a);
 	const sb = center(map, b);
 	if (Math.hypot(sb.x - sa.x, sb.y - sa.y) < MIN_MID_SEGMENT_PX) return null;
-	return blockCenter(map, midpoint(xz(a), xz(b)));
+	// On a smooth line the "+" sits on the curve, not on the straight segment.
+	const onCurve = curveMid?.(a, b);
+	return onCurve
+		? center(map, onCurve)
+		: blockCenter(map, midpoint(xz(a), xz(b)));
 }
 
 /** The vertex a new one is joined to: the selected one of a line, the last one of an area. */
@@ -183,12 +223,14 @@ function plusAt(
 	d: DrawState,
 	sx: number,
 	sy: number,
+	curveMid?: (a: Point, b: Point) => readonly [number, number] | null,
 ): [number, number] | null {
 	for (const segment of segmentsOf(d)) {
 		const mid = midHandle(
 			map,
 			d.points[segment[0]] as Point,
 			d.points[segment[1]] as Point,
+			curveMid,
 		);
 		if (mid && Math.hypot(mid.x - sx, mid.y - sy) <= MID_RADIUS) return segment;
 	}
@@ -249,6 +291,73 @@ export function createShapeEditor(opts: ShapeOptions) {
 			preview: true,
 		};
 	});
+
+	/**
+	 * While smoothing is on: the shape as the map draws it, with the segment a click at the
+	 * pointer would add already part of it (it bends the curve before it), and that segment's two
+	 * ends, `edge`, so that it can be dashed as not placed yet.
+	 */
+	const curve = computed<{
+		shape: SmoothShape;
+		draft: { type: "line" | "polygon"; geometry: unknown };
+		edge: [Point, Point] | null;
+	} | null>(() => {
+		const d = state.value;
+		if (!d || d.type === "pin" || !opts.smooth?.()) return null;
+		if (d.type === "line") {
+			const aim = aimed.value;
+			if (!aim || aim.edges.length === 0) return null;
+			const paths = pathsFromGraph(aim);
+			const e = aim.preview ? aim.edges.at(-1) : undefined;
+			return {
+				shape: smoothShape("line", paths),
+				draft: { type: "line", geometry: lineGeometry(paths) },
+				edge: e ? [aim.points[e[0]] as Point, aim.points[e[1]] as Point] : null,
+			};
+		}
+		if (d.mode === "placed")
+			return d.points.length >= 3
+				? {
+						shape: smoothShape("polygon", [d.points]),
+						draft: { type: "polygon", geometry: d.points },
+						edge: null,
+					}
+				: null;
+		// An area being drawn goes through the points so far and the pointer.
+		const anchor = anchorOf(d);
+		const h = hover.value;
+		const aim = anchor && h ? snapped(anchor, h) : null;
+		const last = d.points.at(-1);
+		const cursor = aim && last && !samePoint(xz(last), xz(aim)) ? aim : null;
+		const through = cursor ? [...d.points, cursor] : d.points;
+		const edge: [Point, Point] | null = cursor && last ? [last, cursor] : null;
+		if (through.length >= 3)
+			return {
+				shape: smoothShape("polygon", [through]),
+				draft: { type: "polygon", geometry: through },
+				edge,
+			};
+		if (through.length === 2)
+			return {
+				shape: smoothShape("line", [through]),
+				draft: { type: "line", geometry: through },
+				edge,
+			};
+		return null;
+	});
+
+	/** What the map is to draw for the shape being edited: the curve, or the shape as it is. */
+	const draft = computed(() => {
+		const d = state.value;
+		return d ? (curve.value?.draft ?? draftOf(d)) : null;
+	});
+
+	/** Where the curve the map draws is in the middle of each segment, while smoothing is on. */
+	const mids = computed<Map<string, readonly [number, number]> | null>(() =>
+		curve.value ? segmentMids(curve.value.shape) : null,
+	);
+	const curveMid = (a: Point, b: Point) =>
+		mids.value?.get(segmentKey(a, b)) ?? null;
 
 	/** Starts placing a shape. `paths` is its geometry: one path for a pin or an area, any number for a line. */
 	function start(type: FeatureType, paths: Point[][], cancel: () => void) {
@@ -592,12 +701,16 @@ export function createShapeEditor(opts: ShapeOptions) {
 		const vertex = nearestHandle(map, d.points.map(xz), sx, sy);
 		if (vertex >= 0) return vertexSession(map, vertex, sx, sy, false);
 
-		const segment = plusAt(map, d, sx, sy);
+		const segment = plusAt(map, d, sx, sy, curveMid);
 		if (!segment) return null;
 		const [a, b] = segment;
 		const pa = d.points[a] as Point;
 		const pb = d.points[b] as Point;
-		const point = pair(midpoint(xz(pa), xz(pb)));
+		// A new point goes where the "+" is: on the curve when the line is smooth.
+		const onCurve = curveMid(pa, pb);
+		const point: Point = onCurve
+			? [Math.round(onCurve[0]), Math.round(onCurve[1])]
+			: pair(midpoint(xz(pa), xz(pb)));
 		if (d.type === "line") {
 			// The new vertex splits the segment in two.
 			const at = d.points.length;
@@ -635,7 +748,7 @@ export function createShapeEditor(opts: ShapeOptions) {
 					? "alias"
 					: "grab";
 		}
-		if (plusAt(map, d, sx, sy)) return "copy";
+		if (plusAt(map, d, sx, sy, curveMid)) return "copy";
 		return "crosshair";
 	}
 
@@ -694,11 +807,32 @@ export function createShapeEditor(opts: ShapeOptions) {
 		if (!d || d.points.length === 0) return;
 		const pts = d.points.map((p) => center(map, p));
 		const aim = aimed.value;
+		const curved = curve.value;
+		// The piece of the curve that is the segment to the pointer, which is dashed: it is not placed yet.
+		let rubber: { x: number; y: number }[] | null = null;
+		if (curved?.edge) {
+			const key = segmentKey(curved.edge[0], curved.edge[1]);
+			for (const stroke of curved.shape.strokes) {
+				let from = stroke.start;
+				for (const [i, bezier] of stroke.beziers.entries()) {
+					if (segmentKey(from, bezier[2]) === key) {
+						const first = i === 0 ? 0 : (stroke.ends[i - 1] as number);
+						rubber = stroke.samples
+							.slice(first, (stroke.ends[i] as number) + 1)
+							.map((p) => center(map, p));
+					}
+					from = bezier[2];
+				}
+			}
+		}
+		// With the map drawing the shape there is no second copy of it here.
+		const mapDraws =
+			!!opts.mapDrawsShape?.() && (curved?.draft ?? draftOf(d)) !== null;
 		ctx.save();
 		ctx.lineJoin = "round";
 		ctx.lineCap = "round";
 
-		if (d.type === "polygon") {
+		if (!mapDraws && d.type === "polygon") {
 			if (pts.length >= 3) {
 				ctx.beginPath();
 				for (const [i, p] of pts.entries()) {
@@ -713,7 +847,7 @@ export function createShapeEditor(opts: ShapeOptions) {
 				color: style.line,
 				closed: d.mode === "placed",
 			});
-		} else if (d.type === "line") {
+		} else if (!mapDraws && d.type === "line") {
 			// A loop (also the one a click would close) is shaded like an area.
 			const loop = style.fillLoops && aim ? loopOf(aim) : null;
 			if (loop) {
@@ -732,21 +866,25 @@ export function createShapeEditor(opts: ShapeOptions) {
 				pts[b] as { x: number; y: number },
 			]);
 			outlinedPaths(ctx, segments, { color: style.line });
-			if (aim?.preview) {
-				const [a, b] = aim.edges.at(-1) as Edge;
-				const from = center(map, aim.points[a] as Point);
-				const to = center(map, aim.points[b] as Point);
-				outlinedPath(ctx, [from, to], {
-					color: style.line,
-					width: 2,
-					dashed: true,
-				});
-			}
+		}
+
+		// The segment a click would add, dashed.
+		if (rubber)
+			outlinedPath(ctx, rubber, { color: style.line, width: 2, dashed: true });
+		else if (d.type === "line" && aim?.preview) {
+			const [a, b] = aim.edges.at(-1) as Edge;
+			const from = center(map, aim.points[a] as Point);
+			const to = center(map, aim.points[b] as Point);
+			outlinedPath(ctx, [from, to], {
+				color: style.line,
+				width: 2,
+				dashed: true,
+			});
 		}
 
 		const anchor = anchorOf(d);
 		const h = hover.value;
-		if (d.type === "polygon" && d.mode === "draw" && h && anchor) {
+		if (d.type === "polygon" && d.mode === "draw" && h && anchor && !curved) {
 			const from = center(map, anchor);
 			const to = center(map, snapped(anchor, h));
 			const band = [from, to];
@@ -755,7 +893,12 @@ export function createShapeEditor(opts: ShapeOptions) {
 		}
 
 		for (const [a, b] of segmentsOf(d)) {
-			const mid = midHandle(map, d.points[a] as Point, d.points[b] as Point);
+			const mid = midHandle(
+				map,
+				d.points[a] as Point,
+				d.points[b] as Point,
+				curveMid,
+			);
 			if (mid) plusHandle(ctx, mid.x, mid.y);
 		}
 
@@ -789,6 +932,8 @@ export function createShapeEditor(opts: ShapeOptions) {
 		hover,
 		hoverVertex,
 		aimed,
+		curve,
+		draft,
 		setHover,
 		start,
 		setType,

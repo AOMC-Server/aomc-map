@@ -1,5 +1,5 @@
 import type { Dye } from "@aomc/shared/colors";
-import type { FeatureType, Point } from "@aomc/shared/features";
+import type { FeatureStyle, FeatureType, Point } from "@aomc/shared/features";
 import { canEdit, canModerate, isReadOnly } from "@aomc/shared/roles";
 import type { DimensionTheme } from "@aomc/shared/schemas";
 import type { View } from "@aomc/shared/view";
@@ -23,6 +23,7 @@ export type FeatureData = {
 	name: string;
 	popup: string;
 	color: Dye | null;
+	style: FeatureStyle | null;
 	geometry: Point | Point[] | Point[][];
 	authorId: string;
 	updatedAt: number;
@@ -143,6 +144,8 @@ export const hoverInfo = signal<{
 	text: string;
 	sx: number;
 	sy: number;
+	/** The colour of the feature, which tints the tooltip; none for a cluster of pins. */
+	dye?: Dye;
 } | null>(null);
 
 /**
@@ -165,6 +168,13 @@ export type EditorTarget =
 	  }
 	| { mode: "edit"; layerId: number; featureId: number };
 export const editor = signal<EditorTarget | null>(null);
+/** What the feature editor has chosen beyond the geometry, to preview it on the map while editing. */
+export const draftLook = signal<{
+	color: Dye | null;
+	style: FeatureStyle | null;
+	/** The feature is drawn as a curve, from its style and its layer's. */
+	smooth: boolean;
+} | null>(null);
 /** The layer a feature was last saved to, which new features start in. */
 export const lastEditLayer = signal<number | null>(null);
 

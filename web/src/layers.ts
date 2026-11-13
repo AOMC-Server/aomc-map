@@ -34,7 +34,10 @@ export const mutate = <R extends Res>(call: () => Promise<R>) =>
 	run(call, loadLayers);
 export const mutateOk = (call: () => Promise<Res>) => ok(call, loadLayers);
 
-export async function createLayer(input: Omit<CreateLayer, "dimension">) {
+export async function createLayer(
+	input: Omit<CreateLayer, "dimension" | "style"> &
+		Partial<Pick<CreateLayer, "style">>,
+) {
 	const dimension = dimSlug.value;
 	if (!dimension) return null;
 	const out = await mutate(() =>

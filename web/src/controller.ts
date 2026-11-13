@@ -323,7 +323,12 @@ export async function boot(container: HTMLElement) {
 		mv.setFeatures(
 			layersData.value
 				.filter((l) => !isLayerHidden(l))
-				.map((l) => ({ id: l.id, color: l.color, features: l.features })),
+				.map((l) => ({
+					id: l.id,
+					color: l.color,
+					style: l.style,
+					features: l.features,
+				})),
 		);
 	});
 

@@ -51,7 +51,11 @@ export function initFeatureInteraction(map: MapView) {
 		// A feature without a name has nothing to show on hover.
 		const text =
 			hit.kind === "cluster" ? `${hit.count} pins` : hit.feature.name.trim();
-		hoverInfo.value = text ? { text, sx, sy } : null;
+		const dye =
+			hit.kind === "feature"
+				? (hit.feature.color ?? hit.layer.color)
+				: undefined;
+		hoverInfo.value = text ? { text, sx, sy, dye } : null;
 	});
 	map.on("move", (e) => {
 		const current = hoverInfo.value;
