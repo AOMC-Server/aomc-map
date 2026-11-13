@@ -10,6 +10,8 @@ export type ClusterNode<T> = {
 	bounds: Bounds;
 	/** The pin, for a single one. */
 	item: T | null;
+	/** Average colour of the pins in the node, if the pins have one. */
+	rgb: [number, number, number] | null;
 };
 
 type Options = {
@@ -37,7 +39,12 @@ export class ClusterIndex<T> {
 	private levels: ClusterNode<T>[][] = [];
 
 	constructor(
-		points: { x: number; z: number; item: T }[],
+		points: {
+			x: number;
+			z: number;
+			item: T;
+			rgb?: [number, number, number];
+		}[],
 		private opts: Options,
 	) {
 		this.leaves = points.map((p) => ({
@@ -46,6 +53,7 @@ export class ClusterIndex<T> {
 			count: 1,
 			bounds: { minX: p.x, minZ: p.z, maxX: p.x, maxZ: p.z },
 			item: p.item,
+			rgb: p.rgb ?? null,
 		}));
 	}
 
@@ -116,7 +124,21 @@ function merge<T>(nodes: ClusterNode<T>[], radius: number): ClusterNode<T>[] {
 			count,
 			bounds: boundsOf(corners),
 			item: null,
+			rgb: mixRgb(members),
 		});
 	});
 	return out;
+}
+
+/** Mean colour of the nodes, weighted by how many pins each holds; null if any has none. */
+function mixRgb<T>(members: ClusterNode<T>[]): [number, number, number] | null {
+	const sum: [number, number, number] = [0, 0, 0];
+	let count = 0;
+	for (const m of members) {
+		if (!m.rgb) return null;
+		for (let i = 0; i < 3; i++)
+			sum[i] = (sum[i] as number) + (m.rgb[i] as number) * m.count;
+		count += m.count;
+	}
+	return sum.map((v) => v / count) as [number, number, number];
 }

@@ -61,7 +61,7 @@ const clusterRadius = (count: number) => 13 + Math.min(8, Math.log2(count) * 2);
 const ICON_W = 24;
 const ICON_H = 24;
 /** Pins closer than this on screen (just after switching to a level; about half at its end) merge. */
-const CLUSTER_RADIUS_PX = 56;
+export const CLUSTER_RADIUS_PX = 56;
 /**
  * Cluster levels switch at zooms of k + 0.25, and the crossfade covers this much zoom around
  * each switch. The grid that wheel zooming snaps to (multiples of 0.5) stays clear of it, so a
@@ -97,6 +97,11 @@ type DrawnCluster = {
 	bounds: Bounds;
 };
 
+function hexToRgb(hex: string): [number, number, number] {
+	const n = Number.parseInt(hex.replace("#", "").slice(0, 6), 16);
+	return [(n >> 16) & 255, (n >> 8) & 255, n & 255];
+}
+
 function prepare(feature: RenderFeature, layer: RenderLayer): Prepared {
 	const paths = pathsOf(feature);
 	const points = paths.flat();
@@ -119,6 +124,7 @@ function prepare(feature: RenderFeature, layer: RenderLayer): Prepared {
 /** Draws pins (clustered by the world-fixed `ClusterIndex`), lines and polygons, and answers hit-test queries. */
 export class FeatureLayer {
 	private prepared: Prepared[] = [];
+	private clusterPx = CLUSTER_RADIUS_PX;
 	private clusters = new ClusterIndex<Prepared>([], {
 		radiusPx: CLUSTER_RADIUS_PX,
 		minLevel: MIN_CLUSTER_LEVEL,
@@ -144,23 +150,35 @@ export class FeatureLayer {
 		this.prepared = layers.flatMap((layer) =>
 			layer.features.map((feature) => prepare(feature, layer)),
 		);
+		this.rebuildClusters();
+		this.refreshShown();
+		this.onChange();
+	}
+
+	/** How far apart (in px) pins may be and still clump together. */
+	setClusterDistance(px: number) {
+		if (px === this.clusterPx) return;
+		this.clusterPx = px;
+		this.rebuildClusters();
+		this.onChange();
+	}
+
+	private rebuildClusters() {
 		this.clusters = new ClusterIndex(
 			this.prepared
 				.filter((p) => p.feature.type === "pin")
 				.map((p) => {
 					const [x, z] = p.points[0] as Pt;
-					return { x, z, item: p };
+					return { x, z, item: p, rgb: hexToRgb(DYE_HEX[this.colorOf(p)]) };
 				}),
 			{
-				radiusPx: CLUSTER_RADIUS_PX,
+				radiusPx: this.clusterPx,
 				minLevel: MIN_CLUSTER_LEVEL,
 				maxLevel: MAX_CLUSTER_LEVEL,
 			},
 		);
 		this.drawnPins = [];
 		this.drawnClusters = [];
-		this.refreshShown();
-		this.onChange();
 	}
 
 	/**
@@ -430,7 +448,7 @@ export class FeatureLayer {
 						count: node.count,
 						bounds: node.bounds,
 					});
-				this.drawCluster(ctx, s.x, s.y, r, node.count);
+				this.drawCluster(ctx, s.x, s.y, r, node.count, node.rgb);
 			}
 			ctx.globalAlpha = 1;
 		};
@@ -487,10 +505,13 @@ export class FeatureLayer {
 		y: number,
 		r: number,
 		count: number,
+		rgb: [number, number, number] | null,
 	) {
 		ctx.beginPath();
 		ctx.arc(x, y, r, 0, Math.PI * 2);
-		ctx.fillStyle = "rgba(88,101,242,0.92)";
+		ctx.fillStyle = rgb
+			? `rgba(${rgb.map(Math.round).join(",")},0.92)`
+			: "rgba(88,101,242,0.92)";
 		ctx.fill();
 		ctx.lineWidth = 2;
 		ctx.strokeStyle = "#fff";

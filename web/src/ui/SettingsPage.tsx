@@ -3,6 +3,8 @@ import { api, attempt, loginUrl } from "../api";
 import {
 	isMapOutlines,
 	MAP_OUTLINE_CHOICES,
+	PIN_CLUMP_MAX,
+	PIN_CLUMP_MIN,
 	type Settings,
 	settings,
 	TRANSITION_SPEEDS,
@@ -187,6 +189,27 @@ function Preferences() {
 				label="Show the zoom scale"
 				hint="For example “1 px = 4 blocks”."
 			/>
+			<label class="field">
+				<span class="label">
+					Pin clumping distance: {settings.value.pinClumpDistance}
+				</span>
+				<input
+					type="range"
+					min={PIN_CLUMP_MIN}
+					max={PIN_CLUMP_MAX}
+					step={1}
+					value={settings.value.pinClumpDistance}
+					onInput={(e) =>
+						updateSettings({
+							pinClumpDistance: Number(e.currentTarget.value),
+						})
+					}
+				/>
+				<span class="muted hint">
+					How close pins must be on the map to merge into one numbered marker.
+					Lower shows more individual pins; higher groups them sooner.
+				</span>
+			</label>
 			<Toggle
 				field="preloadSpawn"
 				label="Preload the area around spawn"

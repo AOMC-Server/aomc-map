@@ -258,6 +258,11 @@ export class MapView {
 		this.features.setFeatures(layers);
 	}
 
+	/** Sets how close (in px) pins must be to clump together. */
+	setPinClumpDistance(px: number) {
+		this.features.setClusterDistance(px);
+	}
+
 	/** Previews the feature being edited in its new shape and style (null: stop); see FeatureLayer.setDraft. */
 	setDraftFeature(
 		layer: { id: number; color: Dye; style?: FeatureStyle | null },
