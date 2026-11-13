@@ -1,5 +1,9 @@
 import { afterAll, describe, expect, test } from "bun:test";
-import { featureInputSchema, MAX_LAYERS_PER_USER } from "@aomc/shared";
+import {
+	featureInputSchema,
+	MAX_FEATURES_PER_LAYER,
+	MAX_LAYERS_PER_USER,
+} from "@aomc/shared";
 import { eq } from "drizzle-orm";
 import {
 	featureRevisions,
@@ -1657,5 +1661,195 @@ describe("layer default style", () => {
 		await makeLayer(t);
 		const list = (await call(t, null, "GET", "/api/layers")).body.layers;
 		expect(list[0].style).toBeNull();
+	});
+});
+
+describe("moving a feature to another layer", () => {
+	async function setup() {
+		const t = await bootTiles();
+		const a = await makeLayer(t, t.editor, { name: "A" });
+		const b = await makeLayer(t, t.editor, { name: "B" });
+		const res = await call(
+			t,
+			t.editor,
+			"POST",
+			`/api/layers/${a.id}/features`,
+			pin(),
+		);
+		return { t, a, b, feature: res.body.feature as { id: number } };
+	}
+	const move = (t: TileApp, user: Auth, id: number, layerId: number) =>
+		call(t, user, "PATCH", `/api/features/${id}`, { layerId });
+	const namesIn = async (t: TileApp, layer: number) =>
+		(
+			(await call(t, null, "GET", "/api/layers")).body.layers.find(
+				(l: { id: number }) => l.id === layer,
+			).features as { name: string }[]
+		).map((f) => f.name);
+
+	test("moves it, with other changes, as one revision at the end of the target", async () => {
+		const { t, a, b, feature } = await setup();
+		await call(
+			t,
+			t.editor,
+			"POST",
+			`/api/layers/${b.id}/features`,
+			pin(1, 1, { name: "Old" }),
+		);
+		const res = await call(
+			t,
+			t.editor,
+			"PATCH",
+			`/api/features/${feature.id}`,
+			{
+				layerId: b.id,
+				name: "Moved",
+			},
+		);
+		expect(res.status).toBe(200);
+		expect(res.body.feature).toMatchObject({ layerId: b.id, name: "Moved" });
+		expect(await namesIn(t, a.id)).toEqual([]);
+		expect(await namesIn(t, b.id)).toEqual(["Old", "Moved"]);
+		const history = (
+			await call(t, null, "GET", `/api/features/${feature.id}/history`)
+		).body.history;
+		expect(history.map((h: { layerId: number }) => h.layerId)).toEqual([
+			b.id,
+			a.id,
+		]);
+	});
+
+	test("needs edit rights on both layers", async () => {
+		const { t, a, b, feature } = await setup();
+		const secret = await makeLayer(t, t.mod, {
+			name: "S",
+			visibility: "private",
+		});
+		expect((await move(t, t.editor, feature.id, secret.id)).status).toBe(404);
+		await t.db
+			.insert(layerMembers)
+			.values({ layerId: secret.id, userId: "editor", role: "viewer" });
+		expect((await move(t, t.editor, feature.id, secret.id)).status).toBe(403);
+		expect((await move(t, null, feature.id, b.id)).status).toBe(401);
+		expect((await move(t, t.editor, feature.id, 99999)).status).toBe(404);
+		expect(await namesIn(t, a.id)).toEqual(["Base"]);
+	});
+
+	test("not to another dimension, a deleted layer or a full one", async () => {
+		const { t, b, feature } = await setup();
+		const hell = await makeLayer(t, t.editor, {
+			dimension: "nether",
+			name: "Hell",
+		});
+		expect((await move(t, t.editor, feature.id, hell.id)).status).toBe(400);
+		await t.db
+			.update(layers)
+			.set({ deletedAt: Date.now() })
+			.where(eq(layers.id, b.id));
+		expect((await move(t, t.editor, feature.id, b.id)).status).toBe(404);
+
+		const full = await makeLayer(t, t.editor, { name: "Full" });
+		const items = Array.from({ length: MAX_FEATURES_PER_LAYER }, (_, i) =>
+			pin(i, i),
+		);
+		expect(
+			(await call(t, t.editor, "POST", `/api/layers/${full.id}/import`, items))
+				.status,
+		).toBe(201);
+		const res = await move(t, t.editor, feature.id, full.id);
+		expect(res.status).toBe(409);
+	});
+
+	test("a stale baseRevisionId is a conflict", async () => {
+		const { t, b, feature } = await setup();
+		await call(t, t.editor, "PATCH", `/api/features/${feature.id}`, {
+			name: "Newer",
+		});
+		const res = await call(
+			t,
+			t.editor,
+			"PATCH",
+			`/api/features/${feature.id}`,
+			{
+				layerId: b.id,
+				baseRevisionId: 1,
+			},
+		);
+		expect(res.status).toBe(409);
+		expect(res.body.feature.layerId).not.toBe(b.id);
+	});
+
+	test("restore brings it back to the layer it was in, unless that is gone", async () => {
+		const { t, a, b, feature } = await setup();
+		await move(t, t.editor, feature.id, b.id);
+		const history = (
+			await call(t, null, "GET", `/api/features/${feature.id}/history`)
+		).body.history;
+		const first = history[history.length - 1].revisionId;
+		const back = await call(
+			t,
+			t.mod,
+			"POST",
+			`/api/features/${feature.id}/restore/${first}`,
+		);
+		expect(back.body.feature.layerId).toBe(a.id);
+		expect(await namesIn(t, a.id)).toEqual(["Base"]);
+		expect(await namesIn(t, b.id)).toEqual([]);
+
+		await move(t, t.editor, feature.id, b.id);
+		await t.db
+			.update(layers)
+			.set({ deletedAt: Date.now() })
+			.where(eq(layers.id, a.id));
+		const stay = await call(
+			t,
+			t.mod,
+			"POST",
+			`/api/features/${feature.id}/restore/${first}`,
+		);
+		expect(stay.body.feature.layerId).toBe(b.id);
+	});
+
+	test("time travel shows it in the layer it was in then", async () => {
+		const t = await bootTiles();
+		for (let i = 0; i < 3; i++)
+			await upload(t, await solid(T, T, RED), i * T, 0);
+		for (const [i, completedAt] of [1000, 3000, 5000].entries())
+			await t.db
+				.update(revisions)
+				.set({ completedAt })
+				.where(eq(revisions.rev, i + 1));
+		const a = await makeLayer(t, t.editor, { name: "A" });
+		const b = await makeLayer(t, t.editor, { name: "B" });
+		await t.db.update(layers).set({ createdAt: 500 });
+		const created = await call(
+			t,
+			t.editor,
+			"POST",
+			`/api/layers/${a.id}/features`,
+			pin(),
+		);
+		const id = created.body.feature.id as number;
+		await t.db
+			.update(featureRevisions)
+			.set({ createdAt: 2000 })
+			.where(eq(featureRevisions.featureId, id));
+		const moved = await move(t, t.editor, id, b.id);
+		await t.db
+			.update(featureRevisions)
+			.set({ createdAt: 4000 })
+			.where(eq(featureRevisions.id, moved.body.feature.revisionId));
+
+		const at = async (rev: number) =>
+			Object.fromEntries(
+				(
+					await call(t, null, "GET", `/api/layers?dim=overworld&at=${rev}`)
+				).body.layers.map((l: { name: string; features: unknown[] }) => [
+					l.name,
+					l.features.length,
+				]),
+			);
+		expect(await at(2)).toEqual({ A: 1, B: 0 });
+		expect(await at(3)).toEqual({ A: 0, B: 1 });
 	});
 });

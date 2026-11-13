@@ -1,4 +1,4 @@
-import { startReorder } from "../reorder";
+import { type CrossDrop, startReorder } from "../reorder";
 
 /**
  * The handle of a list row that can be reordered: drag it, or focus it and press the up and down
@@ -10,6 +10,8 @@ export function Grip(props: {
 	index: number;
 	count: number;
 	onMove: (from: number, to: number) => void;
+	/** Lets the row also be dropped on other lists. */
+	cross?: CrossDrop;
 }) {
 	const { id, index, count, onMove } = props;
 	return (
@@ -18,11 +20,15 @@ export function Grip(props: {
 			class="plain grip"
 			data-grip={id}
 			aria-label={`Move ${props.label}`}
-			title="Drag to reorder, or press the up and down arrow keys"
+			title={
+				props.cross
+					? "Drag to reorder or to move to another layer, or press the up and down arrow keys"
+					: "Drag to reorder, or press the up and down arrow keys"
+			}
 			onPointerDown={(e) => {
 				const item = e.currentTarget.closest("li");
 				if (e.button === 0 && item)
-					startReorder(e, e.currentTarget, item, onMove);
+					startReorder(e, e.currentTarget, item, onMove, props.cross);
 			}}
 			onKeyDown={(e) => {
 				const to =

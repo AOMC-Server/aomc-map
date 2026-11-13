@@ -41,6 +41,18 @@ export function dropIndex(
 	return to;
 }
 
+/** Where a dragged item lands in another list: the number of its items whose middle is above `y`. */
+export const insertIndex = (mids: readonly number[], y: number): number =>
+	mids.filter((m) => m < y).length;
+
+/** Dragging an item out of its list onto another one; the targets are elements with `data-drop-layer`. */
+export type CrossDrop = {
+	/** Whether the item may go to the list with this id. */
+	accepts: (id: number) => boolean;
+	/** The item was dropped on another list: at `index` among its items, or at the end when null. */
+	onDrop: (id: number, index: number | null) => void;
+};
+
 const EDGE = 48;
 const MAX_SCROLL_SPEED = 14;
 
@@ -63,6 +75,7 @@ export function startReorder(
 	handle: HTMLElement,
 	item: HTMLElement,
 	onDrop: (from: number, to: number) => void,
+	cross?: CrossDrop,
 ) {
 	const list = item.parentElement;
 	if (!list) return;
@@ -70,7 +83,7 @@ export function startReorder(
 		(c): c is HTMLElement => c instanceof HTMLElement,
 	);
 	const from = items.indexOf(item);
-	if (from < 0 || items.length < 2) return;
+	if (from < 0 || (items.length < 2 && !cross)) return;
 
 	e.preventDefault();
 	handle.setPointerCapture(e.pointerId);
@@ -79,8 +92,10 @@ export function startReorder(
 	let startScroll = scroller?.scrollTop ?? 0;
 	let mids: number[] = [];
 	let slide = 0;
+	let pointerX = e.clientX;
 	let pointerY = startY;
 	let to = from;
+	let over: HTMLElement | null = null;
 	let frame = 0;
 	let moved = false;
 
@@ -108,7 +123,14 @@ export function startReorder(
 		}
 		const dy = pointerY - startY + ((scroller?.scrollTop ?? 0) - startScroll);
 		item.style.transform = `translateY(${dy}px)`;
-		to = dropIndex(mids, from, (mids[from] ?? 0) + dy);
+		const zone = cross ? dropZone() : null;
+		if (zone !== over) {
+			over?.classList.remove("drop-target");
+			zone?.classList.add("drop-target");
+			over = zone;
+		}
+		// Over another list the items of this one stay where they are.
+		to = zone ? from : dropIndex(mids, from, (mids[from] ?? 0) + dy);
 		items.forEach((el, i) => {
 			if (i === from) return;
 			const shift =
@@ -120,6 +142,16 @@ export function startReorder(
 			el.style.transform = shift ? `translateY(${shift}px)` : "";
 			el.classList.add("sliding");
 		});
+	};
+
+	/** The list under the pointer that takes the item, if it is not the one it came from. */
+	const dropZone = (): HTMLElement | null => {
+		for (const el of document.elementsFromPoint(pointerX, pointerY)) {
+			const zone = el.closest<HTMLElement>("[data-drop-layer]");
+			if (!zone || zone.contains(item)) continue;
+			return cross?.accepts(Number(zone.dataset.dropLayer)) ? zone : null;
+		}
+		return null;
 	};
 
 	const tick = () => {
@@ -147,18 +179,35 @@ export function startReorder(
 		handle.removeEventListener("pointerup", onUp);
 		handle.removeEventListener("pointercancel", onCancel);
 		window.removeEventListener("keydown", onKey, true);
+		over?.classList.remove("drop-target");
 		for (const el of items) {
 			el.style.transform = "";
 			el.classList.remove("dragging", "sliding");
 		}
 	};
 	const onMove = (ev: PointerEvent) => {
+		pointerX = ev.clientX;
 		pointerY = ev.clientY;
 		apply();
 	};
 	const onUp = () => {
+		const zone = over;
+		const y = pointerY;
 		cleanup();
-		if (moved && to !== from) onDrop(from, to);
+		if (!moved) return;
+		if (zone && cross) {
+			const rows = [
+				...zone.querySelectorAll<HTMLElement>(".features > li:not(.muted)"),
+			];
+			const mids = rows.map((r) => {
+				const b = r.getBoundingClientRect();
+				return b.top + b.height / 2;
+			});
+			cross.onDrop(
+				Number(zone.dataset.dropLayer),
+				rows.length > 0 ? insertIndex(mids, y) : null,
+			);
+		} else if (to !== from) onDrop(from, to);
 	};
 	const onCancel = () => cleanup();
 	const onKey = (ev: KeyboardEvent) => {

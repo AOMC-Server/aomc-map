@@ -4,6 +4,7 @@ import type {
 	UpdateLayer,
 } from "@aomc/shared/features";
 import { api, attempt, ok, type Res, run, showNotice } from "./api";
+import { moveItem } from "./reorder";
 import { dimSlug, layersData, rev } from "./state";
 
 let loadSeq = 0;
@@ -79,7 +80,7 @@ export type FeatureUpdate =
  */
 export async function updateFeature(
 	id: number,
-	patch: Partial<FeatureInput>,
+	patch: Partial<FeatureInput> & { layerId?: number },
 	baseRevisionId: number | undefined,
 ): Promise<FeatureUpdate> {
 	const res = await attempt(() =>
@@ -107,6 +108,30 @@ export async function updateFeature(
 	}
 	showNotice(res.error, "error");
 	return { saved: false, conflict: null };
+}
+
+/**
+ * Moves a feature to the end of another layer of the dimension, or to `index` among its features.
+ * `baseRevisionId` is the revision the user saw, so that a change made meanwhile is not lost.
+ */
+export async function moveFeature(
+	id: number,
+	layerId: number,
+	baseRevisionId: number,
+	index: number | null = null,
+) {
+	const out = await updateFeature(id, { layerId }, baseRevisionId);
+	if (!out.saved) return false;
+	if (index !== null) {
+		const ids =
+			layersData.value
+				.find((l) => l.id === layerId)
+				?.features.map((f) => f.id) ?? [];
+		const last = ids.indexOf(id);
+		if (last >= 0 && index < last)
+			await reorderFeatures(layerId, moveItem(ids, last, index));
+	}
+	return true;
 }
 
 /** Deletes a feature; if the server refuses because it changed, the layers are reloaded to show the current state. */

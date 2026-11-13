@@ -16,12 +16,13 @@ import {
 	deleteFeature,
 	deleteLayer,
 	importFeatures,
+	moveFeature,
 	reorderFeatures,
 	reorderLayers,
 	updateLayer,
 } from "../layers";
 import { boundsOf } from "../map/geometry";
-import { moveItem } from "../reorder";
+import { type CrossDrop, moveItem } from "../reorder";
 import {
 	canEditMap,
 	currentMap,
@@ -334,8 +335,41 @@ function LayerRow(props: {
 			? l.features.map((f) => f.id)
 			: null;
 
+	/** Layers of the dimension that a feature of this one can be moved to. */
+	const targets = editable
+		? layersData.value.filter((t) => t.id !== l.id && t.canEdit)
+		: [];
+
+	async function moveTo(
+		f: FeatureData,
+		t: LayerData,
+		index: number | null = null,
+	) {
+		if (!(await moveFeature(f.id, t.id, f.revisionId, index))) return;
+		if (isLayerHidden(t)) setLayersHidden([t], false);
+		showNotice(`Moved “${featureTitle(f)}” to ${t.name}.`);
+	}
+
+	/** Dragging a feature onto another layer of the list. */
+	const dropOn = (f: FeatureData): CrossDrop | undefined =>
+		editable && targets.length > 0
+			? {
+					accepts: (id) => {
+						const t = targets.find((x) => x.id === id);
+						return !!t && !isLayerFull(t);
+					},
+					onDrop: (id, index) => {
+						const t = targets.find((x) => x.id === id);
+						if (t) void moveTo(f, t, index);
+					},
+				}
+			: undefined;
+
 	return (
-		<li class={`layer ${open ? "open" : ""} ${hidden ? "hidden" : ""}`}>
+		<li
+			class={`layer ${open ? "open" : ""} ${hidden ? "hidden" : ""}`}
+			data-drop-layer={l.id}
+		>
 			<div class="layer-head">
 				{props.position && (
 					<Grip
@@ -442,18 +476,20 @@ function LayerRow(props: {
 									onMouseEnter={() => hoverFeature(f.id)}
 									onMouseLeave={() => hoverFeature(null)}
 								>
-									{featureOrder && (
+									{(featureOrder || dropOn(f)) && (
 										<Grip
 											id={`feature-${f.id}`}
 											label={f.name || TYPE_LABEL[f.type]}
 											index={i}
-											count={featureOrder.length}
+											count={featureOrder?.length ?? 0}
 											onMove={(from, to) =>
+												featureOrder &&
 												void reorderFeatures(
 													l.id,
 													moveItem(featureOrder, from, to),
 												)
 											}
+											cross={dropOn(f)}
 										/>
 									)}
 									<button

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { dropIndex, moveItem, renumber } from "./reorder";
+import { dropIndex, insertIndex, moveItem, renumber } from "./reorder";
 
 describe("moveItem", () => {
 	test("moves an item without touching the original", () => {
@@ -52,5 +52,14 @@ describe("renumber", () => {
 			["d2", 1],
 			["d1", 2],
 		]);
+	});
+});
+
+describe("insertIndex", () => {
+	test("counts the items above the drop point", () => {
+		expect(insertIndex([10, 30, 50], 5)).toBe(0);
+		expect(insertIndex([10, 30, 50], 40)).toBe(2);
+		expect(insertIndex([10, 30, 50], 99)).toBe(3);
+		expect(insertIndex([], 20)).toBe(0);
 	});
 });

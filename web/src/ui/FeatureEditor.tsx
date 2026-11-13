@@ -82,6 +82,12 @@ export function FeatureEditor() {
 			: undefined;
 
 	const shape = target?.mode === "create" ? target.shape : undefined;
+	// When editing, the layer the feature is going to; `layer` stays the one it is in now.
+	const [destId, setDestId] = useState(target?.layerId);
+	const dest =
+		target?.mode === "edit"
+			? (layersData.value.find((l) => l.id === destId) ?? layer)
+			: layer;
 
 	const [type, setType] = useState<FeatureType>(
 		existing?.type ?? shape?.type ?? "pin",
@@ -119,12 +125,12 @@ export function FeatureEditor() {
 			style: own,
 			smooth:
 				type !== "pin" &&
-				resolveStyle(own, type === "polygon", layer?.style).smooth,
+				resolveStyle(own, type === "polygon", dest?.style).smooth,
 		};
 		return () => {
 			draftLook.value = null;
 		};
-	}, [color, style, type, layer?.style]);
+	}, [color, style, type, dest?.style]);
 
 	if (!target || !layer) return null;
 	const d = drawing.value;
@@ -134,6 +140,7 @@ export function FeatureEditor() {
 	const layers = layersData.value.filter(
 		(l) => l.canEdit && (l.id === layer.id || !isLayerFull(l)),
 	);
+	const moving = target.mode === "edit" && dest && dest.id !== layer.id;
 
 	const changeType = (next: FeatureType) => {
 		setType(next);
@@ -158,7 +165,11 @@ export function FeatureEditor() {
 			if (target.mode === "create") {
 				saved = (await createFeature(layer.id, input)) !== null;
 			} else {
-				const out = await updateFeature(target.featureId, input, baseRevision);
+				const out = await updateFeature(
+					target.featureId,
+					moving && dest ? { ...input, layerId: dest.id } : input,
+					baseRevision,
+				);
 				saved = out.saved;
 				if (!out.saved && out.conflict)
 					setBaseRevision(out.conflict.revisionId);
@@ -167,7 +178,10 @@ export function FeatureEditor() {
 			setSaving(false);
 		}
 		if (!saved) return;
-		lastEditLayer.value = layer.id;
+		const finalLayer = moving && dest ? dest : layer;
+		lastEditLayer.value = finalLayer.id;
+		if (finalLayer !== layer && isLayerHidden(finalLayer))
+			setLayersHidden([finalLayer], false);
 		if (another && target.mode === "create") {
 			setName("");
 			setText("");
@@ -244,16 +258,20 @@ export function FeatureEditor() {
 				</>
 			}
 		>
-			{target.mode === "create" && layers.length > 1 ? (
+			{layers.length > 1 ? (
 				<label class="field editor-layer-pick">
 					<span class="label">Layer</span>
 					<select
-						value={layer.id}
+						value={dest?.id ?? layer.id}
 						onChange={(e) => {
 							const next = layers.find(
 								(l) => l.id === Number(e.currentTarget.value),
 							);
 							if (!next) return;
+							if (target.mode === "edit") {
+								setDestId(next.id);
+								return;
+							}
 							if (isLayerHidden(next)) setLayersHidden([next], false);
 							editor.value = { ...target, layerId: next.id };
 						}}
@@ -378,7 +396,7 @@ export function FeatureEditor() {
 					<StyleControls
 						kind={type}
 						style={style}
-						inherited={layer.style}
+						inherited={dest?.style ?? layer.style}
 						onChange={setStyle}
 					/>
 				</div>
@@ -389,7 +407,7 @@ export function FeatureEditor() {
 				<DyePicker
 					label="Colour"
 					value={color}
-					fallback={layer.color}
+					fallback={dest?.color ?? layer.color}
 					onChange={setColor}
 				/>
 			</div>

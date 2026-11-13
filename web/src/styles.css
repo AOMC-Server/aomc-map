@@ -4074,3 +4074,8 @@ body.resizing {
 	font-style: italic;
 	color: var(--muted);
 }
+
+.layer.drop-target {
+	outline: 2px solid var(--accent-hi);
+	outline-offset: -2px;
+}

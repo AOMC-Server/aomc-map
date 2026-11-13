@@ -127,6 +127,13 @@
       "when": 1794525312068,
       "tag": "0017_layer_style",
       "breakpoints": true
+    },
+    {
+      "idx": 18,
+      "version": "6",
+      "when": 1794605894221,
+      "tag": "0018_feature_revision_layer",
+      "breakpoints": true
     }
   ]
 }

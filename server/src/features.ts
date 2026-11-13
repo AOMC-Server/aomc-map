@@ -25,13 +25,10 @@ export type FeatureView = {
 
 type RevisionRow = typeof featureRevisions.$inferSelect;
 
-export function toView(
-	feature: { id: number; layerId: number },
-	r: RevisionRow,
-): FeatureView {
+export function toView(feature: { id: number }, r: RevisionRow): FeatureView {
 	return {
 		id: feature.id,
-		layerId: feature.layerId,
+		layerId: r.layerId,
 		revisionId: r.id,
 		type: r.type,
 		name: r.name,
@@ -46,7 +43,7 @@ export function toView(
 
 /**
  * Current (or as-of `at`, a unix ms timestamp) non-deleted features of the given layers.
- * A feature's state is its latest revision at that time.
+ * A feature's state is its latest revision at that time, which also says which layer it was in.
  */
 export function featuresOfLayers(
 	db: Pick<Db, "select">,
@@ -66,9 +63,9 @@ export function featuresOfLayers(
 				inArray(
 					featureRevisions.featureId,
 					db
-						.select({ id: features.id })
-						.from(features)
-						.where(inArray(features.layerId, layerIds)),
+						.select({ id: featureRevisions.featureId })
+						.from(featureRevisions)
+						.where(inArray(featureRevisions.layerId, layerIds)),
 				),
 				at === null ? undefined : lte(featureRevisions.createdAt, at),
 			),
@@ -81,7 +78,7 @@ export function featuresOfLayers(
 		.innerJoin(features, eq(features.id, featureRevisions.featureId))
 		.where(
 			and(
-				inArray(features.layerId, layerIds),
+				inArray(featureRevisions.layerId, layerIds),
 				inArray(featureRevisions.id, latest),
 				eq(featureRevisions.deleted, false),
 			),
@@ -89,7 +86,7 @@ export function featuresOfLayers(
 		.orderBy(features.sortOrder, features.id)
 		.all();
 	for (const { feature, revision } of rows)
-		byLayer.get(feature.layerId)?.push(toView(feature, revision));
+		byLayer.get(revision.layerId)?.push(toView(feature, revision));
 	return byLayer;
 }
 
@@ -141,16 +138,18 @@ export const contentOf = (
 		geometry: r.geometry,
 	}) as FeatureInput;
 
+/** Adds a revision; `feature.layerId` is the layer the feature is in as of it. */
 export function insertRevision(
 	db: Pick<Db, "insert">,
-	featureId: number,
+	feature: { id: number; layerId: number },
 	authorId: string,
 	content: RevisionContent,
 ) {
 	return db
 		.insert(featureRevisions)
 		.values({
-			featureId,
+			featureId: feature.id,
+			layerId: feature.layerId,
 			authorId,
 			deleted: content.deleted ?? false,
 			type: content.type,
@@ -181,5 +180,17 @@ export function insertFeature(
 		.values({ layerId, sortOrder })
 		.returning()
 		.get();
-	return toView(feature, insertRevision(db, feature.id, authorId, content));
+	return toView(feature, insertRevision(db, feature, authorId, content));
+}
+
+/** Puts a feature at the end of another layer. The caller adds the revision that records it. */
+export function moveFeature(
+	db: Pick<Db, "select" | "update">,
+	featureId: number,
+	toLayerId: number,
+) {
+	db.update(features)
+		.set({ layerId: toLayerId, sortOrder: nextFeatureOrder(db, toLayerId) })
+		.where(eq(features.id, featureId))
+		.run();
 }

@@ -513,7 +513,7 @@ export const layerRoutes = new Hono<AppEnv>()
 				if (kept + items.length > MAX_FEATURES_PER_LAYER) return "full";
 
 				for (const f of existing) {
-					insertRevision(tx, f.id, user.id, {
+					insertRevision(tx, f, user.id, {
 						...contentOf(f),
 						deleted: true,
 					});

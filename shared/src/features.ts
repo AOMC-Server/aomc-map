@@ -157,6 +157,8 @@ export const featurePatchSchema = z.object({
 	color: dyeSchema.nullable().optional(),
 	style: styleSchema.nullable().optional(),
 	geometry: z.unknown().optional(),
+	/** Moves the feature to another layer of the same dimension. */
+	layerId: z.number().int().positive().optional(),
 });
 
 export const featureImportSchema = z

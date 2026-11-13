@@ -5,17 +5,18 @@ import {
 	featurePatchSchema,
 	MAX_FEATURES_PER_LAYER,
 } from "@aomc/shared";
-import { and, desc, eq, lt } from "drizzle-orm";
+import { and, desc, eq, isNull, lt } from "drizzle-orm";
 import { Hono } from "hono";
 import { announceLayers } from "../announce";
 import { requireUser, userOf } from "../auth/session";
 import type { Db } from "../db/client";
-import { featureRevisions, features, users } from "../db/schema";
+import { featureRevisions, features, layers, users } from "../db/schema";
 import {
 	contentOf,
 	insertRevision,
 	latestRevision,
 	liveFeatureCount,
+	moveFeature,
 	toView,
 } from "../features";
 import { doc } from "../openapi";
@@ -45,6 +46,13 @@ async function loadFeatureAccess(
 	return found && { feature, ...found };
 }
 
+const layerIsLive = (db: Pick<Db, "select">, id: number) =>
+	db
+		.select({ id: layers.id })
+		.from(layers)
+		.where(and(eq(layers.id, id), isNull(layers.deletedAt)))
+		.get() !== undefined;
+
 type Vars = { db: Db; user: Actor; role: Role };
 
 /** The feature as the actor sees it, or the status to answer with. */
@@ -68,7 +76,7 @@ export const featureRoutes = new Hono<AppEnv>()
 			tag: "Features",
 			summary: "Update a feature",
 			description:
-				"Send `baseRevisionId` (the `revisionId` you last saw) to avoid overwriting someone else's change: if the feature has a newer revision the answer is 409 with `{ error, feature }`, the current state.",
+				"Send `baseRevisionId` (the `revisionId` you last saw) to avoid overwriting someone else's change: if the feature has a newer revision the answer is 409 with `{ error, feature }`, the current state. `layerId` moves the feature to another layer of the same dimension (you must be able to edit both; 409 `layer is full` if the target holds the most features it can).",
 			fails: [400, 403, 404, 409, 429],
 			login: true,
 		}),
@@ -81,12 +89,36 @@ export const featureRoutes = new Hono<AppEnv>()
 			if (typeof found === "number")
 				return c.json({ error: failure[found] }, found);
 
-			const { baseRevisionId, ...patch } = c.req.valid("json");
+			const { baseRevisionId, layerId, ...patch } = c.req.valid("json");
+			const toLayerId = layerId ?? found.feature.layerId;
+			const moving = toLayerId !== found.feature.layerId;
+			if (moving) {
+				const target = await loadLayerAccess(
+					db,
+					c.var.user,
+					c.var.role,
+					toLayerId,
+				);
+				if (!target) return c.json({ error: "layer not found" }, 404);
+				if (!canEditLayer(c.var.role, target.layer, target.layerRole))
+					return c.json({ error: "forbidden" }, 403);
+				if (target.layer.dimensionId !== found.layer.dimensionId)
+					return c.json(
+						{ error: "a feature cannot move to another dimension" },
+						400,
+					);
+			}
 			const out = db.transaction((tx) => {
 				const current = latestRevision(tx, found.feature.id);
 				if (!current || current.deleted) return { status: 404 } as const;
 				if (baseRevisionId !== undefined && baseRevisionId !== current.id)
 					return { status: 409, current } as const;
+				if (
+					moving &&
+					(!layerIsLive(tx, toLayerId) ||
+						liveFeatureCount(tx, toLayerId) >= MAX_FEATURES_PER_LAYER)
+				)
+					return { status: 422 } as const;
 				const merged = featureInputSchema.safeParse({
 					type: patch.type ?? current.type,
 					name: patch.name ?? current.name,
@@ -97,9 +129,15 @@ export const featureRoutes = new Hono<AppEnv>()
 				});
 				if (!merged.success)
 					return { status: 400, error: merged.error } as const;
+				if (moving) moveFeature(tx, found.feature.id, toLayerId);
 				return {
 					status: 200,
-					row: insertRevision(tx, found.feature.id, user.id, merged.data),
+					row: insertRevision(
+						tx,
+						{ id: found.feature.id, layerId: toLayerId },
+						user.id,
+						merged.data,
+					),
 				} as const;
 			});
 			switch (out.status) {
@@ -113,6 +151,8 @@ export const featureRoutes = new Hono<AppEnv>()
 						},
 						409,
 					);
+				case 422:
+					return c.json({ error: "layer is full" }, 409);
 				case 400:
 					return c.json(
 						{
@@ -147,7 +187,7 @@ export const featureRoutes = new Hono<AppEnv>()
 			const deleted = db.transaction((tx) => {
 				const current = latestRevision(tx, found.feature.id);
 				if (!current || current.deleted) return false;
-				insertRevision(tx, found.feature.id, user.id, {
+				insertRevision(tx, found.feature, user.id, {
 					...contentOf(current),
 					deleted: true,
 				});
@@ -194,6 +234,7 @@ export const featureRoutes = new Hono<AppEnv>()
 				history: page.map(({ revision: r, authorName }) => ({
 					...contentOf(r),
 					revisionId: r.id,
+					layerId: r.layerId,
 					authorId: r.authorId,
 					authorName,
 					createdAt: r.createdAt,
@@ -210,7 +251,7 @@ export const featureRoutes = new Hono<AppEnv>()
 			tag: "Features",
 			summary: "Restore an earlier version of a feature",
 			description:
-				"Moderators. Also brings back a deleted feature. Restoring the current version changes nothing (200).",
+				"Moderators. Also brings back a deleted feature, and moves it back to the layer it was in then (if that layer still exists). Restoring the current version changes nothing (200).",
 			ok: { 201: "Restored" },
 			fails: [403, 404, 409, 429],
 			login: true,
@@ -240,16 +281,27 @@ export const featureRoutes = new Hono<AppEnv>()
 				const current = latestRevision(tx, found.feature.id);
 				if (current?.id === old.id)
 					return { status: 200, row: old, old } as const;
+				// Back to the layer it was in then, unless that one is gone.
+				const dest = layerIsLive(tx, old.layerId)
+					? old.layerId
+					: found.feature.layerId;
+				const moving = dest !== found.feature.layerId;
 				if (
-					current?.deleted &&
 					!old.deleted &&
-					liveFeatureCount(tx, found.layer.id) >= MAX_FEATURES_PER_LAYER
+					(current?.deleted || moving) &&
+					liveFeatureCount(tx, dest) >= MAX_FEATURES_PER_LAYER
 				)
 					return { status: 409 } as const;
-				const row = insertRevision(tx, found.feature.id, user.id, {
-					...contentOf(old),
-					deleted: old.deleted,
-				});
+				if (moving) moveFeature(tx, found.feature.id, dest);
+				const row = insertRevision(
+					tx,
+					{ id: found.feature.id, layerId: dest },
+					user.id,
+					{
+						...contentOf(old),
+						deleted: old.deleted,
+					},
+				);
 				return { status: 201, row, old } as const;
 			});
 			switch (out.status) {

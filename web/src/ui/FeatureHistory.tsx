@@ -6,7 +6,7 @@ import {
 	loadFeatureHistory,
 	restoreFeatureRevision,
 } from "../revisions";
-import { isModerator, popup, readOnly } from "../state";
+import { isModerator, layersData, popup, readOnly } from "../state";
 import { formatTime } from "./format";
 import { Modal } from "./Modal";
 
@@ -29,6 +29,14 @@ function summary(e: FeatureHistoryEntry): string {
 			: `${new Set(points.map(String)).size} points`;
 	const color = e.color ? `, ${dyeLabel(e.color)}` : "";
 	return `${TYPE_LABEL[e.type]} "${e.name || "unnamed"}" ${where}${color}`;
+}
+
+/** "Moved to …" when the entry put the feature in another layer than the one before it. */
+function moved(e: FeatureHistoryEntry, older: FeatureHistoryEntry | undefined) {
+	if (!older || older.layerId === e.layerId) return null;
+	// Names of layers the user cannot see are not known to the client.
+	const name = layersData.value.find((l) => l.id === e.layerId)?.name;
+	return name ? `Moved to ${name}` : "Moved to another layer";
 }
 
 /** Revision list of one feature. Moderators can make an old version current again. */
@@ -102,6 +110,9 @@ export function FeatureHistory() {
 								)}
 								{i === 0 && <span class="badge">current</span>}
 							</div>
+							{moved(e, entries[i + 1]) && (
+								<div class="muted">{moved(e, entries[i + 1])}</div>
+							)}
 							<div class="muted">{summary(e)}</div>
 							<div class="muted">
 								{e.authorName} · {formatTime(e.createdAt)}

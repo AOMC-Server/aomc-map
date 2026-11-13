@@ -287,6 +287,10 @@ export const featureRevisions = sqliteTable(
 			.references(() => users.id),
 		createdAt: createdAt(),
 		deleted: bool("deleted").notNull().default(false),
+		/** The layer the feature is in as of this revision; features.layer_id is the current one. */
+		layerId: integer("layer_id")
+			.notNull()
+			.references(() => layers.id),
 		type: text("type", { enum: FEATURE_TYPES }).notNull(),
 		name: text("name").notNull(),
 		popup: text("popup").notNull().default(""),
@@ -298,6 +302,7 @@ export const featureRevisions = sqliteTable(
 	(t) => [
 		index("feature_revisions_feature").on(t.featureId, t.createdAt),
 		index("feature_revisions_author").on(t.authorId),
+		index("feature_revisions_layer").on(t.layerId),
 	],
 );
 
