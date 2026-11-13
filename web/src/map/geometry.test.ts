@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import {
+	arcLengthAt,
 	boundsOf,
 	distToPolyline,
 	distToSegment,
 	intersects,
+	type Pt,
 	pointInPolygon,
 } from "./geometry";
 
@@ -67,5 +69,20 @@ describe("bounds", () => {
 		expect(b).toEqual({ minX: -2, minZ: -4, maxX: 7, maxZ: 9 });
 		expect(intersects(b, { minX: 7, minZ: 9, maxX: 20, maxZ: 20 })).toBe(true);
 		expect(intersects(b, { minX: 8, minZ: 0, maxX: 20, maxZ: 20 })).toBe(false);
+	});
+});
+
+describe("arcLengthAt", () => {
+	const l: Pt[] = [
+		[0, 0],
+		[10, 0],
+		[10, 10],
+	];
+
+	test("is how far along the line its nearest point is", () => {
+		expect(arcLengthAt(4, 3, l)).toBe(4);
+		expect(arcLengthAt(14, 6, l)).toBe(16);
+		expect(arcLengthAt(-5, 0, l)).toBe(0);
+		expect(arcLengthAt(10, 50, l)).toBe(20);
 	});
 });

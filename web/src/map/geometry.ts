@@ -38,6 +38,36 @@ export function distToPolyline(
 	return best;
 }
 
+/** How far along a polyline its nearest point to p is. */
+export function arcLengthAt(
+	px: number,
+	pz: number,
+	pts: readonly Pt[],
+): number {
+	let best = Number.POSITIVE_INFINITY;
+	let bestAt = 0;
+	let along = 0;
+	for (let i = 0; i < pts.length - 1; i++) {
+		const [ax, az] = pts[i] as Pt;
+		const [bx, bz] = pts[i + 1] as Pt;
+		const dx = bx - ax;
+		const dz = bz - az;
+		const len2 = dx * dx + dz * dz;
+		const t =
+			len2 === 0
+				? 0
+				: Math.max(0, Math.min(1, ((px - ax) * dx + (pz - az) * dz) / len2));
+		const d = Math.hypot(px - (ax + t * dx), pz - (az + t * dz));
+		const len = Math.sqrt(len2);
+		if (d < best) {
+			best = d;
+			bestAt = along + t * len;
+		}
+		along += len;
+	}
+	return bestAt;
+}
+
 /** Even-odd rule. */
 export function pointInPolygon(
 	px: number,

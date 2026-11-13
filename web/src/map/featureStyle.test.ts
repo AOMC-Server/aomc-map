@@ -58,6 +58,14 @@ describe("a layer's default style", () => {
 	});
 });
 
+test("hover makes a line thicker, and a thick line is easier to hit", () => {
+	expect(emphasisedWidth(2)).toBe(5);
+	expect(emphasisedWidth(3)).toBe(5);
+	expect(emphasisedWidth(10)).toBe(12);
+	expect(hitTolerance(1)).toBe(7);
+	expect(hitTolerance(10)).toBe(9);
+});
+
 describe("dashPattern", () => {
 	test("solid has no dashes; the others grow with the width", () => {
 		expect(dashPattern("solid", 5)).toEqual([]);
@@ -69,12 +77,4 @@ describe("dashPattern", () => {
 		expect(dot).toBeLessThan(1);
 		expect(gap).toBeGreaterThan(4);
 	});
-});
-
-test("hover makes a line thicker, and a thick line is easier to hit", () => {
-	expect(emphasisedWidth(2)).toBe(5);
-	expect(emphasisedWidth(3)).toBe(5);
-	expect(emphasisedWidth(10)).toBe(12);
-	expect(hitTolerance(1)).toBe(7);
-	expect(hitTolerance(10)).toBe(9);
 });

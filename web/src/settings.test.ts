@@ -138,3 +138,14 @@ describe("transition speed", () => {
 		expect(transitionFactor("instant")).toBe(0);
 	});
 });
+
+test("the pin cluster distance is kept within its range", () => {
+	expect(DEFAULT_SETTINGS.pinClusterDistance).toBe(56);
+	const parse = (v: unknown) =>
+		parseSettings(JSON.stringify({ pinClusterDistance: v })).pinClusterDistance;
+	expect(parse(30.4)).toBe(30);
+	expect(parse(1)).toBe(8);
+	expect(parse(9999)).toBe(120);
+	for (const bad of ["40", null, true, {}])
+		expect(parse(bad)).toBe(DEFAULT_SETTINGS.pinClusterDistance);
+});

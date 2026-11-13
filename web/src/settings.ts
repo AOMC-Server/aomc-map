@@ -37,9 +37,9 @@ export const isMapOutlines = (value: unknown): value is MapOutlines =>
 export const mapOutlineScales = (choice: MapOutlines): readonly number[] =>
 	MAP_OUTLINE_CHOICES.find((c) => c.id === choice)?.scales ?? [];
 
-export const PIN_CLUMP_MIN = 8;
-export const PIN_CLUMP_MAX = 120;
-export const PIN_CLUMP_DEFAULT = 56;
+export const PIN_CLUSTER_MIN = 8;
+export const PIN_CLUSTER_MAX = 120;
+export const PIN_CLUSTER_DEFAULT = 56;
 
 /** Per-browser preferences, kept in localStorage. */
 export type Settings = {
@@ -59,8 +59,8 @@ export type Settings = {
 	historyInView: boolean;
 	/** History panel: only your own uploads. */
 	historyMineOnly: boolean;
-	/** How close (in px, roughly) map pins must be to clump into one marker. */
-	pinClumpDistance: number;
+	/** How close map pins must be to merge into one numbered marker (px, at the moment a level switches in). */
+	pinClusterDistance: number;
 	/** Load the dimension's low resolution tiles around spawn in the background. */
 	preloadSpawn: boolean;
 	/** Map debugging: colour tiles by load state, label them and show renderer statistics. */
@@ -87,7 +87,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	transitionSpeed: "normal",
 	historyInView: false,
 	historyMineOnly: false,
-	pinClumpDistance: PIN_CLUMP_DEFAULT,
+	pinClusterDistance: PIN_CLUSTER_DEFAULT,
 	preloadSpawn: true,
 	debugRender: false,
 	tileOutlines: false,
@@ -135,11 +135,14 @@ export function parseSettings(raw: string | null): Settings {
 		result.defaultDimension = stored.defaultDimension;
 	}
 	if (
-		typeof stored.pinClumpDistance === "number" &&
-		Number.isFinite(stored.pinClumpDistance)
+		typeof stored.pinClusterDistance === "number" &&
+		Number.isFinite(stored.pinClusterDistance)
 	) {
-		result.pinClumpDistance = Math.round(
-			Math.min(Math.max(stored.pinClumpDistance, PIN_CLUMP_MIN), PIN_CLUMP_MAX),
+		result.pinClusterDistance = Math.round(
+			Math.min(
+				Math.max(stored.pinClusterDistance, PIN_CLUSTER_MIN),
+				PIN_CLUSTER_MAX,
+			),
 		);
 	}
 	if (isModeChoice(stored.mode)) result.mode = stored.mode;
@@ -194,9 +197,10 @@ function write(key: string, value: string | null) {
 
 export const settings = signal<Settings>(parseSettings(read(SETTINGS_KEY)));
 
-export function updateSettings(patch: Partial<Settings>) {
+/** `persist: false` applies a change without saving it yet, for values that change continuously. */
+export function updateSettings(patch: Partial<Settings>, persist = true) {
 	settings.value = { ...settings.value, ...patch };
-	write(SETTINGS_KEY, JSON.stringify(settings.value));
+	if (persist) write(SETTINGS_KEY, JSON.stringify(settings.value));
 	if (patch.rememberPosition === false) write(POSITION_KEY, null);
 }
 

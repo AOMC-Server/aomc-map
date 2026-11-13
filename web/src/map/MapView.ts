@@ -258,8 +258,8 @@ export class MapView {
 		this.features.setFeatures(layers);
 	}
 
-	/** Sets how close (in px) pins must be to clump together. */
-	setPinClumpDistance(px: number) {
+	/** Sets how close (in px) pins must be to merge into a cluster. */
+	setPinClusterDistance(px: number) {
 		this.features.setClusterDistance(px);
 	}
 
@@ -481,6 +481,15 @@ export class MapView {
 		for (const cb of this.listeners[name]) cb(e);
 	}
 
+	/** What is under a still pointer changes when the map moves, zooms or its pins re-cluster. */
+	private rehover() {
+		const p = this.lastPointer;
+		if (!p) return;
+		const hit = this.hitTest(p.sx, p.sy);
+		p.hit = hit;
+		this.updateHover(hit, p.sx, p.sy);
+	}
+
 	private updateHover(hit: Hit | null, sx: number, sy: number) {
 		const key = hit
 			? hit.kind === "feature"
@@ -556,6 +565,7 @@ export class MapView {
 		ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
 		this.features.draw(ctx, view, size);
 		for (const overlay of this.overlays) overlay(ctx, this);
+		this.rehover();
 		if (debug.debug) this.drawDebugHud();
 		this.lastDrawMs = performance.now() - began;
 	}

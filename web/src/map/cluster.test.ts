@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
 import { ClusterIndex } from "./cluster";
 
-const opts = { radiusPx: 48, minLevel: -2, maxLevel: 12 };
+const opts = { radiusPx: 48, minLevel: -2, maxLevel: 12, combine: () => null };
 const pins = (coords: [number, number][]) =>
-	coords.map(([x, z], i) => ({ x, z, item: i }));
+	coords.map(([x, z], i) => ({ x, z, item: i, data: null }));
 
 describe("ClusterIndex", () => {
 	test("pins that are far apart stay single, close ones merge", () => {
@@ -80,5 +80,23 @@ describe("ClusterIndex", () => {
 		expect(index.nodes(99)).toHaveLength(1);
 		expect(new ClusterIndex([], opts).nodes(0)).toEqual([]);
 		expect(index.singles()[0]?.item).toBe(0);
+	});
+
+	test("combine makes a cluster's data from its pins, weighted by their counts", () => {
+		const combine = (parts: { data: number; count: number }[]) =>
+			parts.reduce((sum, p) => sum + p.data * p.count, 0) /
+			parts.reduce((sum, p) => sum + p.count, 0);
+		const index = new ClusterIndex<number, number>(
+			[
+				{ x: 0, z: 0, item: 0, data: 10 },
+				{ x: 10, z: 0, item: 1, data: 20 },
+				{ x: 20, z: 0, item: 2, data: 60 },
+				{ x: 5000, z: 0, item: 3, data: 7 },
+			],
+			{ ...opts, combine },
+		);
+		const nodes = index.nodes(0);
+		expect(nodes.find((n) => n.count === 3)?.data).toBe(30);
+		expect(nodes.find((n) => n.count === 1)?.data).toBe(7);
 	});
 });

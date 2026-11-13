@@ -1,4 +1,5 @@
 import { beforeAll, beforeEach, describe, expect, test } from "bun:test";
+import { DYE_HEX } from "@aomc/shared/colors";
 import type { MapView } from "../map/MapView";
 import { activeTool, hoverInfo } from "../state";
 import { initFeatureInteraction } from "./features";
@@ -31,16 +32,16 @@ describe("the hover tooltip", () => {
 			text: "Base",
 			sx: 10,
 			sy: 20,
-			dye: "lime",
+			color: DYE_HEX.lime,
 		});
 		hover(feature("Base", null));
-		expect(hoverInfo.value?.dye).toBe("red");
+		expect(hoverInfo.value?.color).toBe(DYE_HEX.red);
 	});
 
-	test("a cluster of pins has no colour", () => {
-		hover({ kind: "cluster", count: 3, bounds: {} });
+	test("a cluster of pins is tinted by the mix of their colours", () => {
+		hover({ kind: "cluster", count: 3, bounds: {}, color: "#804020" });
 		expect(hoverInfo.value?.text).toBe("3 pins");
-		expect(hoverInfo.value?.dye).toBeUndefined();
+		expect(hoverInfo.value?.color).toBe("#804020");
 	});
 
 	test("a feature without a name shows nothing", () => {

@@ -3,8 +3,8 @@ import { api, attempt, loginUrl } from "../api";
 import {
 	isMapOutlines,
 	MAP_OUTLINE_CHOICES,
-	PIN_CLUMP_MAX,
-	PIN_CLUMP_MIN,
+	PIN_CLUSTER_MAX,
+	PIN_CLUSTER_MIN,
 	type Settings,
 	settings,
 	TRANSITION_SPEEDS,
@@ -191,17 +191,23 @@ function Preferences() {
 			/>
 			<label class="field">
 				<span class="label">
-					Pin clumping distance: {settings.value.pinClumpDistance}
+					Pin clustering distance: {settings.value.pinClusterDistance}
 				</span>
 				<input
 					type="range"
-					min={PIN_CLUMP_MIN}
-					max={PIN_CLUMP_MAX}
+					min={PIN_CLUSTER_MIN}
+					max={PIN_CLUSTER_MAX}
 					step={1}
-					value={settings.value.pinClumpDistance}
+					value={settings.value.pinClusterDistance}
 					onInput={(e) =>
+						updateSettings(
+							{ pinClusterDistance: Number(e.currentTarget.value) },
+							false,
+						)
+					}
+					onChange={(e) =>
 						updateSettings({
-							pinClumpDistance: Number(e.currentTarget.value),
+							pinClusterDistance: Number(e.currentTarget.value),
 						})
 					}
 				/>

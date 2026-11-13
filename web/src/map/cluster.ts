@@ -1,6 +1,6 @@
 import { type Bounds, boundsOf, type Pt } from "./geometry";
 
-export type ClusterNode<T> = {
+export type ClusterNode<T, M> = {
 	/** Block position: the pin itself, or the centre of the pins in a cluster. */
 	x: number;
 	z: number;
@@ -10,17 +10,19 @@ export type ClusterNode<T> = {
 	bounds: Bounds;
 	/** The pin, for a single one. */
 	item: T | null;
-	/** Average colour of the pins in the node, if the pins have one. */
-	rgb: [number, number, number] | null;
+	/** The pin's data, or for a cluster what `Options.combine` made of its pins'. */
+	data: M;
 };
 
-type Options = {
+type Options<M> = {
 	/** How far apart (in px, at the level's own scale) pins may be and still merge. */
 	radiusPx: number;
 	/** The most zoomed in level that is clustered; anything closer shows single pins. */
 	minLevel: number;
 	/** Past this level the pins are one cluster at most, so nothing more is built. */
 	maxLevel: number;
+	/** Makes the data of a cluster from the data and pin counts of what it merges. */
+	combine: (parts: { data: M; count: number }[]) => M;
 };
 
 /**
@@ -33,19 +35,19 @@ type Options = {
  * a level past each integer): its radius is `radiusPx * 2^L` blocks, which is between about 0.4
  * and 0.8 of `radiusPx` on screen.
  */
-export class ClusterIndex<T> {
-	private leaves: ClusterNode<T>[];
+export class ClusterIndex<T, M> {
+	private leaves: ClusterNode<T, M>[];
 	/** levels[0] is minLevel. */
-	private levels: ClusterNode<T>[][] = [];
+	private levels: ClusterNode<T, M>[][] = [];
 
 	constructor(
 		points: {
 			x: number;
 			z: number;
 			item: T;
-			rgb?: [number, number, number];
+			data: M;
 		}[],
-		private opts: Options,
+		private opts: Options<M>,
 	) {
 		this.leaves = points.map((p) => ({
 			x: p.x,
@@ -53,17 +55,17 @@ export class ClusterIndex<T> {
 			count: 1,
 			bounds: { minX: p.x, minZ: p.z, maxX: p.x, maxZ: p.z },
 			item: p.item,
-			rgb: p.rgb ?? null,
+			data: p.data,
 		}));
 	}
 
 	/** Every pin on its own. */
-	singles(): ClusterNode<T>[] {
+	singles(): ClusterNode<T, M>[] {
 		return this.leaves;
 	}
 
 	/** The nodes to show at an integer zoom level. */
-	nodes(level: number): ClusterNode<T>[] {
+	nodes(level: number): ClusterNode<T, M>[] {
 		const { minLevel, maxLevel } = this.opts;
 		const wanted = Math.min(Math.max(level, minLevel), maxLevel) - minLevel;
 		while (this.levels.length <= wanted) {
@@ -72,15 +74,19 @@ export class ClusterIndex<T> {
 			this.levels.push(
 				below.length <= 1
 					? below
-					: merge(below, this.opts.radiusPx * 2 ** level),
+					: merge(below, this.opts.radiusPx * 2 ** level, this.opts.combine),
 			);
 		}
-		return this.levels[wanted] as ClusterNode<T>[];
+		return this.levels[wanted] as ClusterNode<T, M>[];
 	}
 }
 
 /** Greedy: each node, in order, takes in every node within `radius` that is still free. */
-function merge<T>(nodes: ClusterNode<T>[], radius: number): ClusterNode<T>[] {
+function merge<T, M>(
+	nodes: ClusterNode<T, M>[],
+	radius: number,
+	combine: Options<M>["combine"],
+): ClusterNode<T, M>[] {
 	const cell = (v: number) => Math.floor(v / radius);
 	const grid = new Map<string, number[]>();
 	nodes.forEach((n, i) => {
@@ -91,7 +97,7 @@ function merge<T>(nodes: ClusterNode<T>[], radius: number): ClusterNode<T>[] {
 	});
 
 	const taken = new Array<boolean>(nodes.length).fill(false);
-	const out: ClusterNode<T>[] = [];
+	const out: ClusterNode<T, M>[] = [];
 	nodes.forEach((n, i) => {
 		if (taken[i]) return;
 		taken[i] = true;
@@ -99,7 +105,7 @@ function merge<T>(nodes: ClusterNode<T>[], radius: number): ClusterNode<T>[] {
 		for (let dx = -1; dx <= 1; dx++) {
 			for (let dz = -1; dz <= 1; dz++) {
 				for (const j of grid.get(`${cell(n.x) + dx},${cell(n.z) + dz}`) ?? []) {
-					const o = nodes[j] as ClusterNode<T>;
+					const o = nodes[j] as ClusterNode<T, M>;
 					if (!taken[j] && Math.hypot(o.x - n.x, o.z - n.z) <= radius)
 						near.push(j);
 				}
@@ -111,7 +117,7 @@ function merge<T>(nodes: ClusterNode<T>[], radius: number): ClusterNode<T>[] {
 		}
 		// Ascending, so the result does not depend on the order the grid cells are visited in.
 		near.sort((a, b) => a - b);
-		const members = [n, ...near.map((j) => nodes[j] as ClusterNode<T>)];
+		const members = [n, ...near.map((j) => nodes[j] as ClusterNode<T, M>)];
 		for (const j of near) taken[j] = true;
 		const count = members.reduce((sum, m) => sum + m.count, 0);
 		const corners: Pt[] = members.flatMap((m) => [
@@ -124,21 +130,8 @@ function merge<T>(nodes: ClusterNode<T>[], radius: number): ClusterNode<T>[] {
 			count,
 			bounds: boundsOf(corners),
 			item: null,
-			rgb: mixRgb(members),
+			data: combine(members),
 		});
 	});
 	return out;
-}
-
-/** Mean colour of the nodes, weighted by how many pins each holds; null if any has none. */
-function mixRgb<T>(members: ClusterNode<T>[]): [number, number, number] | null {
-	const sum: [number, number, number] = [0, 0, 0];
-	let count = 0;
-	for (const m of members) {
-		if (!m.rgb) return null;
-		for (let i = 0; i < 3; i++)
-			sum[i] = (sum[i] as number) + (m.rgb[i] as number) * m.count;
-		count += m.count;
-	}
-	return sum.map((v) => v / count) as [number, number, number];
 }

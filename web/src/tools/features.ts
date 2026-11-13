@@ -1,3 +1,4 @@
+import { DYE_HEX } from "@aomc/shared/colors";
 import type { FeatureType } from "@aomc/shared/features";
 import { effect } from "@preact/signals";
 import { pointsOf } from "../featureInfo";
@@ -51,11 +52,11 @@ export function initFeatureInteraction(map: MapView) {
 		// A feature without a name has nothing to show on hover.
 		const text =
 			hit.kind === "cluster" ? `${hit.count} pins` : hit.feature.name.trim();
-		const dye =
-			hit.kind === "feature"
-				? (hit.feature.color ?? hit.layer.color)
-				: undefined;
-		hoverInfo.value = text ? { text, sx, sy, dye } : null;
+		const color =
+			hit.kind === "cluster"
+				? hit.color
+				: DYE_HEX[hit.feature.color ?? hit.layer.color];
+		hoverInfo.value = text ? { text, sx, sy, color } : null;
 	});
 	map.on("move", (e) => {
 		const current = hoverInfo.value;

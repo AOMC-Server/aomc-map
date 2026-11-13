@@ -37,7 +37,7 @@ export function resolveStyle(
 	};
 }
 
-/** Canvas dash lengths for a line of the given width; dots need round caps. */
+/** Canvas dash lengths (screen px) for a line of the given width; dots need round caps. */
 export function dashPattern(
 	dash: ResolvedStyle["dash"],
 	width: number,

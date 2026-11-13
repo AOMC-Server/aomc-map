@@ -144,8 +144,8 @@ export const hoverInfo = signal<{
 	text: string;
 	sx: number;
 	sy: number;
-	/** The colour of the feature, which tints the tooltip; none for a cluster of pins. */
-	dye?: Dye;
+	/** What tints the tooltip (hex): the feature's colour, or the mix of a cluster's pins'. */
+	color: string;
 } | null>(null);
 
 /**

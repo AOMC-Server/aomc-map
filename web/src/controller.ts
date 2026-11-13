@@ -236,7 +236,7 @@ export async function boot(container: HTMLElement) {
 	effect(() =>
 		mv.setMotionScale(transitionFactor(settings.value.transitionSpeed)),
 	);
-	effect(() => mv.setPinClumpDistance(settings.value.pinClumpDistance));
+	effect(() => mv.setPinClusterDistance(settings.value.pinClusterDistance));
 	effect(() => {
 		const {
 			debugRender,
