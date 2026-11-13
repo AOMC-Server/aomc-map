@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { mkdir, readFile, rename, utimes } from "node:fs/promises";
+import { mkdir, open, readFile, rename, rm, utimes } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomToken } from "../auth/tokens";
 import {
@@ -9,6 +9,24 @@ import {
 	type TileFormat,
 	transcode,
 } from "./formats";
+
+/** Writes through a temporary file, synced before the rename so a crash never leaves a truncated blob. */
+async function writeAtomic(target: string, data: Uint8Array): Promise<void> {
+	const tmp = `${target}.${randomToken(6)}.tmp`;
+	try {
+		const handle = await open(tmp, "w");
+		try {
+			await handle.writeFile(data);
+			await handle.sync();
+		} finally {
+			await handle.close();
+		}
+		await rename(tmp, target);
+	} catch (err) {
+		await rm(tmp, { force: true }).catch(() => {});
+		throw err;
+	}
+}
 
 export type BlobStore = ReturnType<typeof createBlobStore>;
 
@@ -95,9 +113,7 @@ export function createBlobStore(
 				}
 			}
 			await mkdir(dirname(target), { recursive: true });
-			const tmp = `${target}.${randomToken(6)}.tmp`;
-			await Bun.write(tmp, data);
-			await rename(tmp, target);
+			await writeAtomic(target, data);
 			onPut?.(hash, data.byteLength);
 			return hash;
 		},
@@ -120,9 +136,7 @@ export function createBlobStore(
 			if (!pending) {
 				pending = (async () => {
 					const data = await transcode(await readFile(path(hash)), format);
-					const tmp = `${target}.${randomToken(6)}.tmp`;
-					await Bun.write(tmp, data);
-					await rename(tmp, target);
+					await writeAtomic(target, data);
 				})().finally(() => converting.delete(key));
 				converting.set(key, pending);
 			}

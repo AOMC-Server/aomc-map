@@ -58,12 +58,47 @@ const CACHE_MAX = 400;
 /** Per blob store, so separate data directories never share results. */
 const caches = new WeakMap<BlobStore, Map<string, Buffer | null>>();
 
+/** Renders in progress, so concurrent requests for one tile render it once. */
+const inFlight = new WeakMap<BlobStore, Map<string, Promise<Buffer | null>>>();
+
 /**
  * A zoomed-out tile (zoom > 0) of one upload alone, as WebP, built from its patches the way the
  * map's own pyramid is. Nothing is stored: these are not part of any revision. Null = empty.
  * An upload's patches never change, so results can be cached for good.
  */
-export async function isolatedTile(
+export function isolatedTile(
+	db: Db,
+	blobs: BlobStore,
+	tileSize: number,
+	revisionId: number,
+	zoom: number,
+	x: number,
+	y: number,
+): Promise<Buffer | null> {
+	let flights = inFlight.get(blobs);
+	if (!flights) {
+		flights = new Map();
+		inFlight.set(blobs, flights);
+	}
+	const key = `${tileSize}:${revisionId}:${zoom}:${x}:${y}`;
+	let pending = flights.get(key);
+	if (!pending) {
+		const map = flights;
+		pending = buildIsolatedTile(
+			db,
+			blobs,
+			tileSize,
+			revisionId,
+			zoom,
+			x,
+			y,
+		).finally(() => map.delete(key));
+		flights.set(key, pending);
+	}
+	return pending;
+}
+
+async function buildIsolatedTile(
 	db: Db,
 	blobs: BlobStore,
 	tileSize: number,

@@ -1,6 +1,6 @@
 import { rmSync } from "node:fs";
 import { rm } from "node:fs/promises";
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq, inArray } from "drizzle-orm";
 import { jobs, revisions, tileVersionsRebuild } from "../db/schema";
 import { recordStorage } from "../storage";
 import { isPublished } from "../tiles/history";
@@ -240,7 +240,25 @@ export function createWorker(ctx: JobContext) {
 						.limit(1)
 						.get();
 					if (!job) break;
-					await runJob(job);
+					try {
+						await runJob(job);
+					} catch (err) {
+						// Setup before the job's own error handling failed; don't leave it stuck.
+						console.error(`job ${job.id} could not run:`, err);
+						db.update(jobs)
+							.set({
+								status: "failed",
+								error: "internal error",
+								completedAt: Date.now(),
+							})
+							.where(
+								and(
+									eq(jobs.id, job.id),
+									inArray(jobs.status, ["pending", "processing"]),
+								),
+							)
+							.run();
+					}
 				}
 			} finally {
 				running = null;

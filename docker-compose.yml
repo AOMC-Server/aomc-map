@@ -4,7 +4,9 @@ services:
     restart: unless-stopped
     ports:
       # The container listens on PORT from .env (3000 if unset); publish the same port.
-      - "${PORT:-3000}:${PORT:-3000}"
+      # Bound to localhost: only the reverse proxy on this host may reach it, so client IPs
+      # taken from X-Forwarded-For can be trusted.
+      - "127.0.0.1:${PORT:-3000}:${PORT:-3000}"
     env_file: .env
     environment:
       DATA_DIR: /data
