@@ -6,6 +6,7 @@ import {
 	PANEL_MIN_WIDTH,
 	parsePosition,
 	parseSettings,
+	shapeCacheEnabled,
 	transitionFactor,
 } from "./settings";
 
@@ -148,4 +149,29 @@ test("the pin cluster distance is kept within its range", () => {
 	expect(parse(9999)).toBe(120);
 	for (const bad of ["40", null, true, {}])
 		expect(parse(bad)).toBe(DEFAULT_SETTINGS.pinClusterDistance);
+});
+
+describe("shape cache", () => {
+	const firefox =
+		"Mozilla/5.0 (X11; Linux x86_64; rv:140.0) Gecko/20100101 Firefox/140.0";
+	const chrome =
+		"Mozilla/5.0 (Linux; Android 14) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/141.0 Mobile Safari/537.36";
+
+	test("defaults to automatic, and a stored choice is kept", () => {
+		expect(parseSettings(null).shapeCache).toBe("auto");
+		expect(
+			parseSettings(JSON.stringify({ shapeCache: "off" })).shapeCache,
+		).toBe("off");
+		for (const bad of ["maybe", true, 1])
+			expect(
+				parseSettings(JSON.stringify({ shapeCache: bad })).shapeCache,
+			).toBe("auto");
+	});
+
+	test("automatic is on in Firefox only; on and off ignore the browser", () => {
+		expect(shapeCacheEnabled("auto", firefox)).toBe(true);
+		expect(shapeCacheEnabled("auto", chrome)).toBe(false);
+		expect(shapeCacheEnabled("on", chrome)).toBe(true);
+		expect(shapeCacheEnabled("off", firefox)).toBe(false);
+	});
 });

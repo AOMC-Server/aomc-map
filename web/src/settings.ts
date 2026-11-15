@@ -37,6 +37,30 @@ export const isMapOutlines = (value: unknown): value is MapOutlines =>
 export const mapOutlineScales = (choice: MapOutlines): readonly number[] =>
 	MAP_OUTLINE_CHOICES.find((c) => c.id === choice)?.scales ?? [];
 
+/**
+ * Whether lines and areas are drawn once into an image that is moved and scaled while the map
+ * pans and zooms, instead of being drawn again every frame. Firefox draws them slowly enough for
+ * that to help a lot; elsewhere it is not needed. "auto" turns it on in Firefox only.
+ */
+export const SHAPE_CACHE_CHOICES = [
+	{ id: "auto", name: "Automatic" },
+	{ id: "on", name: "On" },
+	{ id: "off", name: "Off" },
+] as const;
+export type ShapeCache = (typeof SHAPE_CACHE_CHOICES)[number]["id"];
+
+export const isShapeCache = (value: unknown): value is ShapeCache =>
+	SHAPE_CACHE_CHOICES.some((c) => c.id === value);
+
+/** Whether the shape cache is used for a choice, given the browser's user agent. */
+export function shapeCacheEnabled(
+	choice: ShapeCache,
+	userAgent: string,
+): boolean {
+	if (choice === "auto") return /\bFirefox\//.test(userAgent);
+	return choice === "on";
+}
+
 export const PIN_CLUSTER_MIN = 8;
 export const PIN_CLUSTER_MAX = 120;
 export const PIN_CLUSTER_DEFAULT = 56;
@@ -63,6 +87,8 @@ export type Settings = {
 	pinClusterDistance: number;
 	/** Load the dimension's low resolution tiles around spawn in the background. */
 	preloadSpawn: boolean;
+	/** Draw lines and areas from a cached image while moving the map; see SHAPE_CACHE_CHOICES. */
+	shapeCache: ShapeCache;
 	/** Map debugging: colour tiles by load state, label them and show renderer statistics. */
 	debugRender: boolean;
 	/** Draw the edges of the map tiles being shown. */
@@ -89,6 +115,7 @@ export const DEFAULT_SETTINGS: Settings = {
 	historyMineOnly: false,
 	pinClusterDistance: PIN_CLUSTER_DEFAULT,
 	preloadSpawn: true,
+	shapeCache: "auto",
 	debugRender: false,
 	tileOutlines: false,
 	chunkOutlines: false,
@@ -149,6 +176,7 @@ export function parseSettings(raw: string | null): Settings {
 	if (isStyle(stored.style)) result.style = stored.style;
 	if (isTransitionSpeed(stored.transitionSpeed))
 		result.transitionSpeed = stored.transitionSpeed;
+	if (isShapeCache(stored.shapeCache)) result.shapeCache = stored.shapeCache;
 	if (isMapOutlines(stored.mapOutlines))
 		result.mapOutlines = stored.mapOutlines;
 	return result;

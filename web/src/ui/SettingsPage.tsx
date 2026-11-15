@@ -2,10 +2,12 @@ import { useEffect, useState } from "preact/hooks";
 import { api, attempt, loginUrl } from "../api";
 import {
 	isMapOutlines,
+	isShapeCache,
 	MAP_OUTLINE_CHOICES,
 	PIN_CLUSTER_MAX,
 	PIN_CLUSTER_MIN,
 	type Settings,
+	SHAPE_CACHE_CHOICES,
 	settings,
 	TRANSITION_SPEEDS,
 	updateSettings,
@@ -221,6 +223,29 @@ function Preferences() {
 				label="Preload the area around spawn"
 				hint="Load low resolution images of the area around spawn in the background, so there is always something to show there while the detailed ones load. Turn off to save data on a slow or metered connection."
 			/>
+			<label class="field">
+				<span class="label">Cache lines and areas while moving</span>
+				<select
+					value={settings.value.shapeCache}
+					onChange={(e) => {
+						const value = e.currentTarget.value;
+						if (isShapeCache(value)) updateSettings({ shapeCache: value });
+					}}
+				>
+					{SHAPE_CACHE_CHOICES.map((c) => (
+						<option key={c.id} value={c.id}>
+							{c.name}
+						</option>
+					))}
+				</select>
+				<span class="muted hint">
+					Draw lines and areas once and move that picture while panning and
+					zooming, instead of drawing them again every frame. Smoother where
+					drawing them is slow, such as in Firefox; while zooming they look
+					slightly thicker or thinner until it settles. Automatic turns it on in
+					Firefox only.
+				</span>
+			</label>
 		</section>
 	);
 }

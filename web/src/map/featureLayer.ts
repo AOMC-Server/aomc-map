@@ -16,6 +16,7 @@ import {
 	type DashState,
 	dashRuns,
 	newDashState,
+	type ScreenRect,
 	stepDashes,
 	traceRun,
 	type ZoomStep,
@@ -92,6 +93,8 @@ type Prepared = {
 	points: Pt[];
 	/** How a line or area is drawn and hit-tested: end to end, fork to fork, or round a loop. */
 	runs: DashRun[];
+	/** Dashed or patterned: these keep their size on screen when zooming, so they are never cached. */
+	special: boolean;
 };
 type DrawnPin = { x: number; y: number; item: Prepared };
 type PinNode = ClusterNode<Prepared, Rgb>;
@@ -112,9 +115,19 @@ function prepare(feature: RenderFeature, layer: RenderLayer): Prepared {
 		resolveStyle(feature.style, feature.type === "polygon", layer.style).smooth
 			? smoothShape(feature.type, paths)
 			: null;
+	const style =
+		feature.type === "pin"
+			? null
+			: resolveStyle(feature.style, feature.type === "polygon", layer.style);
 	return {
 		feature,
 		layer,
+		special:
+			style !== null &&
+			(dashPattern(style.dash, style.width).length > 0 ||
+				(feature.type === "polygon" &&
+					style.fill !== "none" &&
+					style.fill !== "solid")),
 		points,
 		bounds: smooth ? smooth.bounds : boundsOf(points),
 		runs: feature.type === "pin" ? [] : dashRuns(feature.type, paths, smooth),
@@ -150,6 +163,21 @@ export class FeatureLayer {
 	/** Screen px per block. */
 	private scale = 1;
 	private zoomStep: ZoomStep | null = null;
+	private shapeVersion = 0;
+	private cacheZoom: number | null = null;
+	private plain = false;
+	private cacheEnabled = true;
+	private zoomSettled = false;
+	private shapeCache: {
+		canvas: HTMLCanvasElement;
+		view: View;
+		pad: number;
+		dpr: number;
+		zoom: number;
+		version: number;
+		width: number;
+		height: number;
+	} | null = null;
 	hoveredId: number | null = null;
 	selectedId: number | null = null;
 
@@ -161,6 +189,7 @@ export class FeatureLayer {
 		);
 		this.rebuildClusters();
 		this.refreshShown();
+		this.touchShapes();
 		this.onChange();
 	}
 
@@ -172,6 +201,14 @@ export class FeatureLayer {
 		if (px === this.clusterPx) return;
 		this.clusterPx = px;
 		this.rebuildClusters();
+		this.onChange();
+	}
+
+	/** Whether lines and areas are drawn from a cached image while the map moves; see `drawShapesCached`. */
+	setShapeCache(enabled: boolean) {
+		if (enabled === this.cacheEnabled) return;
+		this.cacheEnabled = enabled;
+		this.shapeCache = null;
 		this.onChange();
 	}
 
@@ -298,16 +335,7 @@ export class FeatureLayer {
 		ctx.save();
 		ctx.lineJoin = "round";
 		ctx.lineCap = "round";
-
-		for (const p of this.shown) {
-			if (!intersects(p.bounds, viewport)) continue;
-			if (p.feature.type === "polygon") this.drawShape(ctx, p, project, true);
-		}
-		for (const p of this.shown) {
-			if (p.feature.type === "line" && intersects(p.bounds, viewport)) {
-				this.drawShape(ctx, p, project, false);
-			}
-		}
+		this.drawShapesCached(ctx, view, size);
 		// Clusters are fixed per integer level. Around each switch between two levels they are
 		// crossfaded, so that zooming (which is smooth) never makes pins pop.
 		const p = view.zoom - SWITCH_OFFSET;
@@ -329,6 +357,186 @@ export class FeatureLayer {
 		ctx.restore();
 	}
 
+	/** Marks the cached lines and areas as out of date; called for whatever changes how they look. */
+	private touchShapes() {
+		this.shapeVersion++;
+		this.shapeCache = null;
+	}
+
+	private drawShapes(
+		ctx: CanvasRenderingContext2D,
+		view: View,
+		size: Size,
+		margin: number,
+		mode: "all" | "base" | "overlay" = "all",
+	) {
+		const viewport = viewportBlocks(view, size, 40 / scaleOf(view.zoom));
+		// "base" is what goes in the cache: nothing emphasised, nothing dashed or patterned.
+		// "overlay" is what is drawn over the cache each frame.
+		this.plain = mode === "base";
+		const wanted = (p: Prepared) =>
+			mode === "all" ||
+			(mode === "base"
+				? !p.special
+				: p.special ||
+					p.feature.id === this.hoveredId ||
+					p.feature.id === this.selectedId);
+		const project = (x: number, z: number) =>
+			blockToScreen(view, size, x + BLOCK_CENTER, z + BLOCK_CENTER);
+		this.cull = {
+			minX: -margin,
+			minY: -margin,
+			maxX: size.width + margin,
+			maxY: size.height + margin,
+		};
+		ctx.lineJoin = "round";
+		ctx.lineCap = "round";
+		for (const p of this.shown) {
+			if (!wanted(p) || !intersects(p.bounds, viewport)) continue;
+			if (p.feature.type === "polygon") this.drawShape(ctx, p, project, true);
+		}
+		for (const p of this.shown) {
+			if (
+				p.feature.type === "line" &&
+				wanted(p) &&
+				intersects(p.bounds, viewport)
+			) {
+				this.drawShape(ctx, p, project, false);
+			}
+		}
+		this.plain = false;
+	}
+
+	/**
+	 * Stroking long outlines is the costliest part of a frame, and panning only moves them. So once
+	 * the view has stopped zooming they are drawn onto a canvas a little larger than the screen,
+	 * which is then just shifted until the pan runs out of its margin. Zooming, and anything that
+	 * changes how a shape looks, draws directly instead.
+	 */
+	private drawShapesCached(
+		ctx: CanvasRenderingContext2D,
+		view: View,
+		size: Size,
+	) {
+		if (this.drawBase(ctx, view, size))
+			this.drawShapes(ctx, view, size, 48, "overlay");
+	}
+
+	/** Draws from the cache, or draws directly (false) when it cannot be used. */
+	private drawBase(
+		ctx: CanvasRenderingContext2D,
+		view: View,
+		size: Size,
+	): boolean {
+		const dpr = ctx.getTransform?.()?.a;
+		const cache = this.shapeCache;
+		const sameZoom = this.cacheZoom === view.zoom;
+		this.cacheZoom = view.zoom;
+		if (
+			!this.cacheEnabled ||
+			!dpr ||
+			typeof document === "undefined" ||
+			this.draft
+		) {
+			this.shapeCache = null;
+			this.drawShapes(ctx, view, size, 48);
+			return false;
+		}
+		const scale = scaleOf(view.zoom);
+		const current =
+			cache &&
+			cache.version === this.shapeVersion &&
+			cache.dpr === dpr &&
+			cache.width === size.width &&
+			cache.height === size.height
+				? cache
+				: null;
+		if (current) {
+			const r = scale / scaleOf(current.zoom);
+			// Where the cache's top left corner is now; it is `r` times as big as when drawn.
+			const x =
+				(current.view.centerX - view.centerX) * scale -
+				(current.pad + size.width / 2) * r +
+				size.width / 2;
+			const y =
+				(current.view.centerZ - view.centerZ) * scale -
+				(current.pad + size.height / 2) * r +
+				size.height / 2;
+			const w = (current.canvas.width / dpr) * r;
+			const h = (current.canvas.height / dpr) * r;
+			const covers =
+				x <= 0 && y <= 0 && x + w >= size.width && y + h >= size.height;
+			if (r === 1) {
+				const slack = current.pad * 0.15;
+				if (
+					x <= -slack &&
+					y <= -slack &&
+					x + w >= size.width + slack &&
+					y + h >= size.height + slack
+				) {
+					ctx.drawImage(
+						current.canvas,
+						Math.round(x * dpr) / dpr,
+						Math.round(y * dpr) / dpr,
+						w,
+						h,
+					);
+					return true;
+				}
+			} else if (!sameZoom && covers && r > 0.6 && r < 2) {
+				// Zooming: the picture is scaled instead of drawn again, and redrawn once it stops.
+				ctx.drawImage(current.canvas, x, y, w, h);
+				return true;
+			}
+		}
+		if (!sameZoom) {
+			this.zoomSettled = false;
+			// Zoomed too far from the cache to scale it: make a new one here, which costs a few
+			// frames but then lasts for another stretch of the zoom. With none to start from, draw.
+			if (!current) {
+				this.drawShapes(ctx, view, size, 48);
+				return false;
+			}
+		} else if (!this.zoomSettled) {
+			// The first frame after a zoom is drawn plainly; the cache (which costs about three
+			// frames to draw) is only made if the view is still there on the next one.
+			this.zoomSettled = true;
+			this.drawShapes(ctx, view, size, 48, "base");
+			return true;
+		}
+		const pad = Math.round(Math.max(size.width, size.height) / 3);
+		const big = { width: size.width + pad * 2, height: size.height + pad * 2 };
+		const canvas = cache?.canvas ?? document.createElement("canvas");
+		canvas.width = Math.round(big.width * dpr);
+		canvas.height = Math.round(big.height * dpr);
+		const c = canvas.getContext("2d");
+		if (!c) {
+			this.drawShapes(ctx, view, size, 48);
+			return false;
+		}
+		c.setTransform(dpr, 0, 0, dpr, 0, 0);
+		// The patterns' phase is in screen px; the cache starts `pad` px before the screen.
+		const shift = { ...this.patternShift };
+		this.patternShift.x = (shift.x + pad) % PATTERN_SIZE;
+		this.patternShift.y = (shift.y + pad) % PATTERN_SIZE;
+		this.drawShapes(c, view, big, 48, "base");
+		this.patternShift = shift;
+		this.shapeCache = {
+			canvas,
+			view,
+			pad,
+			dpr,
+			zoom: view.zoom,
+			version: this.shapeVersion,
+			width: size.width,
+			height: size.height,
+		};
+		ctx.drawImage(canvas, -pad, -pad, big.width, big.height);
+		return true;
+	}
+
+	private cull: ScreenRect | undefined;
+
 	private drawShape(
 		ctx: CanvasRenderingContext2D,
 		p: Prepared,
@@ -339,12 +547,23 @@ export class FeatureLayer {
 		const isDraft = this.draft?.item === p;
 		const emphasised =
 			!isDraft &&
+			!this.plain &&
 			(p.feature.id === this.hoveredId || p.feature.id === this.selectedId);
 		const hex = DYE_HEX[this.colorOf(p)];
 		const style = resolveStyle(p.feature.style, closed, p.layer.style);
 
+		const dash = dashPattern(style.dash, style.width);
+		// Only what can be seen is stroked: long shapes mostly off screen are costly to stroke.
+		const cull = dash.length === 0 ? this.cull : undefined;
 		ctx.beginPath();
-		for (const run of p.runs) traceRun(ctx, run, 0, project);
+		for (const run of p.runs)
+			traceRun(
+				ctx,
+				run,
+				0,
+				project,
+				closed && style.fill !== "none" ? undefined : cull,
+			);
 		if (closed && style.fill !== "none") {
 			ctx.globalAlpha = Math.min(
 				1,
@@ -355,6 +574,10 @@ export class FeatureLayer {
 					? hex
 					: (this.pattern(ctx, style.fill, hex) ?? hex);
 			ctx.fill();
+			if (cull) {
+				ctx.beginPath();
+				for (const run of p.runs) traceRun(ctx, run, 0, project, cull);
+			}
 		}
 		const width = emphasised ? emphasisedWidth(style.width) : style.width;
 		if (isDraft) {
@@ -373,7 +596,6 @@ export class FeatureLayer {
 			ctx.lineWidth = width;
 			ctx.stroke();
 		};
-		const dash = dashPattern(style.dash, style.width);
 		if (dash.length === 0) {
 			outline();
 		} else {

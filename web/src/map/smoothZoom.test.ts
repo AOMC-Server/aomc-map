@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { scaleOf } from "@aomc/shared/view";
-import { easeZoom, snapZoomGoal, tweenView } from "./smoothZoom";
+import { easeZoom, glideZoom, snapZoomGoal, tweenView } from "./smoothZoom";
 
 describe("easeZoom", () => {
 	test("moves toward the goal without overshooting, in both directions", () => {
@@ -154,5 +154,23 @@ describe("snapZoomGoal", () => {
 
 	test("a zero delta just rounds", () => {
 		expect(snapZoomGoal(0.3, 0.3, 0, 0.5, -10, 10)).toBe(0.5);
+	});
+});
+
+describe("glideZoom", () => {
+	test("a frame timed before the fingers lifted moves nothing and keeps the glide going", () => {
+		// requestAnimationFrame's time is the frame's start, which can be before the lift was
+		// handled; such a frame used to be taken for hitting the zoom limit and stop the glide.
+		expect(glideZoom(1, -0.006, 0, 8, 0.006)).toEqual({ zoom: 1, vz: -0.006 });
+	});
+
+	test("moves on at the speed and slows down", () => {
+		const { zoom, vz } = glideZoom(1, -0.006, 16, 8, 0.006);
+		expect(zoom).toBeCloseTo(1 - 0.096);
+		expect(vz).toBeCloseTo(-0.006 * Math.exp(-0.096));
+	});
+
+	test("stops at the zoom limit", () => {
+		expect(glideZoom(7.99, 0.006, 16, 8, 0.006)).toEqual({ zoom: 8, vz: 0 });
 	});
 });

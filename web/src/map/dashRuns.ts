@@ -136,19 +136,39 @@ function nearestVertex(run: DashRun, d: number): number {
 	return best;
 }
 
-/** Adds a run to the current canvas path, starting (if it is a loop) at vertex `seam`. */
+export type ScreenRect = {
+	minX: number;
+	minY: number;
+	maxX: number;
+	maxY: number;
+};
+
+const beyond = (r: ScreenRect, pts: readonly { x: number; y: number }[]) =>
+	pts.every((p) => p.x < r.minX) ||
+	pts.every((p) => p.x > r.maxX) ||
+	pts.every((p) => p.y < r.minY) ||
+	pts.every((p) => p.y > r.maxY);
+
+/**
+ * Adds a run to the current canvas path, starting (if it is a loop) at vertex `seam`. With `cull`,
+ * pieces wholly outside that screen rectangle are left out, which breaks the path there: only for
+ * strokes that are not dashed (a break restarts the dashes) and not for fills.
+ */
 export function traceRun(
 	ctx: CanvasRenderingContext2D,
 	run: DashRun,
 	seam: number,
 	project: (x: number, z: number) => { x: number; y: number },
+	cull?: ScreenRect,
 ) {
 	const k = run.pieces.length;
 	const start = run.closed ? seam : 0;
 	const first = project(...(run.vertices[start] as [number, number]));
-	ctx.moveTo(first.x, first.y);
 	let lastX = first.x;
 	let lastY = first.y;
+	let prev = first;
+	let pen = false;
+	let skipped = false;
 	for (let q = 0; q < k; q++) {
 		const j = (start + q) % k;
 		const piece = run.pieces[j];
@@ -157,15 +177,36 @@ export function traceRun(
 		if (piece) {
 			const a = project(piece[0][0], piece[0][1]);
 			const b = project(piece[1][0], piece[1][1]);
+			if (cull && beyond(cull, [prev, a, b, e])) {
+				pen = false;
+				skipped = true;
+				prev = e;
+				lastX = e.x;
+				lastY = e.y;
+				continue;
+			}
+			if (!pen) ctx.moveTo(prev.x, prev.y);
+			pen = true;
 			ctx.bezierCurveTo(a.x, a.y, b.x, b.y, e.x, e.y);
 		} else {
 			// Skip vertices that fall on the same pixel; huge shapes stay cheap when zoomed out.
 			if (q < k - 1 && Math.abs(e.x - lastX) + Math.abs(e.y - lastY) < 1.5)
 				continue;
+			if (cull && beyond(cull, [prev, e])) {
+				pen = false;
+				skipped = true;
+				prev = e;
+				lastX = e.x;
+				lastY = e.y;
+				continue;
+			}
+			if (!pen) ctx.moveTo(prev.x, prev.y);
+			pen = true;
 			ctx.lineTo(e.x, e.y);
 		}
+		prev = e;
 		lastX = e.x;
 		lastY = e.y;
 	}
-	if (run.closed) ctx.closePath();
+	if (run.closed && !skipped) ctx.closePath();
 }

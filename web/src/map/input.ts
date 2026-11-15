@@ -1,5 +1,6 @@
 import { panBy, zoomAt } from "@aomc/shared/view";
 import type { MapView } from "./MapView";
+import { fitVelocity, type Sample } from "./velocity";
 
 /**
  * A drag started by a tool. `end` is the pointer lifting (a press that never moved is a click);
@@ -40,6 +41,18 @@ export function isInteractiveTarget(target: EventTarget | null): boolean {
 /** Zoom steps from the wheel, keys and double-click end on multiples of this. */
 const ZOOM_GRID = 0.5;
 const DRAG_THRESHOLD = 5;
+/**
+ * How far the last finger of a pinch must move before it drags (and stops the zoom gliding on).
+ * Much more than a plain drag: fingers roll and slide as they come off the screen, and when one
+ * lifts the touch point of the other often jumps a little too.
+ */
+const HANDOVER_THRESHOLD = 24;
+/**
+ * For this long after the first finger of a pinch lifts (ms), the one left cannot take over at
+ * all. It is still carrying on the pinch's movement until it lifts too, and after a quick pinch
+ * (the kind that glides) that alone takes it well past HANDOVER_THRESHOLD.
+ */
+const HANDOVER_GRACE = 200;
 const INERTIA_MIN_SPEED = 0.15; // px per ms
 /** Fastest a released drag keeps gliding, so a hard flick doesn't fling the map away. */
 const INERTIA_MAX_SPEED = 4; // px per ms
@@ -51,11 +64,33 @@ const RELEASE_HOLD = 50;
 const ZOOM_INERTIA_MIN_SPEED = 0.0008;
 /** Fastest a released pinch keeps zooming, in levels per ms (about a level of glide). */
 const ZOOM_INERTIA_MAX_SPEED = 0.006;
-/** How far back the pinch speed is measured when the fingers lift, in ms. */
+/**
+ * How far back the pinch speed is measured when the fingers lift, in ms. Both this and
+ * RELEASE_HOLD stretch to a few of the intervals the fingers were reported at: when frames are
+ * slow the browser only reports them once a frame, and fingers that were moving right up to the
+ * lift would otherwise look like they had stopped.
+ */
 const PINCH_WINDOW = 100;
+/** The furthest the measuring of a pinch stretches when it is reported slowly, in ms. */
+const PINCH_MAX_WINDOW = 250;
+/** The least a pinch's speed is measured over: fewer samples, or a shorter time, is just noise. */
+const PINCH_MIN_SAMPLES = 3;
+const PINCH_MIN_SPAN = 20; // ms
 
 type Pt = { x: number; y: number };
-type PinchSample = { t: number; zoom: number; mid: Pt };
+
+/** The usual time between the moments samples were reported at (the median), in ms. */
+function reportInterval(samples: readonly { t: number }[]): number {
+	const gaps: number[] = [];
+	for (let i = 1; i < samples.length; i++) {
+		const gap =
+			(samples[i] as { t: number }).t - (samples[i - 1] as { t: number }).t;
+		// Both fingers' moves of one frame come at the same moment.
+		if (gap > 0.5) gaps.push(gap);
+	}
+	gaps.sort((a, b) => a - b);
+	return gaps[Math.floor(gaps.length / 2)] ?? 0;
+}
 
 /** Pointer, wheel and keyboard handling for the map element. */
 export class Input {
@@ -65,9 +100,19 @@ export class Input {
 	/** Recent drag positions with their event times, to measure its speed when the pointer lifts. */
 	private dragSamples: (Pt & { t: number })[] = [];
 	private lastPinch: { dist: number; mid: Pt } | null = null;
-	/** Recent pinch positions, to measure its speed when the fingers lift. */
-	private pinchSamples: PinchSample[] = [];
+	/**
+	 * Recent pinches by event time, to measure its speed when the fingers lift: the zoom the
+	 * fingers ask for (-log2 of their distance) and their midpoint, `[zoom, x, y]`.
+	 */
+	private pinchSamples: Sample[] = [];
 	private session: DragSession | null = null;
+	/**
+	 * The finger left down after a pinch: when the pinch ended (`t`) and
+	 * where the finger was. It does nothing during HANDOVER_GRACE, then until it has moved
+	 * HANDOVER_THRESHOLD from where it was at the end of that, then drags. Lifting it before that
+	 * ends the gesture and leaves any glide running.
+	 */
+	private handover: (Pt & { t: number }) | null = null;
 
 	constructor(
 		private el: HTMLElement,
@@ -93,7 +138,8 @@ export class Input {
 
 	private down = (e: PointerEvent) => {
 		if (e.pointerType === "mouse" && e.button !== 0) return;
-		this.map.cancelAnimation();
+		this.map.cancelAnimation("a finger touched");
+		this.handover = null;
 		this.el.setPointerCapture(e.pointerId);
 		const p = this.local(e);
 		this.pointers.set(e.pointerId, p);
@@ -114,8 +160,11 @@ export class Input {
 		}
 	};
 
-	private pinchState() {
-		const [a, b] = [...this.pointers.values()] as [Pt, Pt];
+	/** The first two fingers' distance and midpoint; finger `id` at `at`, if given. */
+	private pinchState(id?: number, at?: Pt) {
+		const [a, b] = [...this.pointers]
+			.slice(0, 2)
+			.map(([k, p]) => (k === id && at ? at : p)) as [Pt, Pt];
 		return {
 			dist: Math.max(Math.hypot(a.x - b.x, a.y - b.y), 1),
 			mid: { x: (a.x + b.x) / 2, y: (a.y + b.y) / 2 },
@@ -149,11 +198,26 @@ export class Input {
 			);
 			this.map.setView(view);
 			this.lastPinch = next;
-			this.recordPinch(next.mid);
+			this.recordPinch(e);
 			return;
 		}
 
 		if (this.pointers.size === 1 && this.start) {
+			if (this.handover) {
+				const h = this.handover;
+				if (e.timeStamp - h.t < HANDOVER_GRACE) {
+					h.x = p.x;
+					h.y = p.y;
+					return;
+				}
+				if (Math.hypot(p.x - h.x, p.y - h.y) <= HANDOVER_THRESHOLD) return;
+				// A real drag: it takes over from here, so the map does not jump to catch up.
+				this.handover = null;
+				this.map.cancelAnimation("the finger left dragged");
+				this.map.setGrabbing(true);
+				this.dragSamples = [{ ...p, t: e.timeStamp }];
+				return;
+			}
 			if (
 				!this.moved &&
 				Math.hypot(p.x - this.start.x, p.y - this.start.y) > DRAG_THRESHOLD
@@ -207,39 +271,84 @@ export class Input {
 		return { x: vx, y: vy };
 	}
 
-	private recordPinch(mid: Pt) {
-		const t = performance.now();
-		this.pinchSamples.push({ t, zoom: this.map.getView().zoom, mid });
-		while (
-			this.pinchSamples.length > 2 &&
-			(this.pinchSamples[0] as PinchSample).t < t - PINCH_WINDOW
-		)
+	/**
+	 * Remembers the pinch by event time, with every position the touch screen reported (several
+	 * per event when frames are slow), so its speed does not depend on when events were handled.
+	 */
+	private recordPinch(e: PointerEvent) {
+		const events = e.getCoalescedEvents?.() ?? [];
+		for (const c of events.length > 0 ? events : [e]) {
+			const at = this.pinchState(e.pointerId, this.local(c));
+			this.pinchSamples.push({
+				t: c.timeStamp,
+				v: [-Math.log2(at.dist), at.mid.x, at.mid.y],
+			});
+		}
+		const oldest = e.timeStamp - PINCH_MAX_WINDOW;
+		while ((this.pinchSamples[0]?.t ?? oldest) < oldest)
 			this.pinchSamples.shift();
 	}
 
-	/** Keeps a pinch zooming for a moment after the fingers lift, if it was moving fast enough. */
-	private releasePinch() {
-		const samples = this.pinchSamples;
+	/**
+	 * Keeps a pinch zooming (and panning) for a moment after a finger lifts at `t`, at the speed
+	 * the fingers were going, if they were still moving fast enough. True if it does.
+	 */
+	private releasePinch(t: number): boolean {
+		const all = this.pinchSamples;
 		this.pinchSamples = [];
-		const now = performance.now();
-		const first = samples.find((s) => s.t >= now - PINCH_WINDOW);
-		const last = samples.at(-1);
-		if (!first || !last || first === last || now - last.t > RELEASE_HOLD)
-			return;
-		const dt = Math.max(last.t - first.t, 1);
-		const raw = (last.zoom - first.zoom) / dt;
-		const vz =
-			Math.abs(raw) < ZOOM_INERTIA_MIN_SPEED
-				? 0
-				: Math.sign(raw) * Math.min(Math.abs(raw), ZOOM_INERTIA_MAX_SPEED);
-		let vx = (last.mid.x - first.mid.x) / dt;
-		let vy = (last.mid.y - first.mid.y) / dt;
-		if (Math.hypot(vx, vy) < INERTIA_MIN_SPEED) {
-			vx = 0;
-			vy = 0;
+		const last = all.at(-1);
+		if (!last) {
+			this.logPinch("no glide: no pinch samples");
+			return false;
 		}
-		if (vz === 0 && vx === 0 && vy === 0) return;
-		this.map.zoomInertia(vz, last.mid, vx, vy);
+		const interval = reportInterval(all);
+		const hold = Math.min(
+			Math.max(RELEASE_HOLD, interval * 1.5),
+			PINCH_MAX_WINDOW,
+		);
+		const window = Math.min(
+			Math.max(PINCH_WINDOW, interval * 3),
+			PINCH_MAX_WINDOW,
+		);
+		const samples = all.filter((s) => s.t >= last.t - window);
+		const first = samples[0] as Sample;
+		const span = last.t - first.t;
+		const times = new Set(samples.map((s) => Math.round(s.t))).size;
+		const fit = fitVelocity(samples);
+		const [rz = 0, rx = 0, ry = 0] = fit ?? [];
+		const facts = `n${samples.length} t${times} int${interval.toFixed(0)} span${span.toFixed(0)} gap${(t - last.t).toFixed(0)}/${hold.toFixed(0)} vz${(rz * 1000).toFixed(2)} pan${(Math.hypot(rx, ry) * 1000).toFixed(0)}`;
+		const refuse = (why: string) => {
+			this.logPinch(`no glide: ${why} | ${facts}`);
+			return false;
+		};
+		if (samples.length < PINCH_MIN_SAMPLES) return refuse("too few samples");
+		if (span < PINCH_MIN_SPAN) return refuse("too short");
+		if (t - last.t > hold) return refuse("held before lift");
+		if (!fit) return refuse("no spread in time");
+		const vz =
+			Math.abs(rz) < ZOOM_INERTIA_MIN_SPEED
+				? 0
+				: Math.sign(rz) * Math.min(Math.abs(rz), ZOOM_INERTIA_MAX_SPEED);
+		const speed = Math.hypot(rx, ry);
+		const pan =
+			speed < INERTIA_MIN_SPEED
+				? 0
+				: Math.min(speed, INERTIA_MAX_SPEED) / speed;
+		if (vz === 0 && pan === 0) return refuse("too slow");
+		const [, x = 0, y = 0] = last.v;
+		this.map.zoomInertia(vz, { x, y }, rx * pan, ry * pan);
+		this.logPinch(`glide | ${facts}`);
+		return true;
+	}
+
+	/**
+	 * Notes why a pinch did or did not glide on, with what was measured: samples in the window
+	 * (n), distinct times among them (t), the usual time between reports (int), the time they
+	 * span, the gap from the last one to the lift against the most allowed, and the zoom speed
+	 * (levels per s) and pan speed (px per s). Shown by the debug view.
+	 */
+	private logPinch(line: string) {
+		this.map.logGesture(line);
 	}
 
 	private endSession() {
@@ -256,21 +365,27 @@ export class Input {
 
 	/**
 	 * A finger lifted while others stay down. With two or more left the pinch carries on from
-	 * where they are now; with one left it continues as a drag from there.
+	 * where they are now. With one left the pinch is over: it glides on if it was moving, and the
+	 * finger left is handed over (see `handover`).
 	 */
 	private rebase(t: number, release: boolean) {
-		this.pinchSamples = [];
 		const rest = this.pointers.values().next().value;
 		if (this.pointers.size >= 2) {
+			this.pinchSamples = [];
 			this.lastPinch = this.pinchState();
 			return;
 		}
-		if (this.lastPinch && release) this.releasePinch();
+		if (this.lastPinch) {
+			if (release) this.releasePinch(t);
+			else this.logPinch("no glide: the browser cancelled the touch");
+		}
+		this.pinchSamples = [];
 		this.lastPinch = null;
 		if (!rest) return;
+		this.handover = { ...rest, t };
 		this.start = { ...rest, t: performance.now() };
 		this.moved = true;
-		this.dragSamples = [{ ...rest, t }];
+		this.dragSamples = [];
 	}
 
 	private up = (e: PointerEvent) => {
@@ -286,6 +401,12 @@ export class Input {
 			return;
 		}
 		this.map.setGrabbing(false);
+		if (this.handover) {
+			// The last finger of a pinch lifting without dragging: nothing is clicked or flung.
+			this.handover = null;
+			this.start = null;
+			return;
+		}
 		if (!wasSingle || !this.start) return;
 		this.start = null;
 
@@ -305,6 +426,7 @@ export class Input {
 			return;
 		}
 		this.map.setGrabbing(false);
+		this.handover = null;
 		this.start = null;
 		this.lastPinch = null;
 		this.pinchSamples = [];
@@ -345,6 +467,7 @@ export class Input {
 
 	private dblclick = (e: MouseEvent) => {
 		if (!this.map.doubleClickZoom) return;
+		this.map.logGesture("double click: zooming in");
 		this.map.zoomBy(-1, this.local(e), 70, ZOOM_GRID);
 	};
 

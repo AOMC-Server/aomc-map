@@ -7,6 +7,7 @@ import {
 	type View,
 	visibleTiles,
 } from "@aomc/shared/view";
+import { loadTile } from "./tileLoader";
 
 export type TileSource = (zoom: number, x: number, y: number) => string;
 
@@ -476,7 +477,7 @@ export class TileLayer {
 		if (!this.paused) this.used.clear();
 		if (!this.source) return;
 		const { tileSize: T, maxZoom } = this.opts;
-		ctx.imageSmoothingQuality = "high";
+		ctx.imageSmoothingQuality = "low";
 		const level = tileLevel(view.zoom, dpr, maxZoom);
 		const range = visibleTiles(view, size, level, T);
 		const wanted = new Map<string, Wanted>();
@@ -806,12 +807,7 @@ export class TileLayer {
 		this.inFlight++;
 		this.evict();
 
-		fetch(url, { signal: abort.signal })
-			.then(async (res) => {
-				if (res.status === 204) return null;
-				if (!res.ok) throw new Error(`tile ${res.status}`);
-				return createImageBitmap(await res.blob());
-			})
+		loadTile(url, abort.signal)
 			.then((bitmap) => {
 				if (target.loading !== loading) {
 					bitmap?.close();

@@ -1,4 +1,4 @@
-import { scaleOf, type View } from "@aomc/shared/view";
+import { clampZoom, scaleOf, type View } from "@aomc/shared/view";
 
 /** Closer than this to the goal, the zoom snaps onto it and the animation ends. */
 const SNAP = 0.002;
@@ -45,6 +45,25 @@ export function easeZoom(
 	if (smoothing <= 0 || Math.abs(diff) < SNAP) return goal;
 	const next = current + diff * (1 - Math.exp(-Math.max(dtMs, 0) / smoothing));
 	return Math.abs(goal - next) < SNAP ? goal : next;
+}
+
+/**
+ * One frame of a released pinch's zoom glide: the zoom after `dt` ms at `vz` levels per ms, and
+ * the speed after slowing down by `friction` (per ms). A frame that takes no time (its time can be
+ * from before the fingers lifted) moves nothing and keeps the speed; reaching the zoom limit
+ * stops it.
+ */
+export function glideZoom(
+	zoom: number,
+	vz: number,
+	dt: number,
+	maxZoom: number,
+	friction: number,
+): { zoom: number; vz: number } {
+	const wanted = zoom + vz * dt;
+	const next = clampZoom(wanted, maxZoom);
+	if (next !== wanted) return { zoom: next, vz: 0 };
+	return { zoom: next, vz: vz * Math.exp(-friction * dt) };
 }
 
 /**

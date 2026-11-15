@@ -27,7 +27,7 @@ import { FeatureLayer, type Hit, type RenderLayer } from "./featureLayer";
 import type { Bounds } from "./geometry";
 import { type DragSession, Input } from "./input";
 import { Renderer } from "./renderer";
-import { easeZoom, snapZoomGoal, tweenView } from "./smoothZoom";
+import { easeZoom, glideZoom, snapZoomGoal, tweenView } from "./smoothZoom";
 import {
 	type PreloadProgress,
 	TileLayer,
@@ -74,6 +74,13 @@ const BASE_CURSOR = "crosshair";
  * Framework-free canvas map. The UI only talks to the map through this class.
  * Coordinates are Minecraft blocks (x east, z south); overlays draw in css pixels.
  */
+/** Phones report 3x or more, which costs 2x the pixels of 2x for detail that is barely visible. */
+const MAX_RENDER_RATIO = 2;
+
+function renderRatio(): number {
+	return Math.min(window.devicePixelRatio || 1, MAX_RENDER_RATIO);
+}
+
 export class MapView {
 	readonly canvas = document.createElement("canvas");
 	readonly maxZoom: number;
@@ -137,7 +144,13 @@ export class MapView {
 			alpha: true,
 		}) as CanvasRenderingContext2D;
 
-		this.renderer = new Renderer(() => this.draw());
+		this.renderer = new Renderer(
+			() => this.draw(),
+			(err) => {
+				console.error(err);
+				this.logGesture(`frame error: ${String(err).slice(0, 60)}`);
+			},
+		);
 		this.tiles = new TileLayer({
 			tileSize: opts.tileSize,
 			maxZoom: opts.maxZoom,
@@ -263,6 +276,11 @@ export class MapView {
 		this.features.setClusterDistance(px);
 	}
 
+	/** Draws lines and areas from a cached image while panning and zooming; see FeatureLayer. */
+	setShapeCache(enabled: boolean) {
+		this.features.setShapeCache(enabled);
+	}
+
 	/** Previews the feature being edited in its new shape and style (null: stop); see FeatureLayer.setDraft. */
 	setDraftFeature(
 		layer: { id: number; color: Dye; style?: FeatureStyle | null },
@@ -352,9 +370,22 @@ export class MapView {
 		this.updateHover(null, 0, 0);
 	}
 
-	cancelAnimation() {
+	cancelAnimation(why = "cancelled") {
 		this.zoomGoal = null;
-		this.renderer.stopAnimation();
+		this.renderer.stopAnimation(why);
+	}
+
+	/**
+	 * Recent pinch releases and how their glides ended, newest first. Shown by the debug view;
+	 * a verdict and its measurements are separated by " | ".
+	 */
+	readonly gestureLog: string[] = [];
+
+	logGesture(line: string) {
+		this.gestureLog.unshift(line);
+		this.gestureLog.length = Math.min(this.gestureLog.length, 6);
+		console.debug("gesture:", line);
+		this.renderer.invalidate();
 	}
 
 	/**
@@ -392,7 +423,7 @@ export class MapView {
 			if (zoom !== goal.zoom) return true;
 			this.zoomGoal = null;
 			return false;
-		});
+		}, "zoom step");
 	}
 
 	/** Animates to a view, keeping `anchor` (screen px) stable while zooming. */
@@ -424,7 +455,7 @@ export class MapView {
 				this.setView(tweenView(from, to, e));
 			}
 			return t < 1;
-		});
+		}, "move to a view");
 	}
 
 	/** Lets a released drag glide on at `vx`, `vy` px per ms, slowing down with friction. */
@@ -443,7 +474,7 @@ export class MapView {
 			vx *= decay;
 			vy *= decay;
 			return Math.hypot(vx, vy) > PAN_STOP_SPEED;
-		});
+		}, "pan glide");
 	}
 
 	/**
@@ -453,26 +484,46 @@ export class MapView {
 	 */
 	zoomInertia(vz: number, anchor: ScreenPoint, vx: number, vy: number) {
 		this.zoomGoal = null;
-		if (this.motion <= 0) return;
+		if (this.motion <= 0) {
+			this.logGesture("glide skipped: camera transitions are instant");
+			return;
+		}
 		let last = performance.now();
-		this.renderer.animate((now) => {
-			const dt = Math.min(Math.max(now - last, 0), 50);
-			last = now;
-			const zoom = clampZoom(this.view.zoom + vz * dt, this.maxZoom);
-			// Hitting the zoom limit stops the zoom, but not the pan.
-			if (zoom === this.view.zoom) vz = 0;
-			let view = zoomAt(this.view, this.size, anchor.x, anchor.y, zoom);
-			view = panBy(view, vx * dt, vy * dt);
-			this.setView(view);
-			const zoomDecay = Math.exp(-ZOOM_FRICTION * dt);
-			const panDecay = Math.exp(-PAN_FRICTION * dt);
-			vz *= zoomDecay;
-			vx *= panDecay;
-			vy *= panDecay;
-			return (
-				Math.abs(vz) > ZOOM_STOP_SPEED || Math.hypot(vx, vy) > PAN_STOP_SPEED
-			);
-		});
+		const began = last;
+		const from = this.view.zoom;
+		let frames = 0;
+		this.renderer.animate(
+			(now) => {
+				// A frame's time can be from before the fingers lifted: then nothing moves yet.
+				const dt = Math.min(Math.max(now - last, 0), 50);
+				last = Math.max(now, last);
+				frames++;
+				// Hitting the zoom limit stops the zoom, but not the pan.
+				const glide = glideZoom(
+					this.view.zoom,
+					vz,
+					dt,
+					this.maxZoom,
+					ZOOM_FRICTION,
+				);
+				const zoom = glide.zoom;
+				vz = glide.vz;
+				let view = zoomAt(this.view, this.size, anchor.x, anchor.y, zoom);
+				view = panBy(view, vx * dt, vy * dt);
+				this.setView(view);
+				const panDecay = Math.exp(-PAN_FRICTION * dt);
+				vx *= panDecay;
+				vy *= panDecay;
+				return (
+					Math.abs(vz) > ZOOM_STOP_SPEED || Math.hypot(vx, vy) > PAN_STOP_SPEED
+				);
+			},
+			"pinch glide",
+			(why) =>
+				this.logGesture(
+					`glide ended: ${why === "done" ? "slowed down" : why} | ${frames} frames, ${Math.round(performance.now() - began)} ms, zoom ${(this.view.zoom - from).toFixed(2)}`,
+				),
+		);
 	}
 
 	// Internals
@@ -521,7 +572,7 @@ export class MapView {
 		const rect = this.container.getBoundingClientRect();
 		const width = Math.max(rect.width, 1);
 		const height = Math.max(rect.height, 1);
-		const dpr = window.devicePixelRatio || 1;
+		const dpr = renderRatio();
 		if (
 			width === this.size.width &&
 			height === this.size.height &&
@@ -537,7 +588,7 @@ export class MapView {
 	}
 
 	private draw() {
-		if ((window.devicePixelRatio || 1) !== this.dpr) this.resize();
+		if (renderRatio() !== this.dpr) this.resize();
 		const began = performance.now();
 		const { ctx, canvas, dpr, view, size, debug } = this;
 		ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -583,6 +634,11 @@ export class MapView {
 			`canvas  ${Math.round(size.width)}×${Math.round(size.height)} @${dpr}x`,
 			`draw    ${this.lastDrawMs.toFixed(1)} ms (last frame)`,
 		];
+		this.gestureLog.slice(0, 4).forEach((entry, i) => {
+			const [verdict, facts] = entry.split(" | ");
+			lines.push(`${i === 0 ? "gesture" : "       "} ${verdict}`);
+			if (facts) lines.push(`          ${facts}`);
+		});
 		if (tiles) {
 			lines.push(
 				`tiles   ${tiles.tiles.length} visible, ${tiles.cached} cached`,

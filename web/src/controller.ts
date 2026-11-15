@@ -11,6 +11,7 @@ import {
 	mapOutlineScales,
 	savePosition,
 	settings,
+	shapeCacheEnabled,
 	transitionFactor,
 } from "./settings";
 import {
@@ -237,6 +238,11 @@ export async function boot(container: HTMLElement) {
 		mv.setMotionScale(transitionFactor(settings.value.transitionSpeed)),
 	);
 	effect(() => mv.setPinClusterDistance(settings.value.pinClusterDistance));
+	effect(() =>
+		mv.setShapeCache(
+			shapeCacheEnabled(settings.value.shapeCache, navigator.userAgent),
+		),
+	);
 	effect(() => {
 		const {
 			debugRender,
