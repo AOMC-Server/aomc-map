@@ -8,6 +8,7 @@ import {
 	canManageLayer,
 	canModerate,
 	canViewLayer,
+	canWriteFolder,
 	effectiveLayerRole,
 	effectiveRole,
 	type LayerAccess,
@@ -146,4 +147,23 @@ describe("effectiveLayerRole", () => {
 		expect(effectiveLayerRole({ id: "u2" }, layer, null)).toBeNull();
 		expect(effectiveLayerRole(null, layer, null)).toBeNull();
 	});
+});
+
+describe("canWriteFolder", () => {
+	// The folder /a/b has id 2 below /a (id 1); the grant is on /a.
+	const granted = new Set([1]);
+	const cases: [string, Role, number[], ReadonlySet<number>, boolean][] = [
+		["moderators write anywhere", "moderator", [], new Set(), true],
+		["owners write anywhere", "owner", [1, 2], new Set(), true],
+		["a grant covers its folder", "editor", [1], granted, true],
+		["a grant covers the folders below it", "editor", [1, 2], granted, true],
+		["no grant, no writing", "editor", [3], granted, false],
+		["the top needs a moderator", "editor", [], granted, false],
+		["anonymous visitors never write", "viewer", [1], granted, false],
+	];
+	for (const [name, role, chain, grants, expected] of cases) {
+		test(name, () =>
+			expect(canWriteFolder(role, chain, grants)).toBe(expected),
+		);
+	}
 });

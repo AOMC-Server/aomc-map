@@ -14,6 +14,8 @@ const WRITE_SCOPES: [RegExp, TokenScope][] = [
 	[/^\/api\/dimensions\/[^/]+\/uploads\/?$/, "upload"],
 	[/^\/api\/revisions\/[^/]+\/?$/, "upload"],
 	[/^\/api\/dimensions(\/[^/]+)?\/?$/, "moderate"],
+	[/^\/api\/files\/folders\/[^/]+\/grants(\/.*)?$/, "moderate"],
+	[/^\/api\/files(\/.*)?$/, "upload"],
 	[/^\/api\/layers(\/.*)?$/, "features"],
 	[/^\/api\/features(\/.*)?$/, "features"],
 	// Revoking: layer invites need `features`; map invites need an owner, which needs `manage`.

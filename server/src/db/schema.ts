@@ -12,6 +12,7 @@ import {
 	type TokenScope,
 } from "@aomc/shared";
 import {
+	type AnySQLiteColumn,
 	index,
 	integer,
 	primaryKey,
@@ -323,6 +324,74 @@ export const invites = sqliteTable("invites", {
 	revoked: bool("revoked").notNull().default(false),
 });
 
+/**
+ * Folders of the file library (/files). Names are unique within a folder, ignoring case, across
+ * folders and files alike; the server checks that, since a null parent can't be in a unique index.
+ */
+export const fileFolders = sqliteTable(
+	"file_folders",
+	{
+		id: id(),
+		/** null: at the top of the library. */
+		parentId: integer("parent_id").references(
+			(): AnySQLiteColumn => fileFolders.id,
+			{ onDelete: "cascade" },
+		),
+		name: text("name").notNull(),
+		description: text("description").notNull().default(""),
+		createdBy: text("created_by")
+			.notNull()
+			.references(() => users.id),
+		createdAt: createdAt(),
+	},
+	(t) => [index("file_folders_parent").on(t.parentId)],
+);
+
+/** Files of the library; the content is `<DATA_DIR>/files/<hash>`, shared by files with the same content. */
+export const fileEntries = sqliteTable(
+	"file_entries",
+	{
+		id: id(),
+		/** null: at the top of the library. */
+		folderId: integer("folder_id").references(() => fileFolders.id, {
+			onDelete: "cascade",
+		}),
+		name: text("name").notNull(),
+		/** sha256 of the content. */
+		hash: text("hash").notNull(),
+		bytes: integer("bytes").notNull(),
+		uploadedBy: text("uploaded_by")
+			.notNull()
+			.references(() => users.id),
+		createdAt: createdAt(),
+		/** When the content was last replaced; createdAt until then. */
+		updatedAt: integer("updated_at").notNull(),
+		downloads: integer("downloads").notNull().default(0),
+	},
+	(t) => [
+		index("file_entries_folder").on(t.folderId),
+		index("file_entries_hash").on(t.hash),
+	],
+);
+
+/** Who may add, change and delete files in a folder and everything below it, besides moderators. */
+export const fileGrants = sqliteTable(
+	"file_grants",
+	{
+		folderId: integer("folder_id")
+			.notNull()
+			.references(() => fileFolders.id, { onDelete: "cascade" }),
+		userId: text("user_id")
+			.notNull()
+			.references(() => users.id, { onDelete: "cascade" }),
+		createdAt: createdAt(),
+	},
+	(t) => [
+		primaryKey({ columns: [t.folderId, t.userId] }),
+		index("file_grants_user").on(t.userId),
+	],
+);
+
 /** Short links to a view of the map: /s/<code> redirects to /?<query>. */
 export const shortLinks = sqliteTable("short_links", {
 	code: text("code").primaryKey(),
@@ -380,7 +449,7 @@ export const trafficHourly = sqliteTable(
 	{
 		hour: integer("hour").notNull(),
 		category: text("category", {
-			enum: ["tiles", "blobs", "preview", "api", "auth", "static"],
+			enum: ["tiles", "blobs", "preview", "api", "auth", "static", "files"],
 		}).notNull(),
 		/** Only for tiles and blobs; "" otherwise. */
 		domain: text("domain").notNull().default(""),

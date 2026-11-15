@@ -87,6 +87,24 @@ export function canManageLayer(
 	return actor !== null && actor.id === layer.createdBy && canEdit(role);
 }
 
+/**
+ * Add, change and delete things in a folder of the file library: moderators anywhere, other
+ * logged-in users in the folders they were given and everything below them. `chain` is the
+ * folder's id and those of the folders above it (empty for the top of the library).
+ */
+export function canWriteFolder(
+	role: Role,
+	chain: readonly number[],
+	granted: ReadonlySet<number>,
+): boolean {
+	if (!canEdit(role)) return false;
+	if (canModerate(role)) return true;
+	return chain.some((id) => granted.has(id));
+}
+
+/** Give and take away write access to folders of the file library. */
+export const canManageFiles = (role: Role) => canModerate(role);
+
 /** Whether changing a member from `current` to `next` (null = removal) would leave no owner. */
 export function leavesNoOwner(
 	owners: number,

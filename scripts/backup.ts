@@ -14,22 +14,36 @@ export type BackupResult = {
 	snapshot: string;
 	blobsCopied: number;
 	blobsSkipped: number;
+	filesCopied: number;
+	filesSkipped: number;
 	pruned: string[];
 };
 
+/** Copies under a temporary name, so an interrupted run never leaves a truncated copy. */
+async function copyNew(from: string, to: string): Promise<boolean> {
+	if (existsSync(to)) return false;
+	await mkdir(dirname(to), { recursive: true });
+	await copyFile(from, `${to}.tmp`);
+	await rename(`${to}.tmp`, to);
+	return true;
+}
+
 /**
  * Takes a consistent snapshot of the database (VACUUM INTO, safe while the server runs) and copies
- * any blobs the destination does not have yet.
+ * any blobs and file library contents the destination does not have yet (`skipFiles` leaves the
+ * file library out, as it can be large).
  *
  * Blobs are content-addressed and immutable, so "exists" means "identical" and the destination
- * only ever grows. The database goes first: a blob is always written before the row that points to
- * it, so everything the snapshot references is already on disk when the blobs are copied.
+ * only ever grows. The same goes for the file library's contents. The database goes first: content
+ * is always written before the row that points to it, so everything the snapshot references is
+ * already on disk when the contents are copied.
  */
 export async function backup(opts: {
 	dataDir: string;
 	dest: string;
 	keep?: number;
 	now?: Date;
+	skipFiles?: boolean;
 }): Promise<BackupResult> {
 	const dbFile = paths.dbFile(opts.dataDir);
 	if (!existsSync(dbFile)) throw new Error(`no database at ${dbFile}`);
@@ -54,16 +68,21 @@ export async function backup(opts: {
 	if (existsSync(blobsDir)) {
 		for (const rel of await readdir(blobsDir, { recursive: true })) {
 			if (!webpBlobHash(basename(rel))) continue; // skips copies and in-progress .tmp files
-			const target = join(opts.dest, "blobs", rel);
-			if (existsSync(target)) {
-				blobsSkipped++;
-				continue;
-			}
-			await mkdir(dirname(target), { recursive: true });
-			// Copy under a temporary name so an interrupted run never leaves a truncated blob.
-			await copyFile(join(blobsDir, rel), `${target}.tmp`);
-			await rename(`${target}.tmp`, target);
-			blobsCopied++;
+			if (await copyNew(join(blobsDir, rel), join(opts.dest, "blobs", rel)))
+				blobsCopied++;
+			else blobsSkipped++;
+		}
+	}
+
+	let filesCopied = 0;
+	let filesSkipped = 0;
+	const filesDir = paths.filesDir(opts.dataDir);
+	if (!opts.skipFiles && existsSync(filesDir)) {
+		for (const name of await readdir(filesDir)) {
+			if (!/^[0-9a-f]{64}$/.test(name)) continue; // skips uploads in progress
+			if (await copyNew(join(filesDir, name), join(opts.dest, "files", name)))
+				filesCopied++;
+			else filesSkipped++;
 		}
 	}
 
@@ -80,7 +99,14 @@ export async function backup(opts: {
 			pruned.push(old);
 		}
 	}
-	return { snapshot, blobsCopied, blobsSkipped, pruned };
+	return {
+		snapshot,
+		blobsCopied,
+		blobsSkipped,
+		filesCopied,
+		filesSkipped,
+		pruned,
+	};
 }
 
 if (import.meta.main) {
@@ -90,23 +116,33 @@ if (import.meta.main) {
 		options: {
 			data: { type: "string", default: process.env.DATA_DIR ?? "./data" },
 			keep: { type: "string", default: "14" },
+			"skip-files": { type: "boolean", default: false },
 		},
 	});
 	const dest = positionals[0];
 	if (!dest) {
 		console.error(
-			"usage: bun scripts/backup.ts <destination-dir> [--data ./data] [--keep 14]",
+			"usage: bun scripts/backup.ts <destination-dir> [--data ./data] [--keep 14] [--skip-files]",
 		);
 		process.exit(2);
 	}
 	const keep = orExit(() =>
 		positiveNumber("keep", values.keep as string, { integer: true }),
 	);
-	const result = await backup({ dataDir: values.data as string, dest, keep });
+	const result = await backup({
+		dataDir: values.data as string,
+		dest,
+		keep,
+		skipFiles: values["skip-files"] as boolean,
+	});
 	console.log(`database: ${result.snapshot}`);
 	console.log(
 		`blobs: ${result.blobsCopied} copied, ${result.blobsSkipped} already there`,
 	);
+	if (!values["skip-files"])
+		console.log(
+			`files: ${result.filesCopied} copied, ${result.filesSkipped} already there`,
+		);
 	if (result.pruned.length > 0)
 		console.log(`removed old snapshots: ${result.pruned.join(", ")}`);
 }

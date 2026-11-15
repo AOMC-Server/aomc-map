@@ -107,10 +107,18 @@ export function Hotbar() {
 				shareOpen.value = true;
 			},
 		},
+		{
+			key: "6",
+			icon: "chest",
+			label: "Files",
+			hint: "Downloads such as Voxy data and Xaero presets",
+			active: false,
+			href: "/files/",
+		},
 	];
 	if (isModerator.value)
 		slots.push({
-			key: "6",
+			key: "7",
 			icon: "command",
 			label: "Manage",
 			hint: "Settings, dimensions, members and invites",

@@ -3956,6 +3956,7 @@ body.resizing {
 	--chart-4: #c55ad6;
 	--chart-5: #e05d5d;
 	--chart-6: #8c8d90;
+	--chart-7: #d6c84a;
 }
 
 .chart-box {
@@ -4078,4 +4079,173 @@ body.resizing {
 .layer.drop-target {
 	outline: 2px solid var(--accent-hi);
 	outline-offset: -2px;
+}
+
+/* ---------------------------------------------------------------------------------------------
+ * The file library (/files)
+ * ------------------------------------------------------------------------------------------- */
+.file-crumbs {
+	display: flex;
+	flex-wrap: wrap;
+	align-items: center;
+	gap: 4px;
+	margin-bottom: 10px;
+	font: 700 18px / 1.3 var(--sans);
+}
+
+.file-crumbs a {
+	color: inherit;
+	text-decoration: none;
+}
+
+.file-crumbs a:hover {
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+
+.file-crumbs .sep {
+	margin: 0 6px 0 2px;
+	color: var(--muted);
+}
+
+.file-description {
+	margin: 0 0 12px;
+	line-height: 1.5;
+}
+
+.file-description .popup-text {
+	max-height: none;
+	margin: 0;
+	padding: 0;
+}
+
+.file-toolbar {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 8px;
+	margin: 12px 0 0;
+}
+
+.file-listing {
+	position: relative;
+}
+
+.file-listing.dragging {
+	outline: 2px dashed var(--accent-hi);
+	outline-offset: -6px;
+}
+
+.file-drop {
+	border-radius: var(--radius);
+	position: absolute;
+	inset: 0;
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	font-weight: 700;
+	pointer-events: none;
+	background: color-mix(in srgb, var(--accent) 20%, transparent);
+}
+
+.file-table .file-name a {
+	display: inline-flex;
+	align-items: center;
+	gap: 8px;
+	font-weight: 600;
+	color: inherit;
+	text-decoration: none;
+	white-space: normal;
+	word-break: break-word;
+}
+
+.file-table .file-name a:hover span {
+	text-decoration: underline;
+	text-underline-offset: 3px;
+}
+
+.file-table .file-name .pixel-icon {
+	flex: none;
+}
+
+.file-table .file-name {
+	white-space: normal;
+}
+
+.file-table .stats-player .avatar {
+	width: 20px;
+	height: 20px;
+}
+
+.file-actions {
+	width: 1%;
+	text-align: right;
+}
+
+.row-menu {
+	position: relative;
+	display: inline-block;
+}
+
+.row-menu > summary {
+	list-style: none;
+}
+
+.row-menu > summary::-webkit-details-marker {
+	display: none;
+}
+
+.row-menu-list {
+	border-radius: var(--radius-sm);
+	position: absolute;
+	right: 0;
+	top: calc(100% + 4px);
+	z-index: 5;
+	display: flex;
+	flex-direction: column;
+	min-width: 180px;
+	padding: 4px;
+	background: var(--s1);
+	border: var(--bw) solid var(--line);
+	box-shadow: var(--surface-shadow);
+}
+
+.row-menu-list button {
+	border-radius: var(--radius-sm);
+	padding: 8px 10px;
+	text-align: left;
+}
+
+.row-menu-list button:hover,
+.row-menu-list button:focus-visible {
+	background: var(--s2);
+}
+
+.upload-jobs {
+	list-style: none;
+	margin: 0;
+	padding: 0;
+}
+
+.upload-jobs li {
+	margin: 0 0 10px;
+}
+
+.upload-job-head {
+	display: flex;
+	flex-wrap: wrap;
+	justify-content: space-between;
+	gap: 4px 12px;
+	margin-bottom: 4px;
+	font-size: 14px;
+}
+
+.upload-job-name {
+	font-weight: 600;
+	word-break: break-word;
+}
+
+@media (max-width: 640px) {
+	.file-table .file-meta {
+		display: none;
+	}
 }

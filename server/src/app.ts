@@ -18,6 +18,8 @@ import { blobRoutes } from "./routes/blobs";
 import { dimensionRoutes } from "./routes/dimensions";
 import { eventRoutes } from "./routes/events";
 import { featureRoutes } from "./routes/features";
+import { fileDownloadRoutes } from "./routes/fileDownloads";
+import { fileRoutes } from "./routes/files";
 import { inviteRoutes } from "./routes/invites";
 import { layerRoutes } from "./routes/layers";
 import { legacyTileRoutes } from "./routes/legacyTiles";
@@ -34,7 +36,8 @@ import type { Services } from "./services";
 import type { AppEnv } from "./types";
 
 const isUpload = (path: string) =>
-	/^\/api\/dimensions\/[^/]+\/uploads\/?$/.test(path);
+	/^\/api\/dimensions\/[^/]+\/uploads\/?$/.test(path) ||
+	/^\/api\/files\/upload\/?$/.test(path);
 
 /** Writes that leave the map alone: your own account and tokens, and short links. */
 const worksInMaintenance = (path: string) =>
@@ -70,6 +73,8 @@ export function createApp({ db, env, services, fetch: fetchFn }: AppDeps) {
 		.route("/map", legacyTileRoutes)
 		.use(authMiddleware)
 		.use(scopeMiddleware)
+		// Downloads need a login but no map; what is not a file falls through to the web app.
+		.route("/files", fileDownloadRoutes)
 		.use("/api/*", async (c, next) => {
 			const { map, role } = await loadAccess(db, c.var.user);
 			c.set("map", map);
@@ -92,6 +97,7 @@ export function createApp({ db, env, services, fetch: fetchFn }: AppDeps) {
 		})
 		.use("/api/layers/*", limitWrites)
 		.use("/api/features/*", limitWrites)
+		.use("/api/files/*", limitWrites)
 		.route("/auth", authRoutes(fetchFn))
 		.route("/api/me", meRoutes)
 		.route("/api/tokens", tokenRoutes)
@@ -103,6 +109,7 @@ export function createApp({ db, env, services, fetch: fetchFn }: AppDeps) {
 		.route("/api/invites", inviteRoutes)
 		.route("/api/preview.png", previewRoutes)
 		.route("/api/features", featureRoutes)
+		.route("/api/files", fileRoutes)
 		.route("/api/stats", statsRoutes)
 		.route("/api/links", linkRoutes)
 		.route("/s", shortLinkRedirect)

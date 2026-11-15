@@ -10,6 +10,7 @@ import {
 	savePalette,
 } from "./theme";
 import { App } from "./ui/App";
+import { FilesPage } from "./ui/FilesPage";
 import { InvitePage, inviteTokenFromPath } from "./ui/InvitePage";
 import { ManagePage } from "./ui/ManagePage";
 import { PrivacyPage } from "./ui/PrivacyPage";
@@ -31,8 +32,10 @@ window.addEventListener("resize", applyFontSize);
 
 const inviteToken = inviteTokenFromPath(location.pathname);
 const path = location.pathname.replace(/\/+$/, "");
+const onFiles = path === "/files" || path.startsWith("/files/");
 const onMap =
 	!inviteToken &&
+	!onFiles &&
 	path !== "/settings" &&
 	path !== "/manage" &&
 	path !== "/stats" &&
@@ -63,6 +66,8 @@ render(
 		<StatsPage />
 	) : path === "/privacy" ? (
 		<PrivacyPage />
+	) : onFiles ? (
+		<FilesPage />
 	) : (
 		<App />
 	),

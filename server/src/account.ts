@@ -4,6 +4,9 @@ import {
 	apiTokens,
 	dimensions,
 	featureRevisions,
+	fileEntries,
+	fileFolders,
+	fileGrants,
 	invites,
 	layerMembers,
 	layers,
@@ -105,6 +108,33 @@ export function exportAccount(db: Db, userId: string) {
 			.from(invites)
 			.where(eq(invites.createdBy, userId))
 			.all(),
+		filesUploaded: db
+			.select({
+				id: fileEntries.id,
+				folderId: fileEntries.folderId,
+				name: fileEntries.name,
+				bytes: fileEntries.bytes,
+				createdAt: fileEntries.createdAt,
+				updatedAt: fileEntries.updatedAt,
+			})
+			.from(fileEntries)
+			.where(eq(fileEntries.uploadedBy, userId))
+			.all(),
+		fileFoldersCreated: db
+			.select({
+				id: fileFolders.id,
+				parentId: fileFolders.parentId,
+				name: fileFolders.name,
+				createdAt: fileFolders.createdAt,
+			})
+			.from(fileFolders)
+			.where(eq(fileFolders.createdBy, userId))
+			.all(),
+		fileFolderAccess: db
+			.select({ folderId: fileGrants.folderId, since: fileGrants.createdAt })
+			.from(fileGrants)
+			.where(eq(fileGrants.userId, userId))
+			.all(),
 		shortLinks: db
 			.select({
 				code: shortLinks.code,
@@ -120,11 +150,11 @@ export function exportAccount(db: Db, userId: string) {
 export type DeleteResult = "deleted" | "missing" | "last owner";
 
 /**
- * Deletes an account. The login, sessions, tokens, roles, layer memberships and the invites the
- * user made go away. What they added to the map (uploads, layers, features and their history)
- * stays, because others build on it, but is moved to a new placeholder user named "Deleted
- * user" that carries nothing of theirs: no Discord id, name or avatar. Their short links are
- * kept without a creator.
+ * Deletes an account. The login, sessions, tokens, roles, layer memberships, folder access and
+ * the invites the user made go away. What they added (uploads, layers, features and their
+ * history, and files and folders of the file library) stays, because others build on it, but is
+ * moved to a new placeholder user named "Deleted user" that carries nothing of theirs: no Discord
+ * id, name or avatar. Their short links are kept without a creator.
  */
 export function deleteAccount(db: Db, userId: string): DeleteResult {
 	return db.transaction(
@@ -174,12 +204,20 @@ export function deleteAccount(db: Db, userId: string): DeleteResult {
 				.set({ authorId: placeholder })
 				.where(eq(featureRevisions.authorId, userId))
 				.run();
+			tx.update(fileEntries)
+				.set({ uploadedBy: placeholder })
+				.where(eq(fileEntries.uploadedBy, userId))
+				.run();
+			tx.update(fileFolders)
+				.set({ createdBy: placeholder })
+				.where(eq(fileFolders.createdBy, userId))
+				.run();
 			tx.update(shortLinks)
 				.set({ createdBy: null })
 				.where(eq(shortLinks.createdBy, userId))
 				.run();
 			tx.delete(invites).where(eq(invites.createdBy, userId)).run();
-			// Sessions, tokens, the map role and layer memberships go with the row.
+			// Sessions, tokens, the map role, layer memberships and folder access go with the row.
 			tx.delete(users).where(eq(users.id, userId)).run();
 			return "deleted";
 		},

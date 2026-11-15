@@ -110,7 +110,8 @@ export function PrivacyPage() {
 					<li>when your account was created and when you last logged in;</li>
 					<li>
 						your <b>role</b> on the map, if you have been made a moderator or
-						owner, and which private layers you have been invited to.
+						owner, which private layers you have been invited to, and which
+						folders of the file library you may change.
 					</li>
 				</ul>
 				<p>
@@ -138,6 +139,11 @@ export function PrivacyPage() {
 						<b>Layers and features</b> (pins, lines and areas) with their names,
 						texts and positions, including every earlier version and deleted
 						ones, so changes can be followed and undone.
+					</li>
+					<li>
+						<b>Files</b> you upload to the file library and folders you make
+						there: their names, sizes and when they were added. They are shown
+						with your name to everyone who is logged in.
 					</li>
 					<li>
 						<b>Invites</b> and <b>short links</b> you make, and{" "}

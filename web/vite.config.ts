@@ -12,6 +12,16 @@ export default defineConfig({
 			"^/map/": backend,
 			"/auth": backend,
 			"/scalar": backend,
+			// Files are downloaded from the server; folders (ending in /) are pages of the app.
+			"/files": {
+				target: backend,
+				bypass: (req) => {
+					const path = req.url?.split("?")[0] ?? "";
+					return path === "/files" || path.endsWith("/")
+						? "/index.html"
+						: undefined;
+				},
+			},
 		},
 	},
 });

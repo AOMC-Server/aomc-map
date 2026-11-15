@@ -30,6 +30,17 @@ const envSchema = z.object({
 		.number()
 		.int()
 		.default(200 * 1024 * 1024),
+	// The file library (/files): the largest single file, and all files together
+	MAX_FILE_BYTES: z.coerce
+		.number()
+		.int()
+		.positive()
+		.default(20 * 1024 ** 3),
+	FILES_QUOTA_BYTES: z.coerce
+		.number()
+		.int()
+		.min(0)
+		.default(100 * 1024 ** 3),
 	MAX_IMAGE_DIM: z.coerce.number().int().default(4096),
 	MAX_FILES_PER_UPLOAD: z.coerce.number().int().default(2000),
 	UPLOAD_RATE_LIMIT: z.coerce.number().int().default(30), // requests per user per minute

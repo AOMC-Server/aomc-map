@@ -29,6 +29,7 @@ const CATEGORIES: { key: Category; label: string; color: string }[] = [
 	{ key: "api", label: "API", color: "var(--chart-4)" },
 	{ key: "static", label: "Web app", color: "var(--chart-5)" },
 	{ key: "auth", label: "Login", color: "var(--chart-6)" },
+	{ key: "files", label: "File downloads", color: "var(--chart-7)" },
 ];
 
 const STORAGE_NOTES: Record<string, string> = {

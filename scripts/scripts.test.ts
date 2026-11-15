@@ -4,6 +4,7 @@ import {
 	existsSync,
 	mkdirSync,
 	readdirSync,
+	readFileSync,
 	statSync,
 	utimesSync,
 	writeFileSync,
@@ -152,6 +153,30 @@ describe("backup", () => {
 		expect(readdirSync(dest).filter((n) => n.startsWith("db-"))).toHaveLength(
 			2,
 		);
+	});
+
+	test("copies the file library's contents unless told to skip them", async () => {
+		const t = await withData();
+		const dir = join(t.env.DATA_DIR, "files");
+		const hash = "a".repeat(64);
+		mkdirSync(join(dir, "tmp"), { recursive: true });
+		writeFileSync(join(dir, hash), "content");
+		writeFileSync(join(dir, "tmp", "partial.tmp"), "half");
+
+		const skipped = await backup({
+			dataDir: t.env.DATA_DIR,
+			dest: tmp("backup"),
+			skipFiles: true,
+		});
+		expect(skipped.filesCopied).toBe(0);
+
+		const dest = tmp("backup");
+		const first = await backup({ dataDir: t.env.DATA_DIR, dest });
+		expect(first.filesCopied).toBe(1);
+		expect(readFileSync(join(dest, "files", hash), "utf8")).toBe("content");
+		expect(existsSync(join(dest, "files", "tmp"))).toBe(false);
+		const again = await backup({ dataDir: t.env.DATA_DIR, dest });
+		expect([again.filesCopied, again.filesSkipped]).toEqual([0, 1]);
 	});
 
 	test("snapshot names sort by time, in UTC", async () => {

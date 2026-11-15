@@ -2,8 +2,9 @@ import type { Db } from "./db/client";
 import { blobFiles } from "./db/schema";
 import type { Env } from "./env";
 import { createEventHub } from "./events";
+import { createFileStore } from "./files/store";
 import { createWorker } from "./jobs/worker";
-import { blobsDir, previewCacheDir } from "./paths";
+import { blobsDir, filesDir, previewCacheDir } from "./paths";
 import { createPreviewService } from "./preview";
 import {
 	createRateLimiter,
@@ -31,8 +32,10 @@ export function createServices(db: Db, env: Env) {
 		maxCached: env.PREVIEW_CACHE_MAX,
 	});
 	const traffic = createTraffic(db, env);
+	const files = createFileStore(filesDir(env.DATA_DIR));
 	return {
 		blobs,
+		files,
 		events,
 		worker,
 		limiter,

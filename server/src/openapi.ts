@@ -35,6 +35,11 @@ export const tags = [
 	{ name: "Sharing", description: "Invites and layer members" },
 	{ name: "Images", description: "Blobs and link previews" },
 	{ name: "Stats", description: "Contribution statistics and leaderboard" },
+	{
+		name: "Files",
+		description:
+			"The file library: folders of downloads, such as Voxy data or Xaero presets. Everything in it is for logged-in users only. A file is downloaded from its `url` (`/files/<folder>/<name>`, with the session cookie or a token with `read`). Moderators may change anything; others only the folders they were given and what is below them.",
+	},
 	{ name: "Admin", description: "Storage, traffic and server statistics" },
 	{ name: "Events", description: "Live updates (server-sent events)" },
 ];
@@ -83,10 +88,12 @@ export const errors = {
 	404: errorResponse("Not found, or not visible to you"),
 	409: errorResponse("Conflict, or the data changed since you read it"),
 	410: errorResponse("Gone: expired, revoked or used up"),
+	411: errorResponse("The request has no Content-Length"),
 	413: errorResponse("Request body too large"),
 	429: errorResponse("Rate limited"),
 	502: errorResponse("Discord could not be reached"),
 	503: errorResponse("Busy, try again shortly"),
+	507: errorResponse("Not enough storage left"),
 } as const;
 
 type Doc = {
