@@ -3,15 +3,18 @@ import type { ComponentChildren } from "preact";
 import { useEffect, useRef, useState } from "preact/hooks";
 import { api, attempt, loginUrl, ok, showNotice } from "../api";
 import {
+	createSpeedMeter,
 	type FileItem,
 	type FileTree,
 	type FolderItem,
 	namesFromLocation,
 	pathOfNames,
 	putFile,
+	type SpeedMeter,
+	secondsLeft,
 } from "../files";
 import { user } from "../state";
-import { formatBytes, formatTime } from "./format";
+import { formatBytes, formatEta, formatTime } from "./format";
 import { PixelIcon } from "./icons";
 import { Modal } from "./Modal";
 import { LoadFailed, Page, usePageLoad } from "./Page";
@@ -108,6 +111,7 @@ type Job = {
 	folder: string;
 	mode: FileConflictMode;
 	loaded: number;
+	meter: SpeedMeter;
 	state: "waiting" | "uploading" | "done" | "failed" | "skipped";
 	error?: string;
 };
@@ -200,6 +204,7 @@ function Library(props: { names: string[]; go: Go }) {
 				let mode = job.mode;
 				for (;;) {
 					job.loaded = 0;
+					job.meter = createSpeedMeter();
 					// Ask before sending what the server would refuse, rather than after a long upload.
 					const clash = mode === "fail" ? knownClash(job) : null;
 					const signal = abort.current.signal;
@@ -211,6 +216,7 @@ function Library(props: { names: string[]; go: Go }) {
 								mode,
 								(loaded) => {
 									job.loaded = loaded;
+									job.meter.sample(loaded);
 									refresh();
 								},
 								signal,
@@ -259,6 +265,7 @@ function Library(props: { names: string[]; go: Go }) {
 				folder: path,
 				mode,
 				loaded: 0,
+				meter: createSpeedMeter(),
 				state: tooBig ? "failed" : "waiting",
 				error: tooBig
 					? `Larger than the ${formatBytes(max)} a file may be.`
@@ -793,6 +800,15 @@ function RowMenu(props: { actions: [string, () => void][] }) {
 	);
 }
 
+/** "1.2 GB of 4 GB · 25 MB/s · 2 min 10 s left" */
+function uploadStatus(j: Job, speed: number | null): string {
+	const parts = [`${formatBytes(j.loaded)} of ${formatBytes(j.file.size)}`];
+	const left = secondsLeft(j.file.size - j.loaded, speed);
+	if (speed !== null && left !== null)
+		parts.push(`${formatBytes(speed)}/s`, `${formatEta(left)} left`);
+	return parts.join(" · ");
+}
+
 function UploadList(props: {
 	jobs: Job[];
 	busy: boolean;
@@ -800,10 +816,37 @@ function UploadList(props: {
 	onClear: () => void;
 }) {
 	const finished = props.jobs.filter((j) => j.state === "done").length;
+	// Estimates move on while an upload stalls, so look again every second.
+	const [, tick] = useState(0);
+	useEffect(() => {
+		if (!props.busy) return;
+		const timer = setInterval(() => tick((n) => n + 1), 1000);
+		return () => clearInterval(timer);
+	}, [props.busy]);
+
+	const now = performance.now();
+	const current = props.jobs.find((j) => j.state === "uploading");
+	const speed = current?.meter.speed(now) ?? null;
+	const waiting = props.jobs.filter((j) => j.state === "waiting");
+	const allLeft =
+		current && waiting.length > 0
+			? secondsLeft(
+					current.file.size -
+						current.loaded +
+						waiting.reduce((n, j) => n + j.file.size, 0),
+					speed,
+				)
+			: null;
 	return (
 		<section class="page-section">
 			<h2>
 				Uploads ({finished} of {props.jobs.length} done)
+				{allLeft !== null && (
+					<span class="muted upload-eta">
+						{" "}
+						· about {formatEta(allLeft)} left for all
+					</span>
+				)}
 			</h2>
 			<ul class="upload-jobs">
 				{props.jobs.map((j) => {
@@ -818,7 +861,7 @@ function UploadList(props: {
 								</span>
 								<span class={j.state === "failed" ? "error-text" : "muted"}>
 									{j.state === "uploading"
-										? `${formatBytes(j.loaded)} of ${formatBytes(j.file.size)}`
+										? uploadStatus(j, j === current ? speed : null)
 										: j.state === "failed"
 											? j.error
 											: j.state === "done"

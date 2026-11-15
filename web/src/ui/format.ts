@@ -68,3 +68,13 @@ export function formatRemaining(ms: number): string {
 	if (hours < 48) return `${hours}h`;
 	return `${Math.floor(hours / 24)}d`;
 }
+
+/** "45 s", "3 min 20 s", "1 h 5 min": how long something still takes, for estimates. */
+export function formatEta(seconds: number): string {
+	const total = Math.max(1, Math.ceil(seconds));
+	if (total < 60) return `${total} s`;
+	const m = Math.floor(total / 60);
+	if (m < 10) return `${m} min ${total % 60} s`;
+	if (m < 60) return `${m} min`;
+	return `${Math.floor(m / 60)} h ${m % 60} min`;
+}
