@@ -11,7 +11,7 @@ A web map for a Minecraft server, built from [Xaero's World Map](https://modrint
 server/    Hono API, SQLite schema + migrations, tile pipeline, job worker
 shared/    zod schemas and the coordinate / projection math used by both sides
 web/       Vite + Preact app; the map engine in web/src/map is framework-free canvas2D
-scripts/   backup, blob garbage collection, v1 importer
+scripts/   backup, blob garbage collection, v1 importer, spreadsheet importer
 ```
 
 ## Quick start with Docker
@@ -264,6 +264,15 @@ bun scripts/import-v1.ts --url https://map.example.com \
 ```
 
 It uploads in batches (`--batch`, default 200; also capped by the server's `MAX_FILES_PER_UPLOAD` and `MAX_UPLOAD_BYTES`, which it reads from `/api/map`) with explicit coordinates, waits for each batch to finish, and records finished files in the state file, so an interrupted run resumes where it stopped (run the same command again). Each tile is sent with an export date, so the import layers under newer real exports like any [old export](#using-the-map): by default the file's modified time, cut back to its UTC day (one revision per day), or `--date 2026-01-31` for all tiles. `--dims overworld,nether` limits the dimensions and `--dim-map old=slug` renames one. The dimensions must already exist on the map (all are checked before anything is uploaded). Tiles that are entirely black have nothing to import and are skipped, and so are tiles the server already has (so a run without its state file doesn't import twice). Check the result on a copy of your data first: a moderator can delete an import batch by batch from the upload log, but nothing deletes a whole import in one go.
+
+### Importing features from a spreadsheet
+
+```bash
+export AOMC_TOKEN=aomc_…          # a token with the `features` scope
+bun scripts/import-xlsx.ts --url https://map.example.com --file AOMC-map.xlsx [--dry-run]
+```
+
+Each sheet is a layer (sheets with `!` in the name are skipped). The sheet name sets the layer: `@<dimension>` first picks the dimension (default `overworld`, change with `--dimension`, or rename with `--dim-map nether=slug`), a leading `.` hides it by default, and a trailing `#<color>` sets its colour. Rows are `name | type | popup | coordinates` with type `Pin`, `Line` or `Polygon` and coordinates like `x z, x z, …`; a `#<color>` at the end of a name colours that feature. A layer is matched by dimension and name, created if missing, and its features are **replaced** by the sheet's rows. Rows that cannot be read are reported and skipped; lines longer than 2000 points are split into consecutive lines. `--sheet "Name"` limits the import to a sheet, and `--dry-run` only reports what would happen.
 
 ### Rate limits and quotas
 

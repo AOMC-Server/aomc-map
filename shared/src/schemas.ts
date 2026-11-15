@@ -45,7 +45,12 @@ export const dimensionScaleSchema = z
 	.nullable();
 
 /** Picks the dimension's block icon and the interface colours while it is shown. */
-export const DIMENSION_THEMES = ["overworld", "nether", "end"] as const;
+export const DIMENSION_THEMES = [
+	"overworld",
+	"nether",
+	"end",
+	"unknown",
+] as const;
 export const dimensionThemeSchema = z.enum(DIMENSION_THEMES);
 export type DimensionTheme = z.infer<typeof dimensionThemeSchema>;
 

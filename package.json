@@ -16,11 +16,13 @@
 		"backup": "bun scripts/backup.ts",
 		"gc-blobs": "bun scripts/gc-blobs.ts",
 		"import-v1": "bun scripts/import-v1.ts",
+		"import-xlsx": "bun scripts/import-xlsx.ts",
 		"db:generate": "bun --cwd server run db:generate"
 	},
 	"devDependencies": {
 		"@biomejs/biome": "^2.0.0",
 		"@types/bun": "latest",
-		"typescript": "^5.6.0"
+		"typescript": "^5.6.0",
+		"xlsx": "^0.18.5"
 	}
 }

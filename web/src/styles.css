@@ -267,6 +267,81 @@
 	color-scheme: light;
 }
 
+/* Unknown dimensions: overworld greys with steel-blue accents. */
+[data-palette="unknown"][data-mode="dark"] {
+	--ink: #1e1e1f;
+	--well: #1e1e1f;
+	--s1: #313233;
+	--s2: #48494a;
+	--s3: #58585a;
+	--s4: #6d6d6f;
+	--card-lo: #3a3b3c;
+	--sheen: rgba(255, 255, 255, 0.07);
+	--text: #ffffff;
+	--muted: #b1b2b5;
+	--faint: #8c8d90;
+	--focus: #ffffff;
+
+	--light: #d0d1d4;
+	--light-hover: #e6e8eb;
+	--light-hi: #ecedee;
+	--light-lo: #58585a;
+	--accent: #4a6f9a;
+	--accent-hover: #37557a;
+	--accent-hi: #6890c0;
+	--accent-lo: #263b55;
+	--chrome: #4a4f66;
+	--yellow: #ffe866;
+	--link: #8cb8ee;
+	--ok: #8cb8ee;
+	--err: #ff7b7b;
+	--dye-shade: #000 0%;
+
+	--shadow: rgba(0, 0, 0, 0.35);
+	--backdrop: rgba(16, 16, 17, 0.72);
+	--map-bg: #1b1d22;
+	--arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 4' shape-rendering='crispEdges'%3E%3Cpath fill='%23ffffff' d='M0 0h7v1H0zM1 1h5v1H1zM2 2h3v1H2zM3 3h1v1H3z'/%3E%3C/svg%3E");
+
+	color-scheme: dark;
+}
+
+[data-palette="unknown"][data-mode="light"] {
+	--ink: #1e1e1f;
+	--well: #f4f4f4;
+	--s1: #c6c6c6;
+	--s2: #d6d6d6;
+	--s3: #e4e4e4;
+	--s4: #8b8b8b;
+	--card-lo: #a8a8a8;
+	--sheen: rgba(255, 255, 255, 0.7);
+	--text: #1e1e1f;
+	--muted: #4d4d50;
+	--faint: #707074;
+	--focus: #1e1e1f;
+
+	--light: #ededed;
+	--light-hover: #ffffff;
+	--light-hi: #ffffff;
+	--light-lo: #8b8b8b;
+	--accent: #4a6f9a;
+	--accent-hover: #37557a;
+	--accent-hi: #6890c0;
+	--accent-lo: #263b55;
+	--chrome: #4a4f66;
+	--yellow: #8a6500;
+	--link: #2f5a8c;
+	--ok: #2f5a8c;
+	--err: #b3261e;
+	--dye-shade: #000 45%;
+
+	--shadow: rgba(0, 0, 0, 0.25);
+	--backdrop: rgba(40, 40, 40, 0.5);
+	--map-bg: #1b1d22;
+	--arrow: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 7 4' shape-rendering='crispEdges'%3E%3Cpath fill='%231e1e1f' d='M0 0h7v1H0zM1 1h5v1H1zM2 2h3v1H2zM3 3h1v1H3z'/%3E%3C/svg%3E");
+
+	color-scheme: light;
+}
+
 /*
  * Dye palettes, for the tooltip and popup of a feature: the surfaces take a muted hint of the
  * feature's colour (--dye) and the title bars a darker shade of it, so each reads as a theme of

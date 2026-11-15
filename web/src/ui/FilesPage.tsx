@@ -499,7 +499,7 @@ function Library(props: { names: string[]; go: Go }) {
 									<tr key={`d${f.id}`}>
 										<td class="file-name">
 											<FolderLink href={f.url} go={go}>
-												<PixelIcon name="chest" size={20} />
+												<PixelIcon name="archive" size={20} />
 												<span>{f.name}</span>
 											</FolderLink>
 										</td>
@@ -543,7 +543,7 @@ function Library(props: { names: string[]; go: Go }) {
 									<tr key={`f${f.id}`}>
 										<td class="file-name">
 											<a href={f.url} download={f.name}>
-												<PixelIcon name="paper" size={20} />
+												<PixelIcon name="file" size={20} />
 												<span>{f.name}</span>
 											</a>
 										</td>

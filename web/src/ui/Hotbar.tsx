@@ -60,7 +60,7 @@ export function Hotbar() {
 	const slots: Slot[] = [
 		{
 			key: "1",
-			icon: "banner",
+			icon: "layers",
 			label: "Layers",
 			hint: "Markers, lines and areas",
 			active: sidePanel.value === "layers",
@@ -68,7 +68,7 @@ export function Hotbar() {
 		},
 		{
 			key: "2",
-			icon: "clock",
+			icon: "history",
 			label: "History",
 			hint: "Earlier versions of the map",
 			active: sidePanel.value === "history" || rev.value !== null,
@@ -78,7 +78,7 @@ export function Hotbar() {
 		},
 		{
 			key: "3",
-			icon: "compass",
+			icon: "measure",
 			label: "Measure",
 			hint: "Click points to measure a path (Esc stops, then clears)",
 			active: activeTool.value === "measure",
@@ -99,7 +99,7 @@ export function Hotbar() {
 		},
 		{
 			key: "5",
-			icon: "pearl",
+			icon: "share",
 			label: "Share",
 			hint: "A short link to this place, zoom and layers",
 			active: shareOpen.value,
@@ -109,7 +109,7 @@ export function Hotbar() {
 		},
 		{
 			key: "6",
-			icon: "chest",
+			icon: "files",
 			label: "Files",
 			hint: "Downloads such as Voxy data and Xaero presets",
 			active: false,
@@ -119,7 +119,7 @@ export function Hotbar() {
 	if (isModerator.value)
 		slots.push({
 			key: "7",
-			icon: "command",
+			icon: "manage",
 			label: "Manage",
 			hint: "Settings, dimensions, members and invites",
 			active: false,

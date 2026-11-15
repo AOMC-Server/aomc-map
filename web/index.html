@@ -15,7 +15,7 @@
 				root.style = "bedrock";
 				try {
 					const STYLES = ["bedrock", "win98", "xp", "modern"];
-					const PALETTES = ["overworld", "nether", "end"];
+					const PALETTES = ["overworld", "nether", "end", "unknown"];
 					const s = JSON.parse(localStorage.getItem("aomc.settings") || "{}") || {};
 					const light = matchMedia("(prefers-color-scheme: light)").matches;
 					if (s.mode === "light" || (s.mode === "system" && light)) root.mode = "light";

@@ -43,6 +43,7 @@ export const DIMENSION_THEME_NAMES: Record<DimensionTheme, string> = {
 	overworld: "Overworld",
 	nether: "Nether",
 	end: "The End",
+	unknown: "Unknown",
 };
 
 export const isStyle = (value: unknown): value is StyleId =>
