@@ -137,12 +137,22 @@ function Traffic(props: { data: Body }) {
 	const { traffic } = props.data;
 	const [metric, setMetric] = useState<"bytes" | "requests">("bytes");
 
-	const series: ChartSeries[] = CATEGORIES.map((c) => ({
-		key: c.key,
-		label: c.label,
-		color: c.color,
-		values: traffic.points.map((p) => p[metric][c.key]),
-	})).filter((s) => s.values.some((v) => v > 0));
+	const [hidden, setHidden] = useState<ReadonlySet<Category>>(new Set());
+	const toggle = (key: Category) =>
+		setHidden((prev) => {
+			const next = new Set(prev);
+			if (!next.delete(key)) next.add(key);
+			return next;
+		});
+
+	const series: ChartSeries[] = CATEGORIES.filter((c) => !hidden.has(c.key))
+		.map((c) => ({
+			key: c.key,
+			label: c.label,
+			color: c.color,
+			values: traffic.points.map((p) => p[metric][c.key]),
+		}))
+		.filter((s) => s.values.some((v) => v > 0));
 
 	const range = traffic.range;
 	const errors = range.total.s4xx + range.total.s5xx;
@@ -216,13 +226,17 @@ function Traffic(props: { data: Body }) {
 							<th class="stats-num">Redirects</th>
 							<th class="stats-num">Errors</th>
 							<th class="stats-num">Sent, all time</th>
+							<th class="stats-num" style={{ textAlign: "right" }}>
+								Chart
+							</th>
 						</tr>
 					</thead>
 					<tbody>
 						{CATEGORIES.map((c) => {
 							const r = range.byCategory[c.key];
+							const on = !hidden.has(c.key);
 							return (
-								<tr key={c.key}>
+								<tr key={c.key} style={{ opacity: on ? 1 : 0.5 }}>
 									<td>
 										<span
 											class="chart-swatch"
@@ -236,6 +250,18 @@ function Traffic(props: { data: Body }) {
 									<td class="stats-num">{number(r.s4xx + r.s5xx)}</td>
 									<td class="stats-num">
 										{formatBytes(traffic.allTime.byCategory[c.key].bytes)}
+									</td>
+									<td
+										class="stats-num"
+										style={{ textAlign: "right", verticalAlign: "middle" }}
+									>
+										<input
+											type="checkbox"
+											style={{ margin: 0, verticalAlign: "middle" }}
+											checked={on}
+											aria-label={`Show ${c.label} in chart`}
+											onChange={() => toggle(c.key)}
+										/>
 									</td>
 								</tr>
 							);
