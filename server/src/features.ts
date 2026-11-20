@@ -4,9 +4,9 @@ import {
 	type FeatureStyle,
 	type FeatureType,
 } from "@aomc/shared";
-import { and, desc, eq, inArray, lte, sql } from "drizzle-orm";
+import { and, desc, eq, gt, inArray, isNull, lte, or, sql } from "drizzle-orm";
 import type { Db } from "./db/client";
-import { featureRevisions, features } from "./db/schema";
+import { featureRevisions, features, layers, revisions } from "./db/schema";
 
 export type FeatureView = {
 	id: number;
@@ -193,4 +193,29 @@ export function moveFeature(
 		.set({ layerId: toLayerId, sortOrder: nextFeatureOrder(db, toLayerId) })
 		.where(eq(features.id, featureId))
 		.run();
+}
+
+/**
+ * Unix ms time of a revision, for "as of revision" reads. null means "now"; undefined means
+ * there is no such revision (for example the upload was deleted).
+ */
+export function timeOfRev(db: Db, headRev: number, at: number | null) {
+	if (at === null || at >= headRev) return null;
+	if (at <= 0) return 0;
+	const row = db
+		.select({ completedAt: revisions.completedAt })
+		.from(revisions)
+		.where(eq(revisions.rev, at))
+		.get();
+	return row ? row.completedAt : undefined;
+}
+
+/** The layers that existed at `at` (unix ms), or the live ones for null. */
+export function layerLiveAt(at: number | null) {
+	return at === null
+		? isNull(layers.deletedAt)
+		: and(
+				lte(layers.createdAt, at),
+				or(isNull(layers.deletedAt), gt(layers.deletedAt, at)),
+			);
 }

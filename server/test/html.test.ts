@@ -92,17 +92,17 @@ const meta = (html: string, key: string) =>
 		html,
 	)?.[1];
 
-describe("share tags on /", () => {
+describe("share tags on /v2/", () => {
 	test("the default view gets a title, description and an absolute preview image", async () => {
 		const t = bootPage();
-		const html = await (await t.app.request("/")).text();
+		const html = await (await t.app.request("/v2/")).text();
 		expect(html).toContain("<title>AOMC: Overworld</title>");
 		expect(meta(html, "og:title")).toBe("AOMC: Overworld");
 		expect(meta(html, "og:image")).toBe(
 			"https://map.example.com/api/preview.png?dim=overworld&amp;x=0&amp;z=0&amp;zoom=2",
 		);
 		expect(meta(html, "og:url")).toBe(
-			"https://map.example.com/?dim=overworld&amp;x=0&amp;z=0&amp;zoom=2",
+			"https://map.example.com/v2/?dim=overworld&amp;x=0&amp;z=0&amp;zoom=2",
 		);
 	});
 
@@ -110,7 +110,7 @@ describe("share tags on /", () => {
 		const t = bootPage();
 		const html = await (
 			await t.app.request(
-				"/?dim=nether&x=-12&z=340&zoom=1.234&rev=0&embed=1&junk=<b>",
+				"/v2/?dim=nether&x=-12&z=340&zoom=1.234&rev=0&embed=1&junk=<b>",
 			)
 		).text();
 		expect(meta(html, "og:title")).toBe("AOMC: Nether");
@@ -128,7 +128,7 @@ describe("share tags on /", () => {
 		await t.db
 			.update(mapInfo)
 			.set({ name: `Evil "><script>alert(1)</script>` });
-		const html = await (await t.app.request("/")).text();
+		const html = await (await t.app.request("/v2/")).text();
 		expect(html).not.toContain("<script>alert(1)");
 		expect(meta(html, "og:title")).toContain("&quot;&gt;&lt;script&gt;");
 	});
@@ -136,7 +136,7 @@ describe("share tags on /", () => {
 	test("unknown or invalid views keep the generic page", async () => {
 		const t = bootPage();
 		for (const q of ["?dim=nope", "?x=abc", "?zoom=NaN"]) {
-			const html = await (await t.app.request(`/${q}`)).text();
+			const html = await (await t.app.request(`/v2/${q}`)).text();
 			expect(html).toContain("<title>AOMC Map</title>");
 			expect(html).not.toContain("og:");
 		}
@@ -156,13 +156,13 @@ describe("share tags on /", () => {
 
 	test("the page is not cached so edits to the map show up", async () => {
 		const t = bootPage();
-		expect((await t.app.request("/")).headers.get("cache-control")).toBe(
+		expect((await t.app.request("/v2/")).headers.get("cache-control")).toBe(
 			"no-cache",
 		);
 	});
 
 	test("a site without a built web app still serves the API", async () => {
 		const t = makeTestApp({ WEB_DIST: join(tmpdir(), "aomc-missing-dist") });
-		expect((await t.app.request("/")).status).toBe(404);
+		expect((await t.app.request("/v2/")).status).toBe(404);
 	});
 });

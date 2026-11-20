@@ -24,9 +24,20 @@ describe("static web app", () => {
 			expect(await res.text()).toContain("<title>app</title>");
 		}
 		// The root page also gets share tags (see html.test.ts), so only its shell is checked.
-		const root = await app.request("/");
+		const root = await app.request("/v2/");
 		expect(root.status).toBe(200);
 		expect(await root.text()).toStartWith("<!doctype html>");
+	});
+
+	test("old links at / redirect to the viewer, with the zoom converted", async () => {
+		const { app } = makeTestApp({ WEB_DIST: makeDist() });
+		const plain = await app.request("/");
+		expect(plain.status).toBe(302);
+		expect(plain.headers.get("location")).toBe("/v2/");
+		const old = await app.request("/?dim=nether&x=100&z=-200&zoom=7");
+		expect(old.headers.get("location")).toBe(
+			"/v2/?dim=nether&x=100&z=-200&zoom=2",
+		);
 	});
 
 	test("serves files, with immutable caching for hashed assets", async () => {
@@ -48,7 +59,7 @@ describe("static web app", () => {
 
 	test("the app shell is never cached, so a new build is picked up", async () => {
 		const { app } = makeTestApp({ WEB_DIST: makeDist() });
-		for (const path of ["/", "/invite/abc", "/some/deep/link"]) {
+		for (const path of ["/v2/", "/invite/abc", "/some/deep/link"]) {
 			const res = await app.request(path);
 			expect(res.headers.get("cache-control")).toBe("no-cache");
 		}
@@ -74,7 +85,7 @@ describe("static web app", () => {
 		const { app } = makeTestApp({
 			WEB_DIST: join(tmpdir(), "aomc-no-such-dist"),
 		});
-		expect((await app.request("/")).status).toBe(404);
+		expect((await app.request("/v2/")).status).toBe(404);
 		expect((await app.request("/api/me")).status).toBe(200);
 	});
 });

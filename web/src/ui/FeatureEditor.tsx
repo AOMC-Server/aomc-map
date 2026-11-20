@@ -1,4 +1,5 @@
 import type { Dye } from "@aomc/shared/colors";
+import { resolveStyle } from "@aomc/shared/featureStyle";
 import {
 	cleanStyle,
 	type FeatureInput,
@@ -11,7 +12,6 @@ import { useEffect, useRef, useState } from "preact/hooks";
 import { showNotice } from "../api";
 import { pathsOf, TYPE_LABEL } from "../featureInfo";
 import { createFeature, deleteFeature, updateFeature } from "../layers";
-import { resolveStyle } from "../map/featureStyle";
 import {
 	draftLook,
 	editor,

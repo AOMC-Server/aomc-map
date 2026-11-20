@@ -11,6 +11,7 @@ import {
 import sharp, { type OverlayOptions } from "sharp";
 import { randomToken } from "./auth/tokens";
 import type { Db } from "./db/client";
+import { buildOverlay, loadIcons, loadOverlayLayers } from "./previewFeatures";
 import type { BlobStore } from "./tiles/blobstore";
 import { tileHashAt } from "./tiles/history";
 
@@ -29,6 +30,10 @@ export type PreviewParams = {
 	z: number;
 	zoom: number;
 	rev: number;
+	/** Unix ms the features are read as of; null for now. */
+	featuresAt: number | null;
+	/** Layers to show; null for each layer's default. */
+	layers: number[] | null;
 	/** Changes when history is rewritten; see `map_info.epoch`. */
 	epoch: number;
 };
@@ -40,7 +45,7 @@ export class PreviewLimitError extends Error {}
 
 /**
  * Rounds a view so that nearby requests share one picture: the zoom to half levels and the
- * centre to about 16 screen pixels, which is the most the marker moves.
+ * centre to about 16 screen pixels, which is the most the picture's centre moves.
  */
 export function snapParams(p: PreviewParams): PreviewParams {
 	const zoom = Math.round(p.zoom * 2) / 2;
@@ -55,26 +60,18 @@ export function snapParams(p: PreviewParams): PreviewParams {
 
 const SIZE: Size = { width: PREVIEW_W, height: PREVIEW_H };
 
-/** A ring and dot marking the centre of the view. */
-const MARKER_SVG = Buffer.from(
-	`<svg xmlns="http://www.w3.org/2000/svg" width="64" height="64" viewBox="0 0 64 64">
-		<circle cx="32" cy="32" r="22" fill="none" stroke="#000" stroke-opacity="0.65" stroke-width="8"/>
-		<circle cx="32" cy="32" r="22" fill="none" stroke="#ffd23f" stroke-width="4"/>
-		<circle cx="32" cy="32" r="5" fill="#ffd23f" stroke="#000" stroke-width="2"/>
-	</svg>`,
-);
-
 const clamp = (n: number, lo: number, hi: number) =>
 	Math.min(Math.max(n, lo), hi);
 
-/** Composites the tiles around a point into a 1200x630 PNG. No browser involved. */
+/** Composites the tiles around a point, and the features over them, into a 1200x630 PNG. No browser involved. */
 async function renderPreview(
 	db: Db,
 	blobs: BlobStore,
 	p: PreviewParams,
+	view: View,
+	overlay: string | null,
 ): Promise<Buffer> {
 	const T = p.tileSize;
-	const view: View = { centerX: p.x + 0.5, centerZ: p.z + 0.5, zoom: p.zoom };
 
 	// Very small tiles (or a wide view) can mean thousands of tiles; use a coarser level instead.
 	let level = tileLevel(p.zoom, 1, p.maxZoom);
@@ -122,11 +119,7 @@ async function renderPreview(
 			});
 		}
 	}
-	layers.push({
-		input: MARKER_SVG,
-		left: PREVIEW_W / 2 - 32,
-		top: PREVIEW_H / 2 - 32,
-	});
+	if (overlay) layers.push({ input: Buffer.from(overlay), left: 0, top: 0 });
 
 	return sharp({
 		create: {
@@ -141,7 +134,20 @@ async function renderPreview(
 		.toBuffer();
 }
 
-function previewCacheKey(p: PreviewParams): string {
+/** What is drawn over the tiles; null when there are no features in view. */
+async function overlayFor(
+	db: Db,
+	p: PreviewParams,
+	view: View,
+	iconDirs: string[],
+): Promise<string | null> {
+	const layers = loadOverlayLayers(db, p.dimensionId, p.featuresAt, p.layers);
+	if (layers.length === 0) return null;
+	const icons = await loadIcons(iconDirs);
+	return buildOverlay(layers, view, SIZE, (dye) => icons.get(dye));
+}
+
+function previewCacheKey(p: PreviewParams, overlay: string | null): string {
 	return createHash("sha256")
 		.update(
 			JSON.stringify([
@@ -152,6 +158,9 @@ function previewCacheKey(p: PreviewParams): string {
 				p.zoom,
 				p.rev,
 				p.epoch,
+				overlay === null
+					? null
+					: createHash("sha256").update(overlay).digest("hex"),
 			]),
 		)
 		.digest("hex");
@@ -180,6 +189,8 @@ export async function pruneCache(dir: string, max: number) {
 export function createPreviewService(opts: {
 	cacheDir: string;
 	maxCached: number;
+	/** Folders with the pin icons (`<dye>_banner.png`); the first with an icon wins. */
+	iconDirs?: string[];
 }) {
 	const inFlight = new Map<string, Promise<Buffer>>();
 	const waiting: (() => void)[] = [];
@@ -210,7 +221,13 @@ export function createPreviewService(opts: {
 			admit: () => boolean = () => true,
 		): Promise<Buffer> {
 			const p = snapParams(params);
-			const key = previewCacheKey(p);
+			const view: View = {
+				centerX: p.x + 0.5,
+				centerZ: p.z + 0.5,
+				zoom: p.zoom,
+			};
+			const overlay = await overlayFor(db, p, view, opts.iconDirs ?? []);
+			const key = previewCacheKey(p, overlay);
 			const file = join(opts.cacheDir, `${key}.png`);
 			const cached = Bun.file(file);
 			if (await cached.exists()) return Buffer.from(await cached.arrayBuffer());
@@ -219,7 +236,7 @@ export function createPreviewService(opts: {
 			if (!job) {
 				if (!admit()) throw new PreviewLimitError();
 				job = slot(async () => {
-					const png = await renderPreview(db, blobs, p);
+					const png = await renderPreview(db, blobs, p, view, overlay);
 					await mkdir(opts.cacheDir, { recursive: true });
 					const tmp = `${file}.${randomToken(6)}.tmp`;
 					await Bun.write(tmp, png);

@@ -101,5 +101,5 @@ export const shortLinkRedirect = new Hono<AppEnv>().get("/:code", (c) => {
 				.get()
 		: undefined;
 	if (!link) return c.text("This link does not exist.", 404);
-	return c.redirect(`/?${link.query}`, 302);
+	return c.redirect(`/v2/?${link.query}`, 302);
 });

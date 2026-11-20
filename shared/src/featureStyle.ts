@@ -6,7 +6,7 @@ import {
 	type FeatureStyle,
 	type LINE_DASHES,
 	mergeStyle,
-} from "@aomc/shared/features";
+} from "./features";
 
 export type ResolvedStyle = {
 	dash: (typeof LINE_DASHES)[number];

@@ -23,7 +23,7 @@ describe("short links", () => {
 		const open = await t.app.request(`/s/${res.body.code}`);
 		expect(open.status).toBe(302);
 		expect(open.headers.get("Location")).toBe(
-			"/?dim=overworld&x=120&z=-40&zoom=1.5&rev=3&layers=2%2C5",
+			"/v2/?dim=overworld&x=120&z=-40&zoom=1.5&rev=3&layers=2%2C5",
 		);
 	});
 

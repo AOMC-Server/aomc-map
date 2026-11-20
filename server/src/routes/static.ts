@@ -1,5 +1,6 @@
 import { existsSync } from "node:fs";
 import { join, relative } from "node:path";
+import { viewerUrlForRoot } from "@aomc/shared/legacyLink";
 import { type Context, Hono } from "hono";
 import { serveStatic } from "hono/bun";
 import { IMMUTABLE } from "../cache";
@@ -18,7 +19,7 @@ export function staticRoutes(distDir: string) {
 	const indexPath = join(distDir, "index.html");
 	if (!existsSync(indexPath)) return app;
 
-	/** Share tags for the page at "/", from the view in the query string. */
+	/** Share tags for the viewer at "/v2/", from the view in the query string. */
 	async function metaFor(c: Context<AppEnv>): Promise<PageMeta | null> {
 		const { db, env } = c.var;
 		const query = viewQuerySchema.safeParse(
@@ -41,6 +42,8 @@ export function staticRoutes(distDir: string) {
 			zoom: String(zoom),
 		});
 		if (query.data.rev !== undefined) view.set("rev", String(rev));
+		if (query.data.layers !== undefined)
+			view.set("layers", (target.params.layers ?? []).join(","));
 		const withBase = (path: string) => {
 			const url = new URL(path, env.PUBLIC_URL);
 			url.search = view.toString();
@@ -49,7 +52,7 @@ export function staticRoutes(distDir: string) {
 		return {
 			title: `${target.mapName}: ${target.dimensionName}`,
 			description: `${target.mapName}, ${target.dimensionName}, around x ${x}, z ${z}${query.data.rev !== undefined ? ` (revision ${rev})` : ""}`,
-			url: withBase("/"),
+			url: withBase("/v2/"),
 			image: withBase("/api/preview.png"),
 		};
 	}
@@ -57,7 +60,11 @@ export function staticRoutes(distDir: string) {
 	// serveStatic resolves its root against the working directory.
 	const root = relative(process.cwd(), distDir) || ".";
 	return app
-		.get("/", async (c) => {
+		.get("/", (c) =>
+			c.redirect(viewerUrlForRoot(new URL(c.req.url).search), 302),
+		)
+		.get("/v2", (c) => c.redirect(`/v2/${new URL(c.req.url).search}`, 302))
+		.get("/v2/", async (c) => {
 			const html = await Bun.file(indexPath).text();
 			const meta = await metaFor(c);
 			c.header("Cache-Control", "no-cache");

@@ -7,14 +7,14 @@ import { clientKey } from "../ratelimit";
 import type { AppEnv } from "../types";
 import { validate } from "../validate";
 
-/** GET /api/preview.png?dim&x&z&zoom&rev: a 1200x630 picture of the map around a point. */
+/** GET /api/preview.png?dim&x&z&zoom&rev&layers: a 1200x630 picture of the map around a point. */
 export const previewRoutes = new Hono<AppEnv>().get(
 	"/",
 	doc({
 		tag: "Images",
 		summary: "Render a link-preview image",
 		description:
-			"A 1200×630 PNG of the tiles around a point with a marker in the middle. Tiles only, no layers. The position and zoom are rounded (zoom to half levels), so nearby views share one picture. Renders are rate limited per client and queued; a full queue answers 503.",
+			"A 1200×630 PNG of the tiles around a point, and the lines, areas and pins of the public layers drawn over them (never private layers). `layers` is a comma separated list of layer ids to show, like the viewer's; empty shows none, and without it each layer's default decides. Pins are never clustered. The position and zoom are rounded (zoom to half levels), so nearby views share one picture. Renders are rate limited per client and queued; a full queue answers 503.",
 		ok: { 200: "PNG image" },
 		fails: [400, 404, 429, 503],
 	}),

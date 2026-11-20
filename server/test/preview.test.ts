@@ -50,7 +50,7 @@ async function withTiles() {
 }
 
 describe("/api/preview.png", () => {
-	test("is a 1200x630 PNG of the tiles around the point, with a marker in the middle", async () => {
+	test("is a 1200x630 PNG of the tiles around the point", async () => {
 		const t = await withTiles();
 		// 4 px per block: the red tile is at screen x 534..598, the blue one at 598..662.
 		const res = await t.app.request("/api/preview.png?x=16&z=8&zoom=-2");
@@ -63,8 +63,7 @@ describe("/api/preview.png", () => {
 		expect(at(655, 315)).toEqual([0, 0, 255, 255]);
 		expect(at(100, 100)).toEqual(BACKGROUND);
 		expect(at(540, 100)).toEqual(BACKGROUND);
-		// The marker's centre dot.
-		expect(at(600, 315)).toEqual([255, 210, 63, 255]);
+		expect(at(600, 315)).toEqual([0, 0, 255, 255]);
 	});
 
 	test("rev selects the version of the map", async () => {
@@ -214,6 +213,8 @@ describe("snapParams", () => {
 		z: 0,
 		zoom: 0,
 		rev: 1,
+		featuresAt: null,
+		layers: null,
 		epoch: 0,
 	};
 

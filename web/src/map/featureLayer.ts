@@ -1,4 +1,11 @@
 import { DYE_HEX, type Dye } from "@aomc/shared/colors";
+import {
+	dashPattern,
+	emphasisedWidth,
+	hitTolerance,
+	type ResolvedStyle,
+	resolveStyle,
+} from "@aomc/shared/featureStyle";
 import type { FeatureStyle } from "@aomc/shared/features";
 import {
 	blockToScreen,
@@ -21,13 +28,6 @@ import {
 	traceRun,
 	type ZoomStep,
 } from "./dashRuns";
-import {
-	dashPattern,
-	emphasisedWidth,
-	hitTolerance,
-	type ResolvedStyle,
-	resolveStyle,
-} from "./featureStyle";
 import {
 	type Bounds,
 	boundsOf,

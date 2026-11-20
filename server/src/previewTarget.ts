@@ -4,6 +4,7 @@ import { z } from "zod";
 import type { Db } from "./db/client";
 import { defaultDimension, dimensionBySlug } from "./dimensionLookup";
 import type { Env } from "./env";
+import { timeOfRev } from "./features";
 import type { PreviewParams } from "./preview";
 import type { MapRow } from "./types";
 
@@ -16,6 +17,8 @@ export const viewQuerySchema = z.object({
 	z: coord.optional(),
 	zoom: z.coerce.number().finite().optional(),
 	rev: z.coerce.number().int().min(0).optional(),
+	/** Layer ids, comma separated, like the viewer's `layers`; empty shows none, absent the defaults. */
+	layers: z.string().max(400).optional(),
 });
 export type ViewQuery = z.infer<typeof viewQuerySchema>;
 
@@ -25,6 +28,16 @@ export type PreviewTarget = {
 	dimensionSlug: string;
 	params: PreviewParams;
 };
+
+/** "1,2,3" to [1, 2, 3], skipping what is no layer id; null (each layer's default) when the query has no layers. */
+export function parseLayerIds(value: string | undefined): number[] | null {
+	if (value === undefined) return null;
+	return value
+		.split(",")
+		.map((part) => Number(part.trim()))
+		.filter((n) => Number.isInteger(n) && n > 0)
+		.sort((a, b) => a - b);
+}
 
 /**
  * Resolves a view query to a concrete dimension, position and revision.
@@ -39,6 +52,7 @@ export async function resolvePreviewTarget(
 	const dim = q.dim ? dimensionBySlug(db, q.dim) : defaultDimension(db);
 	if (!dim) return null;
 
+	const rev = Math.min(q.rev ?? map.headRev, map.headRev);
 	const zoom =
 		Math.round(Math.min(Math.max(q.zoom ?? 2, MIN_ZOOM), env.MAX_ZOOM) * 100) /
 		100;
@@ -53,7 +67,9 @@ export async function resolvePreviewTarget(
 			x: q.x ?? 0,
 			z: q.z ?? 0,
 			zoom,
-			rev: Math.min(q.rev ?? map.headRev, map.headRev),
+			rev,
+			featuresAt: timeOfRev(db, map.headRev, rev) ?? null,
+			layers: parseLayerIds(q.layers),
 			epoch: map.epoch,
 		},
 	};

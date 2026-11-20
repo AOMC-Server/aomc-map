@@ -1,7 +1,7 @@
+import { resolveStyle } from "@aomc/shared/featureStyle";
 import { mapView } from "../controller";
 import { featureStats, featureTitle, TYPE_LABEL } from "../featureInfo";
 import { deleteFeature } from "../layers";
-import { resolveStyle } from "../map/featureStyle";
 import { canEditMap, editor, embed, layersData, popup, view } from "../state";
 import { dyeScope } from "../theme";
 import { measureFrom } from "../tools/measure";

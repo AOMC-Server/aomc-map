@@ -9,21 +9,23 @@ import {
 	reorderSchema,
 	updateLayerSchema,
 } from "@aomc/shared";
-import { and, count, eq, gt, isNull, lte, or } from "drizzle-orm";
+import { and, count, eq, isNull } from "drizzle-orm";
 import { Hono } from "hono";
 import { z } from "zod";
 import { announceLayers } from "../announce";
 import { requireUser, userOf } from "../auth/session";
 import type { Db } from "../db/client";
-import { features, layerMembers, layers, revisions } from "../db/schema";
+import { features, layerMembers, layers } from "../db/schema";
 import { dimensionBySlug } from "../dimensionLookup";
 import {
 	contentOf,
 	featuresOfLayers,
 	insertFeature,
 	insertRevision,
+	layerLiveAt,
 	liveFeatureCount,
 	nextFeatureOrder,
+	timeOfRev,
 } from "../features";
 import { doc } from "../openapi";
 import { assignOrder, nextSortOrder, sameSet } from "../order";
@@ -85,21 +87,6 @@ function serializeLayer(layer: LayerRow, canEdit: boolean, canManage: boolean) {
 	};
 }
 
-/**
- * Unix ms time of a revision, for "as of revision" reads. null means "now"; undefined means
- * there is no such revision (for example the upload was deleted).
- */
-function timeOfRev(db: Db, headRev: number, at: number | null) {
-	if (at === null || at >= headRev) return null;
-	if (at <= 0) return 0;
-	const row = db
-		.select({ completedAt: revisions.completedAt })
-		.from(revisions)
-		.where(eq(revisions.rev, at))
-		.get();
-	return row ? row.completedAt : undefined;
-}
-
 const layersQuerySchema = z.object({
 	dim: z.string().optional(),
 	at: z.string().regex(/^\d+$/).optional(),
@@ -133,13 +120,7 @@ export const layerRoutes = new Hono<AppEnv>()
 				dimensionId = dim.id;
 			}
 
-			const liveAt =
-				at === null
-					? isNull(layers.deletedAt)
-					: and(
-							lte(layers.createdAt, at),
-							or(isNull(layers.deletedAt), gt(layers.deletedAt, at)),
-						);
+			const liveAt = layerLiveAt(at);
 			const rows = db
 				.select()
 				.from(layers)

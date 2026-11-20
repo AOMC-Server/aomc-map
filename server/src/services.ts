@@ -1,3 +1,4 @@
+import { join } from "node:path";
 import type { Db } from "./db/client";
 import { blobFiles } from "./db/schema";
 import type { Env } from "./env";
@@ -30,6 +31,13 @@ export function createServices(db: Db, env: Env) {
 	const preview = createPreviewService({
 		cacheDir: previewCacheDir(env.DATA_DIR),
 		maxCached: env.PREVIEW_CACHE_MAX,
+		iconDirs: [
+			join(
+				env.WEB_DIST ?? `${import.meta.dir}/../../web/dist`,
+				"static/markers",
+			),
+			join(import.meta.dir, "../../web/public/static/markers"),
+		],
 	});
 	const traffic = createTraffic(db, env);
 	const files = createFileStore(filesDir(env.DATA_DIR));
