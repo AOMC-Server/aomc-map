@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "zod/mini";
 
 /** Longest name of a file or folder in the file library. */
 export const MAX_FILE_NAME = 200;
@@ -26,13 +26,15 @@ export const normalizeFileName = (name: string) => name.normalize("NFC");
 export const fileNameKey = (name: string) =>
 	normalizeFileName(name).toLowerCase();
 
-export const fileNameSchema = z
-	.string()
-	.transform(normalizeFileName)
-	.superRefine((name, ctx) => {
-		const problem = fileNameProblem(name);
-		if (problem) ctx.addIssue({ code: "custom", message: problem });
-	});
+export const fileNameSchema = z.pipe(
+	z.pipe(z.string(), z.transform(normalizeFileName)),
+	z.string().check(
+		z.superRefine((name, ctx) => {
+			const problem = fileNameProblem(name);
+			if (problem) ctx.addIssue({ code: "custom", message: problem });
+		}),
+	),
+);
 
 /** "world.zip" numbered: "world (2).zip". A leading dot is part of the name, not an extension. */
 export function numberedFileName(name: string, n: number): string {
@@ -52,7 +54,10 @@ export const FILE_CONFLICT_MODES = ["fail", "replace", "rename"] as const;
 export type FileConflictMode = (typeof FILE_CONFLICT_MODES)[number];
 
 /** A folder path, "/" for the top: names separated by slashes. */
-export const filePathSchema = z.string().max(4000).default("/");
+export const filePathSchema = z._default(
+	z.string().check(z.maxLength(4000)),
+	"/",
+);
 
 /** The names in a path such as "/voxy/world 1/"; empty for the top. */
 export const splitFilePath = (path: string) =>
@@ -73,33 +78,37 @@ export const fileUploadQuerySchema = z.object({
 	/** The folder to upload into. */
 	path: filePathSchema,
 	name: fileNameSchema,
-	onConflict: z.enum(FILE_CONFLICT_MODES).default("fail"),
+	onConflict: z._default(z.enum(FILE_CONFLICT_MODES), "fail"),
 });
 
-const descriptionSchema = z.string().trim().max(MAX_FOLDER_DESCRIPTION);
+const descriptionSchema = z
+	.string()
+	.check(z.trim(), z.maxLength(MAX_FOLDER_DESCRIPTION));
 
 export const createFileFolderSchema = z.object({
 	/** null: at the top of the library. */
-	parentId: z.number().int().positive().nullable(),
+	parentId: z.nullable(z.int().check(z.positive())),
 	name: fileNameSchema,
-	description: descriptionSchema.default(""),
+	description: z._default(descriptionSchema, ""),
 });
 
 export const updateFileFolderSchema = z
 	.object({
-		name: fileNameSchema.optional(),
-		description: descriptionSchema.optional(),
+		name: z.optional(fileNameSchema),
+		description: z.optional(descriptionSchema),
 		/** Move it: null is the top of the library. */
-		parentId: z.number().int().positive().nullable().optional(),
+		parentId: z.optional(z.nullable(z.int().check(z.positive()))),
 	})
-	.refine((o) => Object.keys(o).length > 0, "nothing to update");
+	.check(z.refine((o) => Object.keys(o).length > 0, "nothing to update"));
 
 export const updateFileEntrySchema = z
 	.object({
-		name: fileNameSchema.optional(),
+		name: z.optional(fileNameSchema),
 		/** Move it: null is the top of the library. */
-		folderId: z.number().int().positive().nullable().optional(),
+		folderId: z.optional(z.nullable(z.int().check(z.positive()))),
 	})
-	.refine((o) => Object.keys(o).length > 0, "nothing to update");
+	.check(z.refine((o) => Object.keys(o).length > 0, "nothing to update"));
 
-export const fileGrantSchema = z.object({ userId: z.string().min(1) });
+export const fileGrantSchema = z.object({
+	userId: z.string().check(z.minLength(1)),
+});

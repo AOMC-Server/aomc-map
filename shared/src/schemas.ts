@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "zod/mini";
 import { MIN_ZOOM } from "./view";
 
 export const roleSchema = z.enum(["viewer", "editor", "moderator", "owner"]);
@@ -11,38 +11,45 @@ export const MAX_NAME = 100;
 
 export const MAX_COORD = 30_000_000;
 
-export const blockCoord = z.number().int().min(-MAX_COORD).max(MAX_COORD);
+export const blockCoord = z
+	.int()
+	.check(z.minimum(-MAX_COORD), z.maximum(MAX_COORD));
 
 export const coordSchema = z.object({ x: blockCoord, z: blockCoord });
 
 export const uploadCoordsSchema = z.array(coordSchema);
 
 /** Where each uploaded file came from, folders included: the export date is read from it. */
-export const uploadPathsSchema = z.array(z.string().max(1000));
+export const uploadPathSchema = z.string().check(z.maxLength(1000));
+export const uploadPathsSchema = z.array(uploadPathSchema);
 
 const slugSchema = z
 	.string()
-	.min(1)
-	.max(40)
-	.regex(/^[a-z0-9][a-z0-9_-]*$/, "lowercase letters, digits, - and _ only");
+	.check(
+		z.minLength(1),
+		z.maxLength(40),
+		z.regex(/^[a-z0-9][a-z0-9_-]*$/, "lowercase letters, digits, - and _ only"),
+	);
+
+const entityName = z
+	.string()
+	.check(z.trim(), z.minLength(1), z.maxLength(MAX_NAME));
 
 export const updateMapSchema = z
 	.object({
-		name: z.string().trim().min(1).max(MAX_NAME).optional(),
+		name: z.optional(entityName),
 		/** Read only for everyone but owners. */
-		maintenance: z.boolean().optional(),
+		maintenance: z.optional(z.boolean()),
 	})
-	.refine(nonEmpty, "nothing to update");
+	.check(z.refine(nonEmpty, "nothing to update"));
 
 /**
  * Overworld blocks per block of the dimension (1 for the overworld, 8 for the Nether).
  * null: the coordinates cannot be mapped to other dimensions (the End).
  */
-export const dimensionScaleSchema = z
-	.number()
-	.positive()
-	.max(1_000_000)
-	.nullable();
+export const dimensionScaleSchema = z.nullable(
+	z.number().check(z.positive(), z.maximum(1_000_000)),
+);
 
 /** Picks the dimension's block icon and the interface colours while it is shown. */
 export const DIMENSION_THEMES = [
@@ -67,10 +74,12 @@ export function guessDimensionTheme(slug: string): DimensionTheme {
  */
 export const xaeroDimensionSchema = z
 	.string()
-	.trim()
-	.min(1)
-	.max(100)
-	.regex(/^[^:\s]+$/, "no colons or spaces");
+	.check(
+		z.trim(),
+		z.minLength(1),
+		z.maxLength(100),
+		z.regex(/^[^:\s]+$/, "no colons or spaces"),
+	);
 
 /** The Xaero dimension id a dimension most likely has, from its theme. */
 export function guessXaeroDimension(theme: DimensionTheme): string {
@@ -85,11 +94,13 @@ export function guessXaeroDimension(theme: DimensionTheme): string {
  * of the dimension.
  */
 export const preloadRingSchema = z.object({
-	level: z.number().int().min(0).max(12),
-	radius: z.number().int().min(0).max(MAX_COORD),
+	level: z.int().check(z.minimum(0), z.maximum(12)),
+	radius: z.int().check(z.minimum(0), z.maximum(MAX_COORD)),
 });
 export type PreloadRing = z.infer<typeof preloadRingSchema>;
-export const dimensionPreloadSchema = z.array(preloadRingSchema).max(8);
+export const dimensionPreloadSchema = z
+	.array(preloadRingSchema)
+	.check(z.maxLength(8));
 
 export const DEFAULT_PRELOAD: PreloadRing[] = [
 	{ level: 2, radius: 2048 },
@@ -99,27 +110,27 @@ export const DEFAULT_PRELOAD: PreloadRing[] = [
 
 export const createDimensionSchema = z.object({
 	slug: slugSchema,
-	name: z.string().trim().min(1).max(MAX_NAME),
-	scale: dimensionScaleSchema.optional(),
+	name: entityName,
+	scale: z.optional(dimensionScaleSchema),
 	/** Defaults to a guess from the slug. */
-	theme: dimensionThemeSchema.optional(),
+	theme: z.optional(dimensionThemeSchema),
 	/** Defaults to DEFAULT_PRELOAD. */
-	preload: dimensionPreloadSchema.optional(),
+	preload: z.optional(dimensionPreloadSchema),
 	/** Defaults to a guess from the theme. */
-	xaeroDimension: xaeroDimensionSchema.optional(),
+	xaeroDimension: z.optional(xaeroDimensionSchema),
 });
 
 export const updateDimensionSchema = z
 	.object({
-		name: z.string().trim().min(1).max(MAX_NAME).optional(),
-		sortOrder: z.number().int().optional(),
-		archived: z.boolean().optional(),
-		scale: dimensionScaleSchema.optional(),
-		theme: dimensionThemeSchema.optional(),
-		preload: dimensionPreloadSchema.optional(),
-		xaeroDimension: xaeroDimensionSchema.optional(),
+		name: z.optional(entityName),
+		sortOrder: z.optional(z.int()),
+		archived: z.optional(z.boolean()),
+		scale: z.optional(dimensionScaleSchema),
+		theme: z.optional(dimensionThemeSchema),
+		preload: z.optional(dimensionPreloadSchema),
+		xaeroDimension: z.optional(xaeroDimensionSchema),
 	})
-	.refine(nonEmpty, "nothing to update");
+	.check(z.refine(nonEmpty, "nothing to update"));
 
 /** Most layers a shared view can list. */
 export const MAX_SHARED_LAYERS = 500;
@@ -132,12 +143,11 @@ export const shareViewSchema = z.object({
 	dim: slugSchema,
 	x: blockCoord,
 	z: blockCoord,
-	zoom: z.number().finite().min(MIN_ZOOM).max(64),
-	rev: z.number().int().min(0).optional(),
-	layers: z
-		.array(z.number().int().positive())
-		.max(MAX_SHARED_LAYERS)
-		.optional(),
+	zoom: z.number().check(z.minimum(MIN_ZOOM), z.maximum(64)),
+	rev: z.optional(z.int().check(z.minimum(0))),
+	layers: z.optional(
+		z.array(z.int().check(z.positive())).check(z.maxLength(MAX_SHARED_LAYERS)),
+	),
 });
 export type ShareView = z.infer<typeof shareViewSchema>;
 
@@ -146,7 +156,7 @@ export const memberRoleSchema = z.enum(["moderator", "owner"]);
 export type MemberRole = z.infer<typeof memberRoleSchema>;
 
 export const setMemberSchema = z.object({
-	userId: z.string().min(1),
+	userId: z.string().check(z.minLength(1)),
 	role: memberRoleSchema,
 });
 
@@ -186,27 +196,26 @@ export function normalizeScopes(scopes: readonly TokenScope[]): TokenScope[] {
 }
 
 export const createTokenSchema = z.object({
-	name: z.string().trim().min(1).max(MAX_NAME),
+	name: entityName,
 	/** null = never expires. */
-	expiresInDays: z
-		.number()
-		.int()
-		.min(1)
-		.max(MAX_TOKEN_EXPIRY_DAYS)
-		.nullable()
-		.default(DEFAULT_TOKEN_EXPIRY_DAYS),
-	scopes: z
-		.array(z.enum(TOKEN_SCOPES))
-		.min(1)
-		.default(DEFAULT_TOKEN_SCOPES)
-		.transform(normalizeScopes),
+	expiresInDays: z._default(
+		z.nullable(z.int().check(z.minimum(1), z.maximum(MAX_TOKEN_EXPIRY_DAYS))),
+		DEFAULT_TOKEN_EXPIRY_DAYS,
+	),
+	scopes: z.pipe(
+		z._default(
+			z.array(z.enum(TOKEN_SCOPES)).check(z.minLength(1)),
+			DEFAULT_TOKEN_SCOPES,
+		),
+		z.transform((scopes: TokenScope[]) => normalizeScopes(scopes)),
+	),
 });
 
 export const STATS_RANGES = ["all", "30d", "7d"] as const;
 export type StatsRange = (typeof STATS_RANGES)[number];
 
 export const statsQuerySchema = z.object({
-	range: z.enum(STATS_RANGES).default("all"),
+	range: z._default(z.enum(STATS_RANGES), "all"),
 });
 
 export const ADMIN_STATS_RANGES = [
@@ -221,5 +230,5 @@ export const ADMIN_STATS_RANGES = [
 export type AdminStatsRange = (typeof ADMIN_STATS_RANGES)[number];
 
 export const adminStatsQuerySchema = z.object({
-	range: z.enum(ADMIN_STATS_RANGES).default("7d"),
+	range: z._default(z.enum(ADMIN_STATS_RANGES), "7d"),
 });

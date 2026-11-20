@@ -1,4 +1,4 @@
-import { uploadPathsSchema } from "@aomc/shared/schemas";
+import { uploadPathSchema } from "@aomc/shared/schemas";
 import { parseXaeroCoords, parseXaeroExportDate } from "@aomc/shared/xaero";
 import type { UploadLimits } from "./state";
 import { formatBytes } from "./ui/format";
@@ -46,10 +46,7 @@ export function validateFiles(
 
 	for (const f of files) {
 		totalBytes += f.size;
-		if (
-			f.path !== undefined &&
-			!uploadPathsSchema.element.safeParse(f.path).success
-		) {
+		if (f.path !== undefined && !uploadPathSchema.safeParse(f.path).success) {
 			errors.push(`${f.name}: the folder path is too long`);
 		}
 		const e = ext(f.name);

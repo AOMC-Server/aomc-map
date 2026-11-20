@@ -1,4 +1,4 @@
-import { z } from "zod";
+import * as z from "zod/mini";
 
 export const MAX_INVITE_HOURS = 24 * 365;
 export const DEFAULT_INVITE_HOURS = 24 * 7;
@@ -14,20 +14,14 @@ export const inviteRoleSchema = z.enum([
 ]);
 export type InviteRole = z.infer<typeof inviteRoleSchema>;
 
-const expiry = z
-	.number()
-	.int()
-	.min(1)
-	.max(MAX_INVITE_HOURS)
-	.nullable()
-	.default(DEFAULT_INVITE_HOURS);
-const maxUses = z
-	.number()
-	.int()
-	.min(1)
-	.max(MAX_INVITE_USES)
-	.nullable()
-	.default(null);
+const expiry = z._default(
+	z.nullable(z.int().check(z.minimum(1), z.maximum(MAX_INVITE_HOURS))),
+	DEFAULT_INVITE_HOURS,
+);
+const maxUses = z._default(
+	z.nullable(z.int().check(z.minimum(1), z.maximum(MAX_INVITE_USES))),
+	null,
+);
 
 /** Map invites make moderators; owners are added explicitly from the members panel. */
 export const createMapInviteSchema = z.object({
@@ -44,7 +38,7 @@ export const createLayerInviteSchema = z.object({
 });
 
 export const layerMemberSchema = z.object({
-	userId: z.string().min(1),
+	userId: z.string().check(z.minLength(1)),
 	role: layerRoleSchema,
 });
 

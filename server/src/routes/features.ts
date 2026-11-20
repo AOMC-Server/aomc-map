@@ -7,6 +7,7 @@ import {
 } from "@aomc/shared";
 import { and, desc, eq, isNull, lt } from "drizzle-orm";
 import { Hono } from "hono";
+import { z } from "zod";
 import { announceLayers } from "../announce";
 import { requireUser, userOf } from "../auth/session";
 import type { Db } from "../db/client";
@@ -208,7 +209,7 @@ export const featureRoutes = new Hono<AppEnv>()
 			fails: [400, 404],
 		}),
 		// Optional so that clients written before paging need not send a query.
-		validate("query", featureHistoryQuerySchema.optional()),
+		validate("query", z.optional(featureHistoryQuerySchema)),
 		async (c) => {
 			const { db } = c.var;
 			const found = await viewable(c.var, c.req.param("id"));
