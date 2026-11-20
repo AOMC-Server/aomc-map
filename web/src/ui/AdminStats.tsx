@@ -155,7 +155,16 @@ function Traffic(props: { data: Body }) {
 		.filter((s) => s.values.some((v) => v > 0));
 
 	const range = traffic.range;
-	const errors = range.total.s4xx + range.total.s5xx;
+	const shown = CATEGORIES.filter((c) => !hidden.has(c.key));
+	const sum = (
+		src: Body["traffic"]["range"]["byCategory"],
+		f: (r: Body["traffic"]["range"]["byCategory"][Category]) => number,
+	) => shown.reduce((n, c) => n + f(src[c.key]), 0);
+	const periodBytes = sum(range.byCategory, (r) => r.bytes);
+	const periodRequests = sum(range.byCategory, (r) => r.requests);
+	const totalBytes = sum(traffic.allTime.byCategory, (r) => r.bytes);
+	const totalRequests = sum(traffic.allTime.byCategory, (r) => r.requests);
+	const errors = sum(range.byCategory, (r) => r.s4xx + r.s5xx);
 	return (
 		<>
 			<div class="admin-toolbar">
@@ -182,20 +191,20 @@ function Traffic(props: { data: Body }) {
 				tiles={[
 					{
 						label: "Sent in this period",
-						value: formatBytes(range.total.bytes),
-						hint: `${formatBytes(traffic.allTime.total.bytes)} in total`,
+						value: formatBytes(periodBytes),
+						hint: `${formatBytes(totalBytes)} in total`,
 					},
 					{
 						label: "Requests in this period",
-						value: number(range.total.requests),
-						hint: `${number(traffic.allTime.total.requests)} in total`,
+						value: number(periodRequests),
+						hint: `${number(totalRequests)} in total`,
 					},
 					{
 						label: "Failed requests",
 						value: number(errors),
 						hint:
-							range.total.requests > 0
-								? `${((errors / range.total.requests) * 100).toFixed(1)}% of requests`
+							periodRequests > 0
+								? `${((errors / periodRequests) * 100).toFixed(1)}% of requests`
 								: undefined,
 					},
 				]}
