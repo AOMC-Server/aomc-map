@@ -20,9 +20,9 @@
 		"db:generate": "bun --cwd server run db:generate"
 	},
 	"devDependencies": {
-		"@biomejs/biome": "^2.0.0",
-		"@types/bun": "latest",
+		"@biomejs/biome": "^2.6.8",
+		"@types/bun": "^1.4.5",
 		"typescript": "^5.6.0",
-		"xlsx": "^0.18.5"
+		"@e965/xlsx": "^0.20.3"
 	}
 }

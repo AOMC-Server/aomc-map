@@ -13,6 +13,7 @@ const envSchema = z.object({
 	SESSION_SECRET: z.string().min(16).default(DEV_SESSION_SECRET),
 	PREVIEW_CACHE_MAX: z.coerce.number().int().min(1).default(500), // cached link-preview images
 	WEB_DIST: z.string().optional(), // defaults to <repo>/web/dist
+	SCALAR_BUNDLE: z.string().optional(), // Scalar's standalone.js; defaults to the one in node_modules
 	DEFAULT_TILE_SIZE: z.coerce
 		.number()
 		.int()

@@ -7,9 +7,8 @@
 	},
 	"dependencies": {
 		"@aomc/shared": "workspace:*",
-		"@scalar/api-reference": "^1.78.0",
 		"@scalar/hono-api-reference": "^0.12.19",
-		"drizzle-orm": "^0.44.0",
+		"drizzle-orm": "^0.45.2",
 		"fflate": "^0.8.3",
 		"hono": "^4.6.0",
 		"hono-openapi": "^1.5.0",
@@ -17,6 +16,7 @@
 		"zod": "^4.0.0"
 	},
 	"devDependencies": {
+		"@scalar/api-reference": "^1.78.0",
 		"drizzle-kit": "^0.31.0"
 	}
 }
