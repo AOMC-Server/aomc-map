@@ -1,6 +1,13 @@
 import { useEffect, useRef } from "preact/hooks";
 import { boot } from "../controller";
-import { activeTool, editor, embed, loadError, sidePanel } from "../state";
+import {
+	activeTool,
+	editor,
+	embed,
+	interfaceHidden,
+	loadError,
+	sidePanel,
+} from "../state";
 import { uploadOpen } from "../upload";
 import { Banners } from "./Banners";
 import { ContextMenu } from "./ContextMenu";
@@ -52,7 +59,7 @@ export function App() {
 	const panelOpen = editor.value !== null || sidePanel.value !== null;
 	return (
 		<div
-			class={`app ${embed.value ? "embed" : ""} ${panelOpen ? "panel-open" : ""} ${activeTool.value === "measure" ? "measuring" : ""}`}
+			class={`app ${embed.value ? "embed" : ""} ${panelOpen ? "panel-open" : ""} ${activeTool.value === "measure" ? "measuring" : ""} ${interfaceHidden.value ? "ui-hidden" : ""}`}
 		>
 			<div class="map-host" ref={host} />
 			{loadError.value && (

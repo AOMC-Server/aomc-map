@@ -17,7 +17,20 @@ export const blockCoord = z
 
 export const coordSchema = z.object({ x: blockCoord, z: blockCoord });
 
-export const uploadCoordsSchema = z.array(coordSchema);
+/**
+ * How far past MAX_COORD (the world border) an upload may be placed, so that builds at the border
+ * can be uploaded together with the ground around them.
+ */
+export const UPLOAD_COORD_MARGIN = 100_000;
+export const MAX_UPLOAD_COORD = MAX_COORD + UPLOAD_COORD_MARGIN;
+
+const uploadCoord = z
+	.int()
+	.check(z.minimum(-MAX_UPLOAD_COORD), z.maximum(MAX_UPLOAD_COORD));
+
+export const uploadCoordsSchema = z.array(
+	z.object({ x: uploadCoord, z: uploadCoord }),
+);
 
 /** Where each uploaded file came from, folders included: the export date is read from it. */
 export const uploadPathSchema = z.string().check(z.maxLength(1000));

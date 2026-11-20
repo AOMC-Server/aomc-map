@@ -1,4 +1,4 @@
-import { MAX_COORD } from "./schemas";
+import { MAX_UPLOAD_COORD } from "./schemas";
 
 const COORD_RE = /_x(-?\d+)_z(-?\d+)/;
 
@@ -11,7 +11,8 @@ export function parseXaeroCoords(
 	const x = Number(m[1]);
 	const z = Number(m[2]);
 	if (!Number.isSafeInteger(x) || !Number.isSafeInteger(z)) return null;
-	if (Math.abs(x) > MAX_COORD || Math.abs(z) > MAX_COORD) return null;
+	if (Math.abs(x) > MAX_UPLOAD_COORD || Math.abs(z) > MAX_UPLOAD_COORD)
+		return null;
 	return { x, z };
 }
 

@@ -37,6 +37,7 @@ import {
 } from "../tools/draw";
 import { DyePicker } from "./DyePicker";
 import { Banner } from "./icons";
+import { LayerSelect } from "./LayerSelect";
 import { Panel } from "./Panel";
 import { PointsList, ShapeStats } from "./PointsList";
 import { StyleControls } from "./StyleControls";
@@ -259,14 +260,13 @@ export function FeatureEditor() {
 			}
 		>
 			{layers.length > 1 ? (
-				<label class="field editor-layer-pick">
+				<div class="field editor-layer-pick">
 					<span class="label">Layer</span>
-					<select
+					<LayerSelect
+						options={layers}
 						value={dest?.id ?? layer.id}
-						onChange={(e) => {
-							const next = layers.find(
-								(l) => l.id === Number(e.currentTarget.value),
-							);
+						onChange={(id) => {
+							const next = layers.find((l) => l.id === id);
 							if (!next) return;
 							if (target.mode === "edit") {
 								setDestId(next.id);
@@ -275,14 +275,8 @@ export function FeatureEditor() {
 							if (isLayerHidden(next)) setLayersHidden([next], false);
 							editor.value = { ...target, layerId: next.id };
 						}}
-					>
-						{layers.map((l) => (
-							<option key={l.id} value={l.id}>
-								{l.name}
-							</option>
-						))}
-					</select>
-				</label>
+					/>
+				</div>
 			) : (
 				<p class="editor-layer">
 					<Banner dye={layer.color} /> {layer.name}
@@ -397,6 +391,7 @@ export function FeatureEditor() {
 						kind={type}
 						style={style}
 						inherited={dest?.style ?? layer.style}
+						color={color ?? dest?.color ?? layer.color}
 						onChange={setStyle}
 					/>
 				</div>

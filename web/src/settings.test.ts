@@ -4,6 +4,7 @@ import {
 	DEFAULT_SETTINGS,
 	mapOutlineScales,
 	PANEL_MIN_WIDTH,
+	parseLayerChoices,
 	parsePosition,
 	parseSettings,
 	shapeCacheEnabled,
@@ -173,5 +174,29 @@ describe("shape cache", () => {
 		expect(shapeCacheEnabled("auto", chrome)).toBe(false);
 		expect(shapeCacheEnabled("on", chrome)).toBe(true);
 		expect(shapeCacheEnabled("off", firefox)).toBe(false);
+	});
+});
+
+describe("remembered layers", () => {
+	test("reads which layers were shown or hidden", () => {
+		const choices = parseLayerChoices(
+			JSON.stringify({ "3": true, "7": false }),
+		);
+		expect(choices.get(3)).toBe(true);
+		expect(choices.get(7)).toBe(false);
+		expect(choices.size).toBe(2);
+	});
+
+	test("skips anything that is not a layer choice", () => {
+		const raw = JSON.stringify({
+			"1": "yes",
+			"0": true,
+			x: false,
+			"-2": true,
+			"5": true,
+		});
+		expect([...parseLayerChoices(raw)]).toEqual([[5, true]]);
+		for (const bad of [null, "", "nope", "[true]", "5", "null"])
+			expect(parseLayerChoices(bad).size).toBe(0);
 	});
 });

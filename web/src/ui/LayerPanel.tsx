@@ -33,6 +33,7 @@ import {
 	type LayerData,
 	layerLimitReached,
 	layersData,
+	resetLayers,
 	setLayersHidden,
 	showOnlyLayer,
 	sidePanel,
@@ -144,7 +145,12 @@ function LayerForm(props: {
 				<p class="hint">
 					Used by every line and area in this layer that does not set its own.
 				</p>
-				<StyleControls kind="layer" style={style} onChange={setStyle} />
+				<StyleControls
+					kind="layer"
+					style={style}
+					color={color}
+					onChange={setStyle}
+				/>
 			</details>
 			<label class="check">
 				<input
@@ -609,6 +615,14 @@ export function LayerPanel() {
 								onClick={() => setLayersHidden(layers, true)}
 							>
 								Hide all
+							</button>
+							<button
+								type="button"
+								class="plain link"
+								title="Each layer shown or hidden as its settings say"
+								onClick={() => resetLayers(layers)}
+							>
+								Show default
 							</button>
 						</div>
 					)}

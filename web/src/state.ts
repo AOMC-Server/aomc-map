@@ -3,9 +3,10 @@ import type { FeatureStyle, FeatureType, Point } from "@aomc/shared/features";
 import { canEdit, canModerate, isReadOnly } from "@aomc/shared/roles";
 import type { DimensionTheme } from "@aomc/shared/schemas";
 import type { View } from "@aomc/shared/view";
-import { computed, signal } from "@preact/signals";
+import { batch, computed, signal } from "@preact/signals";
 import type { InferResponseType } from "hono/client";
 import type { api } from "./api";
+import { loadLayerChoices, saveLayerChoices } from "./settings";
 
 export type User = NonNullable<
 	InferResponseType<typeof api.api.me.$get, 200>["user"]
@@ -57,6 +58,8 @@ export const centerBlock = computed(() => ({
  * placed, at the crosshair in the middle of the screen instead.
  */
 const hoverQuery = globalThis.matchMedia?.("(hover: none)");
+/** The crosshair was tapped: all of the interface is hidden for a screenshot until the map moves. */
+export const interfaceHidden = signal(false);
 export const noHover = signal(hoverQuery?.matches ?? false);
 hoverQuery?.addEventListener("change", (e) => {
 	noHover.value = e.matches;
@@ -73,8 +76,25 @@ export const notice = signal<{ text: string; kind: "error" | "info" } | null>(
 );
 
 export const layersData = signal<LayerData[]>([]);
-/** Layers the user toggled away from their default (layerId -> hidden). */
+/** Layers the user toggled away from their default during this visit (layerId -> hidden). */
 const layerOverrides = signal<Map<number, boolean>>(new Map());
+/** The choices of earlier visits; a shared link's layers come before them. */
+let savedChoices = loadLayerChoices();
+
+/** Sets the layers' choices for this visit, and remembers them for the next. */
+function chooseLayers(changes: ReadonlyMap<number, boolean>) {
+	const next = new Map(layerOverrides.value);
+	for (const [id, hidden] of changes) next.set(id, hidden);
+	layerOverrides.value = next;
+	// Moved to the end, so the oldest choices are the ones dropped when there are too many.
+	const saved = new Map(savedChoices);
+	for (const [id, hidden] of changes) {
+		saved.delete(id);
+		saved.set(id, hidden);
+	}
+	savedChoices = saved;
+	saveLayerChoices(saved);
+}
 export const sidePanel = signal<SidePanelName | null>(null);
 
 export type RevisionInfo = InferResponseType<
@@ -106,26 +126,36 @@ export const sharedLayers = signal<ReadonlySet<number> | null>(null);
 
 export const isLayerHidden = (l: LayerData) =>
 	layerOverrides.value.get(l.id) ??
-	(sharedLayers.value ? !sharedLayers.value.has(l.id) : l.hiddenByDefault);
+	(sharedLayers.value
+		? !sharedLayers.value.has(l.id)
+		: (savedChoices.get(l.id) ?? l.hiddenByDefault));
 
 export function toggleLayer(l: LayerData) {
-	const next = new Map(layerOverrides.value);
-	next.set(l.id, !isLayerHidden(l));
-	layerOverrides.value = next;
+	chooseLayers(new Map([[l.id, !isLayerHidden(l)]]));
 }
 
 /** Shows or hides the given layers, overriding their defaults. */
 export function setLayersHidden(layers: LayerData[], hidden: boolean) {
-	const next = new Map(layerOverrides.value);
-	for (const l of layers) next.set(l.id, hidden);
-	layerOverrides.value = next;
+	chooseLayers(new Map(layers.map((l) => [l.id, hidden])));
+}
+
+/** Forgets what was chosen for the layers, so each follows its default again (and a shared link no longer decides). */
+export function resetLayers(layers: LayerData[]) {
+	const ids = new Set(layers.map((l) => l.id));
+	// The plain variable first: the drawing effect reads it when a signal below changes.
+	savedChoices = new Map([...savedChoices].filter(([id]) => !ids.has(id)));
+	saveLayerChoices(savedChoices);
+	batch(() => {
+		layerOverrides.value = new Map(
+			[...layerOverrides.value].filter(([id]) => !ids.has(id)),
+		);
+		sharedLayers.value = null;
+	});
 }
 
 /** Shows `only` and hides every other layer of the dimension. */
 export function showOnlyLayer(only: LayerData) {
-	const next = new Map(layerOverrides.value);
-	for (const l of layersData.value) next.set(l.id, l.id !== only.id);
-	layerOverrides.value = next;
+	chooseLayers(new Map(layersData.value.map((l) => [l.id, l.id !== only.id])));
 }
 
 /**

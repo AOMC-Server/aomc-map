@@ -1,3 +1,4 @@
+import type { Dye } from "@aomc/shared/colors";
 import {
 	AREA_FILLS,
 	cleanStyle,
@@ -10,6 +11,8 @@ import {
 	MIN_LINE_WIDTH,
 	mergeStyle,
 } from "@aomc/shared/features";
+import { PreviewSelect } from "./PreviewSelect";
+import { DashPreview, FillPreview } from "./StylePreview";
 
 const DASH_LABEL: Record<(typeof LINE_DASHES)[number], string> = {
 	solid: "Solid",
@@ -51,6 +54,8 @@ export function StyleControls(props: {
 	kind: StyleKind;
 	style: FeatureStyle;
 	inherited?: FeatureStyle | null;
+	/** The colour the previews are drawn in; plain when not known. */
+	color?: Dye;
 	onChange: (style: FeatureStyle) => void;
 }) {
 	const { kind, style, onChange } = props;
@@ -69,18 +74,26 @@ export function StyleControls(props: {
 
 	return (
 		<div class="style-controls">
-			<div class="segmented">
-				{LINE_DASHES.map((dash) => (
-					<button
-						key={dash}
-						type="button"
-						class={`btn ${shown.dash === dash ? "active" : ""}`}
-						aria-pressed={shown.dash === dash}
-						onClick={() => set("dash", dash)}
-					>
-						{DASH_LABEL[dash]}
-					</button>
-				))}
+			<div class="field">
+				<span class="sublabel">{area ? "Outline" : "Line"}</span>
+				<PreviewSelect
+					label="Line style"
+					wide
+					value={shown.dash}
+					onChange={(dash) => set("dash", dash)}
+					options={LINE_DASHES.map((dash) => ({
+						value: dash,
+						label: DASH_LABEL[dash],
+						preview: (
+							<DashPreview
+								dash={dash}
+								width={shown.width}
+								opacity={shown.opacity}
+								color={props.color}
+							/>
+						),
+					}))}
+				/>
 			</div>
 			<label class="slider">
 				<span>
@@ -123,19 +136,24 @@ export function StyleControls(props: {
 					<span class="sublabel">
 						{kind === "layer" ? "Area fill" : "Fill"}
 					</span>
-					<div class="segmented wrap">
-						{AREA_FILLS.map((fill) => (
-							<button
-								key={fill}
-								type="button"
-								class={`btn ${shown.fill === fill ? "active" : ""}`}
-								aria-pressed={shown.fill === fill}
-								onClick={() => set("fill", fill)}
-							>
-								{FILL_LABEL[fill]}
-							</button>
-						))}
-					</div>
+					<PreviewSelect
+						label="Fill"
+						wide
+						value={shown.fill}
+						onChange={(fill) => set("fill", fill)}
+						options={AREA_FILLS.map((fill) => ({
+							value: fill,
+							label: FILL_LABEL[fill],
+							preview: (
+								<FillPreview
+									fill={fill}
+									fillOpacity={shown.fillOpacity}
+									opacity={shown.opacity}
+									color={props.color}
+								/>
+							),
+						}))}
+					/>
 					<label class="slider">
 						<span>Fill opacity: {percent(shown.fillOpacity)}</span>
 						<input

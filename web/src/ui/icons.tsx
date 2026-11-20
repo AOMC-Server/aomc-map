@@ -11,6 +11,11 @@ const ICONS = {
 	manage: "manage.png",
 	file: "file.png",
 	archive: "folder.png",
+	more: "more.png",
+	stats: "stats.png",
+	settings: "settings.png",
+	privacy: "privacy.png",
+	logout: "logout.png",
 } as const;
 
 export type IconName = keyof typeof ICONS;

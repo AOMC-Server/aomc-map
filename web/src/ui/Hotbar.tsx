@@ -1,5 +1,5 @@
 import type { ComponentChildren } from "preact";
-import { useEffect, useRef } from "preact/hooks";
+import { useEffect, useRef, useState } from "preact/hooks";
 import { isTyping } from "../map/input";
 import {
 	activeTool,
@@ -33,6 +33,8 @@ type Slot = {
 	active: boolean;
 	/** Selected, but shown in yellow: something is off about the current view. */
 	warn?: boolean;
+	/** On small screens only the essentials are in the bar; the rest is behind the "…" slot. */
+	secondary?: boolean;
 	href?: string;
 	run?: () => void;
 	extra?: ComponentChildren;
@@ -68,6 +70,7 @@ export function Hotbar() {
 		},
 		{
 			key: "2",
+			secondary: true,
 			icon: "history",
 			label: "History",
 			hint: "Earlier versions of the map",
@@ -88,6 +91,7 @@ export function Hotbar() {
 		},
 		{
 			key: "4",
+			secondary: true,
 			icon: "upload",
 			label: busy ? "Uploading…" : "Upload",
 			hint: "Add Xaero's World Map exports",
@@ -99,6 +103,7 @@ export function Hotbar() {
 		},
 		{
 			key: "5",
+			secondary: true,
 			icon: "share",
 			label: "Share",
 			hint: "A short link to this place, zoom and layers",
@@ -109,6 +114,7 @@ export function Hotbar() {
 		},
 		{
 			key: "6",
+			secondary: true,
 			icon: "files",
 			label: "Files",
 			hint: "Downloads such as Voxy data and Xaero presets",
@@ -119,6 +125,7 @@ export function Hotbar() {
 	if (isModerator.value)
 		slots.push({
 			key: "7",
+			secondary: true,
 			icon: "manage",
 			label: "Manage",
 			hint: "Settings, dimensions, members and invites",
@@ -156,6 +163,28 @@ export function Hotbar() {
 		return () => window.removeEventListener("keydown", onKey);
 	});
 
+	const [moreOpen, setMoreOpen] = useState(false);
+	useEffect(() => {
+		if (!moreOpen) return;
+		const onDown = (e: PointerEvent) => {
+			if (!ref.current?.contains(e.target as Node)) setMoreOpen(false);
+		};
+		const onKey = (e: KeyboardEvent) => {
+			if (e.key === "Escape") setMoreOpen(false);
+		};
+		document.addEventListener("pointerdown", onDown);
+		document.addEventListener("keydown", onKey);
+		return () => {
+			document.removeEventListener("pointerdown", onDown);
+			document.removeEventListener("keydown", onKey);
+		};
+	}, [moreOpen]);
+
+	const hidden = slots.filter((s) => s.secondary);
+	// Something behind "…" wants attention: an old version is shown, or an upload is running.
+	const moreWarn = hidden.some((s) => s.warn);
+	const moreBusy = hidden.some((s) => s.extra);
+
 	return (
 		<nav class="hotbar dock" aria-label="Tools" ref={ref}>
 			{slots.map((s) => {
@@ -170,7 +199,7 @@ export function Hotbar() {
 						</span>
 					</>
 				);
-				const cls = `hotbar-slot ${s.active ? "selected" : ""} ${s.warn ? "warn" : ""}`;
+				const cls = `hotbar-slot ${s.active ? "selected" : ""} ${s.warn ? "warn" : ""} ${s.secondary ? "secondary" : ""}`;
 				return s.href ? (
 					<a key={s.key} class={cls} href={s.href} aria-label={s.label}>
 						{content}
@@ -188,6 +217,49 @@ export function Hotbar() {
 					</button>
 				);
 			})}
+			<button
+				type="button"
+				class={`hotbar-slot hotbar-more ${moreOpen ? "selected" : ""} ${moreWarn ? "warn selected" : ""}`}
+				aria-label="More tools"
+				aria-haspopup="menu"
+				aria-expanded={moreOpen}
+				onClick={() => setMoreOpen(!moreOpen)}
+			>
+				<PixelIcon name="more" />
+				{moreBusy && <span class="more-dot" />}
+			</button>
+			{moreOpen && (
+				<div class="hotbar-menu dock" role="menu">
+					{hidden.map((s) => {
+						const content = (
+							<>
+								<PixelIcon name={s.icon} size={24} />
+								<span class="hotbar-menu-label">{s.label}</span>
+								{s.extra}
+							</>
+						);
+						const cls = `hotbar-menu-item ${s.active ? "selected" : ""} ${s.warn ? "warn" : ""}`;
+						return s.href ? (
+							<a key={s.key} class={cls} role="menuitem" href={s.href}>
+								{content}
+							</a>
+						) : (
+							<button
+								key={s.key}
+								type="button"
+								class={cls}
+								role="menuitem"
+								onClick={() => {
+									setMoreOpen(false);
+									s.run?.();
+								}}
+							>
+								{content}
+							</button>
+						);
+					})}
+				</div>
+			)}
 		</nav>
 	);
 }

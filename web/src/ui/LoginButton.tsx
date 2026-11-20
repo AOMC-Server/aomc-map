@@ -1,6 +1,17 @@
 import { useEffect, useRef, useState } from "preact/hooks";
 import { loginUrl, logout } from "../api";
 import { user } from "../state";
+import { type IconName, PixelIcon } from "./icons";
+
+/** Icon for small screens, where only it is shown, and the label for the rest. */
+function ActionContent(props: { icon: IconName; label: string }) {
+	return (
+		<>
+			<PixelIcon class="account-icon" name={props.icon} size={24} />
+			<span class="account-label">{props.label}</span>
+		</>
+	);
+}
 
 export function LoginButton() {
 	const u = user.value;
@@ -63,32 +74,37 @@ export function LoginButton() {
 				class="btn account-action"
 				href="/stats"
 				title="Your stats and the leaderboard"
+				aria-label="Stats"
 			>
-				Stats
+				<ActionContent icon="stats" label="Stats" />
 			</a>
 			<a
 				class="btn account-action"
 				href="/settings"
 				title="Your settings and API tokens"
+				aria-label="Settings"
 			>
-				Settings
+				<ActionContent icon="settings" label="Settings" />
 			</a>
 			<a
 				class="btn account-action"
 				href="/privacy"
 				title="What the site keeps about you, and why"
+				aria-label="Privacy"
 			>
-				Privacy
+				<ActionContent icon="privacy" label="Privacy" />
 			</a>
 			<button
 				type="button"
 				class="btn account-action"
+				title="Log out"
+				aria-label="Log out"
 				onClick={async () => {
 					await logout();
 					location.reload();
 				}}
 			>
-				Log out
+				<ActionContent icon="logout" label="Log out" />
 			</button>
 		</div>
 	);

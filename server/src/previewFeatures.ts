@@ -9,6 +9,11 @@ import {
 } from "@aomc/shared";
 import { dashPattern, resolveStyle } from "@aomc/shared/featureStyle";
 import { linePaths } from "@aomc/shared/features";
+import {
+	fillPatternMarkup,
+	PATTERN_SIZE,
+	type PatternFill,
+} from "@aomc/shared/fillPattern";
 import { blockToScreen, type Size, type View } from "@aomc/shared/view";
 import { and, eq } from "drizzle-orm";
 import type { Db } from "./db/client";
@@ -21,8 +26,6 @@ const MAX_PINS = 400;
 const MAX_POINTS = 60_000;
 const ICON_W = 24;
 const ICON_H = 24;
-/** Side of the tile of the patterns that fill areas, as on the map. */
-const PATTERN_SIZE = 8;
 /** Shapes are cut off this far outside the picture, which keeps the numbers small. */
 const CLIP_MARGIN = 64;
 const BLOCK_CENTER = 0.5;
@@ -233,17 +236,9 @@ const pathData = (pieces: Pt[][], close: boolean) =>
 		)
 		.join("");
 
-function patternDef(fill: "stripes" | "crosshatch" | "dots", hex: string) {
+function patternDef(fill: PatternFill, hex: string) {
 	const s = PATTERN_SIZE;
-	const body =
-		fill === "dots"
-			? `<circle cx="${s / 2}" cy="${s / 2}" r="1.6" fill="${hex}"/>`
-			: `<path d="M0 ${s}L${s} 0M-1 1L1 -1M${s - 1} ${s + 1}L${s + 1} ${s - 1}${
-					fill === "crosshatch"
-						? `M0 0L${s} ${s}M-1 ${s - 1}L1 ${s + 1}M${s - 1} -1L${s + 1} 1`
-						: ""
-				}" stroke="${hex}" stroke-width="1.5" fill="none"/>`;
-	return `<pattern id="${fill}-${hex.slice(1)}" width="${s}" height="${s}" patternUnits="userSpaceOnUse">${body}</pattern>`;
+	return `<pattern id="${fill}-${hex.slice(1)}" width="${s}" height="${s}" patternUnits="userSpaceOnUse">${fillPatternMarkup(fill, hex)}</pattern>`;
 }
 
 /**

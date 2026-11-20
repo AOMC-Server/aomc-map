@@ -15,17 +15,20 @@ import {
 	transitionFactor,
 } from "./settings";
 import {
+	activeTool,
 	contextMenu,
 	currentMap,
 	dimSlug,
 	editor,
 	effectiveRev,
 	embed,
+	interfaceHidden,
 	isLayerHidden,
 	isolatedUpload,
 	layersData,
 	loadError,
 	mapEpoch,
+	noHover,
 	popup,
 	preloadProgress,
 	type RevisionInfo,
@@ -186,6 +189,9 @@ export async function refreshMap(): Promise<void> {
 	}
 }
 
+/** How close to the middle of the map (css pixels) a tap hides the crosshair. */
+const CROSSHAIR_TAP_RADIUS = 24;
+
 /** Starts the app: loads the map, builds the canvas, and wires URL sync and head polling. */
 export async function boot(container: HTMLElement) {
 	const initial = parseUrl(location.search);
@@ -226,8 +232,30 @@ export async function boot(container: HTMLElement) {
 		view: startView,
 	});
 	view.value = mv.getView();
+	let shownView = mv.getView();
 	mv.on("viewchange", (v) => {
 		view.value = v;
+		// Moving the map brings back the interface.
+		if (
+			v.centerX !== shownView.centerX ||
+			v.centerZ !== shownView.centerZ ||
+			v.zoom !== shownView.zoom
+		)
+			interfaceHidden.value = false;
+		shownView = v;
+	});
+	mv.on("click", (e) => {
+		// Only while the crosshair is shown and nothing else is aiming with it.
+		if (
+			!noHover.value ||
+			!settings.value.showCoordinates ||
+			activeTool.value !== "none" ||
+			editor.value
+		)
+			return;
+		const { width, height } = mv.getSize();
+		if (Math.hypot(e.sx - width / 2, e.sy - height / 2) <= CROSSHAIR_TAP_RADIUS)
+			interfaceHidden.value = true;
 	});
 	mv.on("preloadprogress", (p) => {
 		preloadProgress.value = p;

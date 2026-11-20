@@ -238,6 +238,35 @@ export function savePosition(position: SavedPosition) {
 	write(POSITION_KEY, JSON.stringify(position));
 }
 
+const LAYERS_KEY = "aomc.layers";
+/** Most layer choices that are kept; the oldest are dropped, so deleted layers don't pile up. */
+const MAX_LAYER_CHOICES = 500;
+
+/** Which layers were shown or hidden on purpose (layerId -> hidden), from stored JSON. */
+export function parseLayerChoices(raw: string | null): Map<number, boolean> {
+	const choices = new Map<number, boolean>();
+	if (!raw) return choices;
+	try {
+		const data = JSON.parse(raw) as unknown;
+		if (data && typeof data === "object" && !Array.isArray(data)) {
+			for (const [key, hidden] of Object.entries(data)) {
+				const id = Number(key);
+				if (Number.isInteger(id) && id > 0 && typeof hidden === "boolean")
+					choices.set(id, hidden);
+			}
+		}
+	} catch {}
+	return choices;
+}
+
+export const loadLayerChoices = () => parseLayerChoices(read(LAYERS_KEY));
+
+/** Remembers the layer choices for the next visit. */
+export function saveLayerChoices(choices: ReadonlyMap<number, boolean>) {
+	const kept = [...choices].slice(-MAX_LAYER_CHOICES);
+	write(LAYERS_KEY, JSON.stringify(Object.fromEntries(kept)));
+}
+
 const PANEL_WIDTH_KEY = "aomc.panelWidth";
 export const PANEL_MIN_WIDTH = 320;
 export const PANEL_DEFAULT_WIDTH = 400;
