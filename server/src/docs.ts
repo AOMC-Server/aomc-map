@@ -25,6 +25,7 @@ export const docsRoutes = new Hono<AppEnv>()
 			],
 			cdn: "/scalar/standalone.js",
 			withDefaultFonts: false,
+			showDeveloperTools: "never",
 			telemetry: false,
 		}),
 	)
